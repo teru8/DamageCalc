@@ -682,6 +682,22 @@ class DamagePanel(QWidget):
                     btn._refresh()
                 btn.setVisible(show)
 
+        full_hp_guard_show_map = {
+            "マルチスケイル": ability in ("マルチスケイル", "Multiscale"),
+            "ファントムガード": ability in ("ファントムガード", "Shadow Shield"),
+            "テラスシェル": ability in ("テラスシェル", "Tera Shell"),
+        }
+        if hasattr(self, "_attacker_full_hp_guard_btns"):
+            for key, btn in self._attacker_full_hp_guard_btns.items():
+                show = full_hp_guard_show_map.get(key, False)
+                was_visible = btn.isVisible()
+                btn.setVisible(show)
+                if show and not was_visible:
+                    btn.blockSignals(True)
+                    btn.setChecked(True)
+                    btn.blockSignals(False)
+                    btn._refresh()
+
         show_supreme = ability in ("そうだいしょう", "Supreme Overlord")
         self._supreme_combo.setVisible(show_supreme)
         if not show_supreme:
@@ -809,6 +825,22 @@ class DamagePanel(QWidget):
                     btn.blockSignals(False)
                     btn._refresh()
                 btn.setVisible(show)
+
+        full_hp_guard_show_map = {
+            "マルチスケイル": ability in ("マルチスケイル", "Multiscale"),
+            "ファントムガード": ability in ("ファントムガード", "Shadow Shield"),
+            "テラスシェル": ability in ("テラスシェル", "Tera Shell"),
+        }
+        if hasattr(self, "_defender_full_hp_guard_btns"):
+            for key, btn in self._defender_full_hp_guard_btns.items():
+                show = full_hp_guard_show_map.get(key, False)
+                was_visible = btn.isVisible()
+                btn.setVisible(show)
+                if show and not was_visible:
+                    btn.blockSignals(True)
+                    btn.setChecked(True)
+                    btn.blockSignals(False)
+                    btn._refresh()
 
         if hasattr(self, "_opp_supreme_combo"):
             show_opp_supreme = ability in ("そうだいしょう", "Supreme Overlord")

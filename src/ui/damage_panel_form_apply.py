@@ -29,6 +29,10 @@ def apply_form(
 
     en = form_pokeapi_en.get(form_name, "")
     if en:
+        # Keep ability sanitization target aligned with selected form even when
+        # species lookup fails (prevents using stale previous-form name_en).
+        new_p.name_en = en
+    if en:
         species = species_from_name_en(en, name_ja=form_name)
         if species is None and form_name.startswith("メガ"):
             smogon_name = smogon_mega_species(en, form_name)

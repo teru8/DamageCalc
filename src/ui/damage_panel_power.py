@@ -9,11 +9,11 @@ def power_option_value(data: object) -> int:
     if isinstance(data, tuple) and len(data) >= 1:
         try:
             return int(data[0])
-        except Exception:
+        except (TypeError, ValueError):
             return 0
     try:
         return int(data)
-    except Exception:
+    except (TypeError, ValueError):
         return 0
 
 
