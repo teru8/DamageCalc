@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -66,7 +67,7 @@ def _load_cached_index() -> dict[str, Any] | None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
 
@@ -83,7 +84,7 @@ def _load_cached_masters() -> dict[str, Any] | None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
 
@@ -134,7 +135,8 @@ def get_pokemon_index(force_refresh: bool = False) -> list[ZukanPokemonEntry]:
         payload["fetched_at"] = time.time()
         _save_index(payload)
         return _parse_index(payload)
-    except Exception:
+    except (requests.RequestException, ValueError, TypeError, OSError) as exc:
+        logging.debug("get_pokemon_index fallback to cache: %s", exc)
         return _parse_index(cached)
 
 
@@ -159,14 +161,15 @@ def get_masters(force_refresh: bool = False) -> dict[str, Any]:
         }
         _save_masters(wrapped)
         return payload
-    except Exception:
+    except (requests.RequestException, ValueError, TypeError, OSError) as exc:
+        logging.debug("get_masters fallback to cache: %s", exc)
         return (cached or {}).get("payload", {}) or {}
 
 
 def get_ability_name_by_id(ability_id: int | str) -> str:
     try:
         key = str(int(ability_id))
-    except Exception:
+    except (TypeError, ValueError):
         return ""
 
     masters = get_masters()
@@ -192,7 +195,7 @@ def get_cached_asset_bytes(url: str) -> bytes | None:
     if cache_path.exists():
         try:
             return cache_path.read_bytes()
-        except Exception:
+        except OSError:
             pass
 
     try:
@@ -205,11 +208,12 @@ def get_cached_asset_bytes(url: str) -> bytes | None:
         data = response.content
         cache_path.write_bytes(data)
         return data
-    except Exception:
+    except (requests.RequestException, OSError) as exc:
+        logging.debug("get_cached_asset_bytes failed: %s", exc)
         if cache_path.exists():
             try:
                 return cache_path.read_bytes()
-            except Exception:
+            except OSError:
                 return None
         return None
 
@@ -226,7 +230,7 @@ def get_pokemon_detail(dex_no: str, force_refresh: bool = False) -> dict[str, An
             fetched_at = float(cached.get("fetched_at") or 0)
             if time.time() - fetched_at < _CACHE_TTL_SECONDS:
                 return cached.get("pokemon", {}) or {}
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
 
     url = _BASE_URL + "/zukan-api/api/detail/{}".format(dex_no)
@@ -244,11 +248,12 @@ def get_pokemon_detail(dex_no: str, force_refresh: bool = False) -> dict[str, An
         }
         path.write_text(json.dumps(wrapped, ensure_ascii=False), encoding="utf-8")
         return wrapped["pokemon"]
-    except Exception:
+    except (requests.RequestException, ValueError, TypeError, OSError) as exc:
+        logging.debug("get_pokemon_detail fallback to cache: %s", exc)
         if path.exists():
             try:
                 cached = json.loads(path.read_text(encoding="utf-8"))
                 return cached.get("pokemon", {}) or {}
-            except Exception:
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 return {}
         return {}

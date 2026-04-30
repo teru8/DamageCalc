@@ -324,6 +324,10 @@ class MainWindow(QMainWindow):
         from src.ui.main_window_handlers import _fetch_usage_data as _impl
         return _impl(self)
 
+    def _run_data_integrity_check(self) -> None:
+        from src.ui.main_window_handlers import _run_data_integrity_check as _impl
+        return _impl(self)
+
     @pyqtSlot(QPixmap)
     def _on_frame(self, pixmap: QPixmap) -> None:
         self._preview_lbl.setPixmap(

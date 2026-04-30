@@ -12,7 +12,7 @@ def _get_usage_scraper_symbols(self):
         from src.data.usage_scraper import UsageScraper, USAGE_SOURCES, USAGE_SOURCE_DEFAULT
 
         return UsageScraper, dict(USAGE_SOURCES), str(USAGE_SOURCE_DEFAULT), None
-    except Exception as exc:
+    except ImportError as exc:
         return None, dict(_USAGE_SOURCES_FALLBACK), _USAGE_SOURCE_DEFAULT_FALLBACK, str(exc)
 
 # ── UI Build ──────────────────────────────────────────────────────
@@ -378,13 +378,16 @@ def _build_options_dialog(self) -> None:
     self._fetch_usage_btn.setEnabled(False)
     self._fetch_usage_btn.installEventFilter(self)
     fetch_row.addWidget(self._fetch_usage_btn)
+    check_integrity_btn = QPushButton("整合性チェック")
+    check_integrity_btn.clicked.connect(self._run_data_integrity_check)
+    fetch_row.addWidget(check_integrity_btn)
     fetch_row.addStretch()
     data_layout.addLayout(fetch_row)
     self._option_data_status_lbl = QLabel()
     self._option_data_status_lbl.setStyleSheet("color: #a6adc8; font-size: 11px;")
     data_layout.addWidget(self._option_data_status_lbl)
     data_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-    data_box.setFixedHeight(110)
+    data_box.setFixedHeight(140)
     left_col.addWidget(data_box)
 
     # ── ダメージ計算 ──
@@ -714,8 +717,9 @@ def _show_loading_overlay(self, message: str = "読み込み中...") -> None:
         overlay.raise_()
         self._loading_overlay = overlay
         QApplication.processEvents()
-    except Exception:
-        pass
+    except (RuntimeError, AttributeError, TypeError) as exc:
+        traceback.print_exc()
+        self._log("[ERROR] ローディングオーバーレイ表示失敗: {}".format(exc))
 
 
 
@@ -726,8 +730,8 @@ def _hide_loading_overlay(self) -> None:
             self._loading_overlay.hide()
             self._loading_overlay.deleteLater()
             self._loading_overlay = None
-    except Exception:
-        pass
+    except (RuntimeError, AttributeError, TypeError) as exc:
+        self._log("[ERROR] ローディングオーバーレイ非表示失敗: {}".format(exc))
 
 
 

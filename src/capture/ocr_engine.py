@@ -120,8 +120,8 @@ def read_text(image: np.ndarray, allowlist: str | None = None) -> list[str]:
                 break
         _OCR_RESULT_CACHE[cache_key] = result
         return result
-    except Exception as e:
-        logging.warning("read_text failed: %s", e)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+        logging.warning("read_text failed: %s", e, exc_info=True)
         return []
 
 
@@ -143,5 +143,6 @@ class OcrInitThread(QThread):
             from PIL import Image
             winocr.recognize_pil_sync(Image.new("RGB", (4, 4)), "ja")
             self.finished.emit(True, "")
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+            logging.warning("OcrInitThread initialization failed: %s", e, exc_info=True)
             self.finished.emit(False, str(e))

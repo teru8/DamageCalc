@@ -149,7 +149,13 @@ class MoveSection(QWidget):
             pow_row.addWidget(self._pow_opt_lbl)
             self._pow_combo = QComboBox()
             self._pow_combo.setFixedWidth(222)
-            self._pow_combo.setFixedHeight(28)
+            self._pow_combo.setFixedHeight(25)
+            self._pow_combo.setMinimumHeight(25)
+            self._pow_combo.setMaximumHeight(25)
+            self._pow_combo.setStyleSheet(
+                "QComboBox{font-size:13px; min-height:25px; max-height:25px; padding:0px 18px 0px 4px;}"
+                "QComboBox::drop-down{width:14px;}"
+            )
             self._pow_combo.setVisible(False)
             pow_row.addWidget(self._pow_combo)
             pow_row.addStretch()
@@ -164,7 +170,12 @@ class MoveSection(QWidget):
             self._hit_spin = QSpinBox()
             self._hit_spin.setRange(1, 10)
             self._hit_spin.setFixedWidth(150)
-            self._hit_spin.setFixedHeight(28)
+            self._hit_spin.setFixedHeight(25)
+            self._hit_spin.setMinimumHeight(25)
+            self._hit_spin.setMaximumHeight(25)
+            self._hit_spin.setStyleSheet(
+                "QSpinBox{font-size:13px; min-height:25px; max-height:25px; padding:0px 4px;}"
+            )
             self._hit_spin.setPrefix("ヒット ")
             self._hit_spin.setSuffix(" 回")
             self._hit_spin.setVisible(False)

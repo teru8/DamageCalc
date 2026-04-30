@@ -146,7 +146,7 @@ def _ensure_sprite_manifest() -> dict[str, str]:
                 is_base = not entry.get("form", "")
                 if name_ja not in _SPRITE_BY_NAME_JA or is_base:
                     _SPRITE_BY_NAME_JA[name_ja] = local_path
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
     return _SPRITE_BY_NAME_JA
 
@@ -176,7 +176,7 @@ def _load_sprite_entries() -> list[dict]:
                     "local_path": local_path,
                 }
             )
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         _SPRITE_ENTRIES = []
     return _SPRITE_ENTRIES
 
@@ -541,7 +541,7 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
                     species = db.get_species_by_name_ja(normalized_name)
                     if species and species.name_en:
                         dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME_EN.get(species.name_en.strip().lower(), "")
-                except Exception:
+                except (ImportError, AttributeError, OSError, ValueError):
                     dex_no = ""
         # バドレックス表記ゆれ対応（括弧あり/なし）
         if not dex_no:
