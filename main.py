@@ -79,8 +79,29 @@ def _install_global_exception_hooks() -> None:
         threading.excepthook = _thread_hook
 
 
+_SINGLE_INSTANCE_MUTEX: ctypes.c_void_p | None = None
+
+
+def _acquire_single_instance() -> bool:
+    """Return True if this is the first instance. Windows only."""
+    if os.name != "nt":
+        return True
+    global _SINGLE_INSTANCE_MUTEX
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "DamageCalcSingleInstanceMutex")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        # Bring existing window to foreground
+        HWND_BROADCAST = 0xFFFF
+        WM_USER_FOCUS = 0x8001
+        ctypes.windll.user32.PostMessageW(HWND_BROADCAST, WM_USER_FOCUS, 0, 0)
+        return False
+    _SINGLE_INSTANCE_MUTEX = mutex
+    return True
+
+
 def main() -> None:
     _install_global_exception_hooks()
+    if not _acquire_single_instance():
+        sys.exit(0)
     if os.name == "nt":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DamageCalc.App")

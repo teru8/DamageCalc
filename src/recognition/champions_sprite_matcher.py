@@ -4,7 +4,9 @@ import json
 import re
 import sys
 import time
+from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
 
 import cv2
@@ -49,7 +51,33 @@ _SESSION.headers.update({"User-Agent": "DamageCalc/0.1.0-alpha"})
 
 _MANIFEST_CACHE: dict | None = None
 _REFS_BY_NAME_CACHE: dict[str, list[dict]] | None = None
-_REF_IMAGE_CACHE: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+class _LRUDict(OrderedDict):
+    """OrderedDict with a maximum size; evicts the least-recently-used entry."""
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        if len(self) > self._maxsize:
+            self.popitem(last=False)
+
+    def __getitem__(self, key: Any) -> Any:
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if key in self:
+            return self[key]
+        return default
+
+
+_REF_IMAGE_CACHE: _LRUDict = _LRUDict(256)  # numpy sprite arrays
 
 _FILE_NAME_RE = re.compile(
     r"^Menu[_ ]CP[_ ](?P<dex>\d{4})(?:-(?P<form>.*))?$",
@@ -275,7 +303,10 @@ def download_catalog(
     if include_shiny:
         category_pairs.append(("shiny", _CATEGORY_URLS["shiny"]))
 
-    species_cache: dict[int, tuple[str, str]] = {}
+    all_species = db.get_all_species()
+    species_cache: dict[int, tuple[str, str]] = {
+        s.species_id: (s.name_ja, s.name_en) for s in all_species
+    }
     existing_entries = load_manifest().get("entries") or []
     merged: dict[tuple[int, str, bool, str], dict] = {}
     for row in existing_entries:
@@ -316,10 +347,7 @@ def download_catalog(
                 continue
 
             if species_id not in species_cache:
-                species = db.get_species_by_id(species_id)
-                if not species:
-                    continue
-                species_cache[species_id] = (species.name_ja, species.name_en)
+                continue
             name_ja, name_en = species_cache[species_id]
 
             if not image_url:
