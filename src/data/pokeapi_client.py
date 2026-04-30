@@ -241,6 +241,7 @@ def fetch_species(species_id: int) -> SpeciesInfo | None:
     base_name_ja = _ja_name(spec.get("names", []))
     name_en = poke.get("name", "")
     name_ja = _build_regional_name_ja(name_en, base_name_ja) or base_name_ja
+    name_ja = db.normalize_species_name_ja(name_ja)
 
     if not name_ja:
         return None
@@ -805,7 +806,8 @@ class PokeApiLoader(QThread):
                 row = conn.execute(
                     "SELECT name_ja FROM species_cache WHERE species_id=?", (fid,)
                 ).fetchone()
-                if not row or row[0] != expected_name:
+                actual_name = db.normalize_species_name_ja(row[0]) if row else ""
+                if not row or actual_name != db.normalize_species_name_ja(expected_name):
                     stale_ids.append(fid)
             if stale_ids:
                 # Delete stale entries (both species and learnset) so fetch_species

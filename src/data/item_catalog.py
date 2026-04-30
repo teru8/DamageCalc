@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -71,7 +72,8 @@ def _load_cached_map() -> dict[str, str] | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logging.warning("item_catalog cache load failed: %s", exc, exc_info=True)
         return None
 
     fetched_at = float(payload.get("fetched_at") or 0)
@@ -107,7 +109,8 @@ def _get_json(url: str) -> dict:
         response.raise_for_status()
         data = response.json()
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logging.warning("item_catalog request failed: url=%s error=%s", url, exc, exc_info=True)
         return {}
 
 

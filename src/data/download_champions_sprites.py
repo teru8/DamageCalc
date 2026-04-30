@@ -14,7 +14,7 @@ def _parse_species_ids(raw: str) -> set[int]:
             continue
         try:
             values.add(int(token))
-        except Exception:
+        except ValueError:
             continue
     return values
 

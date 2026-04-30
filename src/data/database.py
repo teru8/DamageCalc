@@ -1,5 +1,7 @@
 import re
 import sqlite3
+import json
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -61,6 +63,14 @@ def _db_path() -> Path:
 
 
 _write_generation: int = 0
+
+
+def normalize_species_name_ja(name_ja: str) -> str:
+    """Normalize Japanese species names for stable cross-source matching."""
+    text = str(name_ja or "").strip()
+    # Unify full-width/half-width parenthesis variants.
+    text = text.replace("（", "(").replace("）", ")")
+    return text
 
 
 def get_write_generation() -> int:
@@ -344,6 +354,13 @@ def init_db() -> None:
         species_cols = [row["name"] for row in c.execute("PRAGMA table_info(species_cache)").fetchall()]
         if "weight_kg" not in species_cols:
             c.execute("ALTER TABLE species_cache ADD COLUMN weight_kg REAL DEFAULT 0")
+        c.execute(
+            """
+            UPDATE species_cache
+            SET name_ja = REPLACE(REPLACE(name_ja, '（', '('), '）', ')')
+            WHERE name_ja LIKE '%（%' OR name_ja LIKE '%）%'
+            """
+        )
         pokemon_cols = [row["name"] for row in c.execute("PRAGMA table_info(registered_pokemon)").fetchall()]
         if "usage_name" not in pokemon_cols:
             c.execute("ALTER TABLE registered_pokemon ADD COLUMN usage_name TEXT DEFAULT ''")
@@ -400,22 +417,25 @@ def init_db() -> None:
 
 def upsert_species(s: SpeciesInfo) -> None:
     _bump_generation()
+    normalized_name = normalize_species_name_ja(s.name_ja)
     with connection() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO species_cache
             (species_id, name_ja, name_en, type1, type2,
              base_hp, base_attack, base_defense, base_sp_attack, base_sp_defense, base_speed, weight_kg)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (s.species_id, s.name_ja, s.name_en, s.type1, s.type2,
+        """, (s.species_id, normalized_name, s.name_en, s.type1, s.type2,
               s.base_hp, s.base_attack, s.base_defense,
               s.base_sp_attack, s.base_sp_defense, s.base_speed, float(s.weight_kg or 0)))
         conn.commit()
 
 
 def get_species_by_name_ja(name_ja: str) -> SpeciesInfo | None:
+    normalized_name = normalize_species_name_ja(name_ja)
     with connection() as conn:
         row = conn.execute(
-            "SELECT * FROM species_cache WHERE name_ja=?", (name_ja,)
+            "SELECT * FROM species_cache WHERE name_ja=? OR name_ja=?",
+            (name_ja, normalized_name),
         ).fetchone()
         if row is not None:
             return SpeciesInfo(**dict(row))
@@ -1185,7 +1205,7 @@ def export_usage_to_json(season: str | None = None) -> bool:
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
-    except Exception as e:
+    except (OSError, sqlite3.DatabaseError, TypeError, ValueError, json.JSONDecodeError) as e:
         logging.warning("export_usage_snapshot failed: %s", e)
         return False
 
@@ -1235,7 +1255,7 @@ def import_usage_from_json(season: str | None = None) -> bool:
             season=season_token,
         )
         return True
-    except Exception as e:
+    except (OSError, sqlite3.DatabaseError, TypeError, ValueError, json.JSONDecodeError) as e:
         logging.warning("import_usage_from_json failed: %s", e)
         return False
 
@@ -1243,3 +1263,115 @@ def import_usage_from_json(season: str | None = None) -> bool:
 def has_usage_json_file(season: str | None = None) -> bool:
     """Check if usage JSON file exists in project root."""
     return _get_usage_json_path(season).exists()
+
+
+def check_usage_data_integrity(season: str | None = None) -> dict[str, object]:
+    """Check consistency between usage tables, species cache, and usage JSON file."""
+    season_token = _season_or_active(season)
+    issues: list[str] = []
+    summary: dict[str, int] = {}
+
+    with connection() as conn:
+        species_names = {
+            normalize_species_name_ja(str(row["name_ja"]).strip())
+            for row in conn.execute(
+                "SELECT name_ja FROM species_cache WHERE name_ja IS NOT NULL AND name_ja != ''"
+            ).fetchall()
+        }
+        usage_names = {
+            normalize_species_name_ja(str(row["pokemon_name_ja"]).strip())
+            for row in conn.execute(
+                "SELECT pokemon_name_ja FROM pokemon_usage WHERE season=?",
+                (season_token,),
+            ).fetchall()
+            if str(row["pokemon_name_ja"]).strip()
+        }
+        option_names = {
+            normalize_species_name_ja(str(row["pokemon_name_ja"]).strip())
+            for row in conn.execute(
+                "SELECT DISTINCT pokemon_name_ja FROM usage_option WHERE season=?",
+                (season_token,),
+            ).fetchall()
+            if str(row["pokemon_name_ja"]).strip()
+        }
+        effort_names = {
+            normalize_species_name_ja(str(row["pokemon_name_ja"]).strip())
+            for row in conn.execute(
+                "SELECT DISTINCT pokemon_name_ja FROM usage_effort WHERE season=?",
+                (season_token,),
+            ).fetchall()
+            if str(row["pokemon_name_ja"]).strip()
+        }
+
+    missing_in_species_usage = sorted(usage_names - species_names)
+    missing_in_usage_option = sorted(option_names - usage_names)
+    missing_in_usage_effort = sorted(effort_names - usage_names)
+
+    if missing_in_species_usage:
+        issues.append(
+            "species_cache に存在しない pokemon_usage 名が {} 件".format(
+                len(missing_in_species_usage)
+            )
+        )
+    if missing_in_usage_option:
+        issues.append(
+            "pokemon_usage に存在しない usage_option 名が {} 件".format(
+                len(missing_in_usage_option)
+            )
+        )
+    if missing_in_usage_effort:
+        issues.append(
+            "pokemon_usage に存在しない usage_effort 名が {} 件".format(
+                len(missing_in_usage_effort)
+            )
+        )
+
+    json_path = _get_usage_json_path(season_token)
+    json_missing_names: list[str] = []
+    json_parse_error = ""
+    if json_path.exists():
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            json_pokemon = payload.get("pokemon", [])
+            json_names = {
+                str(row.get("name_ja", "")).strip()
+                for row in json_pokemon
+                if isinstance(row, dict) and str(row.get("name_ja", "")).strip()
+            }
+            json_missing_names = sorted(usage_names - json_names)
+            if json_missing_names:
+                issues.append(
+                    "JSON usage_data と DB(pokemon_usage) の差分が {} 件".format(
+                        len(json_missing_names)
+                    )
+                )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            json_parse_error = str(exc)
+            issues.append("usage_data JSON の読み込みに失敗: {}".format(exc))
+
+    summary["species_count"] = len(species_names)
+    summary["usage_count"] = len(usage_names)
+    summary["option_count"] = len(option_names)
+    summary["effort_count"] = len(effort_names)
+    summary["missing_in_species_count"] = len(missing_in_species_usage)
+    summary["missing_in_usage_option_count"] = len(missing_in_usage_option)
+    summary["missing_in_usage_effort_count"] = len(missing_in_usage_effort)
+    summary["json_missing_count"] = len(json_missing_names)
+
+    if json_parse_error:
+        logging.warning("usage_data integrity check json parse error: %s", json_parse_error)
+
+    return {
+        "season": season_token,
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "summary": summary,
+        "details": {
+            "missing_in_species": missing_in_species_usage[:50],
+            "missing_in_usage_option": missing_in_usage_option[:50],
+            "missing_in_usage_effort": missing_in_usage_effort[:50],
+            "json_missing_in_file": json_missing_names[:50],
+            "json_path": str(json_path),
+            "json_exists": json_path.exists(),
+        },
+    }

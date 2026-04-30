@@ -445,10 +445,45 @@ def _calc_moves(self) -> None:
         sec.set_effectiveness(type_eff)
 
         # ── bridge call helper ────────────────────────────────────────
+        def _is_opp_full_hp_guard_intact(ability_en: str) -> bool:
+            guard_map = {
+                "Multiscale": "_opp_multiscale_btn",
+                "Shadow Shield": "_opp_shadow_shield_btn",
+                "Tera Shell": "_opp_tera_shell_btn",
+            }
+            btn_name = guard_map.get((ability_en or "").strip(), "")
+            if not btn_name or not hasattr(self, btn_name):
+                return True
+            btn = getattr(self, btn_name)
+            if not btn.isVisible():
+                return True
+            return bool(btn.isChecked())
+
+        def _is_my_full_hp_guard_intact(ability_en: str) -> bool:
+            guard_map = {
+                "Multiscale": "_atk_multiscale_btn",
+                "Shadow Shield": "_atk_shadow_shield_btn",
+                "Tera Shell": "_atk_tera_shell_btn",
+            }
+            btn_name = guard_map.get((ability_en or "").strip(), "")
+            if not btn_name or not hasattr(self, btn_name):
+                return True
+            btn = getattr(self, btn_name)
+            if not btn.isVisible():
+                return True
+            return bool(btn.isChecked())
+
         def _call_bridge(def_d: dict, hp: int) -> tuple[int, int, int, bool]:
             if hp <= 0:
                 return (0, 0, 1, False)
             cur_hp = max(1, math.floor(hp * hp_percent / 100.0))
+            def_ability_en = str(def_d.get("ability") or "").strip()
+            if (
+                def_ability_en in ("Multiscale", "Shadow Shield", "Tera Shell")
+                and not _is_opp_full_hp_guard_intact(def_ability_en)
+                and cur_hp >= hp
+            ):
+                cur_hp = max(1, hp - 1)
             disguise = bool(
                 def_d.get("ability") == "Disguise" and
                 hasattr(self, "_def_panel") and
@@ -475,8 +510,9 @@ def _calc_moves(self) -> None:
                         )
                     )
                 )
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError) as exc:
+                import logging
+                logging.warning("bridge payload emit failed (atk->def): %s", exc, exc_info=True)
             mn, mx, is_error = _bridge.calc(_atk_d_for_move, d_copy, _mv_d, _field_d)
             return (mn, mx, hp or 1, is_error)
 
@@ -675,6 +711,14 @@ def _calc_moves(self) -> None:
 
             def _call_bridge_rev(opp_atk_d: dict) -> tuple[int, int, int, bool]:
                 self_hp = atk.hp if atk.hp > 0 else 1
+                defender_ability_en = str(_self_def_d.get("ability") or "").strip()
+                def_payload = dict(_self_def_d)
+                if (
+                    defender_ability_en in ("Multiscale", "Shadow Shield", "Tera Shell")
+                    and not _is_my_full_hp_guard_intact(defender_ability_en)
+                    and self_hp > 1
+                ):
+                    def_payload["curHP"] = self_hp - 1
                 try:
                     self.bridge_payload_logged.emit(
                         "[SmogonReq] {}".format(
@@ -682,7 +726,7 @@ def _calc_moves(self) -> None:
                                 {
                                     "dir": "def->atk",
                                     "attacker": opp_atk_d,
-                                    "defender": _self_def_d,
+                                    "defender": def_payload,
                                     "move": _mv_d_opp,
                                     "field": _field_d_rev,
                                 },
@@ -690,9 +734,10 @@ def _calc_moves(self) -> None:
                             )
                         )
                     )
-                except Exception:
-                    pass
-                mn, mx, is_error = _bridge.calc(opp_atk_d, _self_def_d, _mv_d_opp, _field_d_rev)
+                except (AttributeError, TypeError, ValueError) as exc:
+                    import logging
+                    logging.warning("bridge payload emit failed (def->atk): %s", exc, exc_info=True)
+                mn, mx, is_error = _bridge.calc(opp_atk_d, def_payload, _mv_d_opp, _field_d_rev)
                 return (mn, mx, self_hp, is_error)
 
             # 調整: 相手の現在設定
