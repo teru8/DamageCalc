@@ -85,7 +85,7 @@ def _read_image_color(path: Path) -> np.ndarray | None:
     """Unicode-safe image loader for Windows paths."""
     try:
         data = np.fromfile(str(path), dtype=np.uint8)
-    except Exception:
+    except (OSError, ValueError):
         return None
     if data.size == 0:
         return None

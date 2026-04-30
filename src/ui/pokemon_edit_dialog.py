@@ -828,14 +828,14 @@ def _build_form_options_by_base(species_list: list[SpeciesInfo]) -> dict[str, li
 def _safe_int(value: object, default: int = 0) -> int:
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
@@ -848,7 +848,7 @@ def _pokeapi_get_json(url: str) -> dict:
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
-    except Exception:
+    except (requests.RequestException, TypeError, ValueError):
         return {}
 
 

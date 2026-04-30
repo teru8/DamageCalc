@@ -22,7 +22,7 @@ def _read_image_color(path: Path) -> np.ndarray | None:
     """Unicode-safe image loader for Windows paths."""
     try:
         data = np.fromfile(str(path), dtype=np.uint8)
-    except Exception:
+    except (OSError, ValueError):
         return None
     if data.size == 0:
         return None
@@ -81,7 +81,7 @@ def _load_template(template_path: str) -> np.ndarray | None:
                         break
                 if tmpl is not None and tmpl.size > 0:
                     break
-            except Exception:
+            except OSError:
                 continue
     if tmpl is None or tmpl.size == 0:
         _TEMPLATE_CACHE[template_path] = None
@@ -122,7 +122,7 @@ def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, f
         if crop.shape[0] != tmpl.shape[0] or crop.shape[1] != tmpl.shape[1]:
             try:
                 cmp_img = cv2.resize(crop, (tmpl.shape[1], tmpl.shape[0]), interpolation=cv2.INTER_LINEAR)
-            except Exception:
+            except cv2.error:
                 scores.append((Path(template_path).name, -1.0, "resize_error"))
                 continue
         else:
@@ -132,7 +132,7 @@ def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, f
             tmpl_gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
             score_ccorr = float(cv2.matchTemplate(cmp_gray, tmpl_gray, cv2.TM_CCORR_NORMED)[0, 0])
             score_sqdiff = float(cv2.matchTemplate(cmp_gray, tmpl_gray, cv2.TM_SQDIFF_NORMED)[0, 0])
-        except Exception:
+        except cv2.error:
             scores.append((Path(template_path).name, -1.0, "match_error"))
             continue
         if not np.isfinite(score_ccorr) or not np.isfinite(score_sqdiff):

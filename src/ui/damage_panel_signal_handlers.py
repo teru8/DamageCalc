@@ -391,6 +391,17 @@ def _reset_conditions(self) -> None:
         self._opp_supreme_combo.setCurrentIndex(0)
     if hasattr(self, "_rivalry_combo"):
         self._rivalry_combo.setCurrentIndex(0)
+    for btn_name in (
+        "_atk_multiscale_btn",
+        "_atk_shadow_shield_btn",
+        "_atk_tera_shell_btn",
+        "_opp_multiscale_btn",
+        "_opp_shadow_shield_btn",
+        "_opp_tera_shell_btn",
+    ):
+        if hasattr(self, btn_name):
+            btn = getattr(self, btn_name)
+            btn.setChecked(True)
     self._atk_panel.reset_to_base()
     self._def_panel.reset_to_base()
     self.recalculate()
@@ -476,6 +487,24 @@ def _change_def_item(self) -> None:
 
 def _on_form_change_atk(self) -> None:
     _bootstrap()
+    from src.data.database import get_abilities_by_usage, get_species_by_name_ja
+    from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
+
+    def _fallback_original_ability(current_ability: str, canon_name: str) -> str:
+        species = get_species_by_name_ja(canon_name)
+        candidates: list[str] = []
+        if species and species.name_en:
+            candidates = _pokeapi_ability_names_for_pokemon(species.name_en or "")
+        if current_ability and current_ability in candidates:
+            return current_ability
+        ranked = get_abilities_by_usage(canon_name)
+        if candidates:
+            for ability in ranked:
+                if ability in candidates:
+                    return ability
+            return candidates[0]
+        return ranked[0] if ranked else ""
+
     if not self._atk:
         return
     key = _normalize_form_name(self._atk.name_ja)
@@ -490,10 +519,9 @@ def _on_form_change_atk(self) -> None:
         cached = self._atk_form_cache.pop(canon, None)
         original_ability = cached[1] if isinstance(cached, tuple) else ""
         if not original_ability:
-            # PTから直接メガフォームで選んだ場合などキャッシュが空の場合、DBから取得
-            from src.data.database import get_abilities_by_usage
-            abilities = get_abilities_by_usage(canon)
-            original_ability = abilities[0] if abilities else ""
+            # PTから直接メガフォームで選んだ場合などキャッシュが空の場合
+            # 原種の候補特性から安全に選ぶ
+            original_ability = _fallback_original_ability(self._atk.ability, canon)
         new_p = _apply_form(self._atk, next_name, original_ability=original_ability)
     else:
         # メガ/別フォームへ移行する際、元の特性を保存
@@ -512,6 +540,24 @@ def _on_form_change_atk(self) -> None:
 
 def _on_form_change_def(self) -> None:
     _bootstrap()
+    from src.data.database import get_abilities_by_usage, get_species_by_name_ja
+    from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
+
+    def _fallback_original_ability(current_ability: str, canon_name: str) -> str:
+        species = get_species_by_name_ja(canon_name)
+        candidates: list[str] = []
+        if species and species.name_en:
+            candidates = _pokeapi_ability_names_for_pokemon(species.name_en or "")
+        if current_ability and current_ability in candidates:
+            return current_ability
+        ranked = get_abilities_by_usage(canon_name)
+        if candidates:
+            for ability in ranked:
+                if ability in candidates:
+                    return ability
+            return candidates[0]
+        return ranked[0] if ranked else ""
+
     if not self._def_custom:
         return
     key = _normalize_form_name(self._def_custom.name_ja)
@@ -525,9 +571,7 @@ def _on_form_change_def(self) -> None:
         cached = self._def_form_cache.pop(canon, None)
         original_ability = cached[1] if isinstance(cached, tuple) else ""
         if not original_ability:
-            from src.data.database import get_abilities_by_usage
-            abilities = get_abilities_by_usage(canon)
-            original_ability = abilities[0] if abilities else ""
+            original_ability = _fallback_original_ability(self._def_custom.ability, canon)
         new_p = _apply_form(self._def_custom, next_name, original_ability=original_ability)
     else:
         existing = self._def_form_cache.get(canon)
@@ -554,7 +598,8 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
         self._atk_party_side = "my"
         self._atk_party_idx = idx
         self._set_attacker_from_party(p, source="my")
-        canon = (_FORM_NAME_TO_GROUP.get(p.name_ja) or [p.name_ja])[0]
+        norm = _normalize_form_name(p.name_ja)
+        canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
@@ -565,7 +610,8 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
         self._def_party_side = "my"
         self._def_party_idx = idx
         self._set_defender_from_party(p)
-        canon = (_FORM_NAME_TO_GROUP.get(p.name_ja) or [p.name_ja])[0]
+        norm = _normalize_form_name(p.name_ja)
+        canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
@@ -587,7 +633,8 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
         self._atk_party_side = "opp"
         self._atk_party_idx = idx
         self._set_attacker_from_party(p, source="opp")
-        canon = (_FORM_NAME_TO_GROUP.get(p.name_ja) or [p.name_ja])[0]
+        norm = _normalize_form_name(p.name_ja)
+        canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
@@ -598,7 +645,8 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
         self._def_party_side = "opp"
         self._def_party_idx = idx
         self._set_defender_from_party(p)
-        canon = (_FORM_NAME_TO_GROUP.get(p.name_ja) or [p.name_ja])[0]
+        norm = _normalize_form_name(p.name_ja)
+        canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
