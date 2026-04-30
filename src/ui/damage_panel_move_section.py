@@ -346,6 +346,9 @@ class MoveSection(QWidget):
     ) -> None:
         """Each tuple is (min_dmg, max_dmg, defender_hp, is_error)."""
         self._show_bulk_rows = bool(show_bulk_rows)
+        # 毎回いったん閉じて、全ダメージ0のときのみ再展開する
+        self._details_visible = False
+        self._apply_detail_visibility()
         if self._move is None:
             self._set_all_no_damage("---")
             return
