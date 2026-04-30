@@ -29,7 +29,7 @@ _HOLDABLE_ITEM_CATEGORIES = (
 _CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 _TIMEOUT_SECONDS = 20
 _SESSION = requests.Session()
-_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
+_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
 
 _ITEM_MAP_CACHE: dict[str, str] | None = None
 _ITEM_NAME_ALIASES_JA_TO_EN: dict[str, str] = {

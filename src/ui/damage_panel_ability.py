@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 _POKEAPI_ABILITY_NAMES_BY_POKEMON_EN: dict[str, list[str]] = {}
 _POKEAPI_ABILITY_JA_BY_EN: dict[str, str] = {}
 _POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
+_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
 
 
 def _ability_name_ja_from_name_en(ability_name_en: str) -> str:

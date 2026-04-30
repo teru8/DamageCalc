@@ -164,7 +164,7 @@ class _PokeApiVarietyStats:
 
 
 _POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
+_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
 _POKEAPI_VARIETY_CACHE: dict[int, list[_PokeApiVarietyStats]] = {}
 _FORM_SPECIES_CACHE: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_ABILITY_JA_CACHE: dict[str, str] = {}

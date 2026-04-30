@@ -8,7 +8,7 @@ from src.models import SpeciesInfo
 
 _POKEAPI_SPECIES_CACHE_BY_NAME_EN: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
+_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
 
 
 def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -> SpeciesInfo | None:
