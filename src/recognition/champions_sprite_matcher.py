@@ -47,7 +47,7 @@ _MANIFEST_PATH = _CACHE_ROOT / "manifest.json"
 _TIMEOUT_SECONDS = 25
 
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "DamageCalc/0.1.0-alpha"})
+_SESSION.headers.update({"User-Agent": "DamageCalc/0.1.1-alpha"})
 
 _MANIFEST_CACHE: dict | None = None
 _REFS_BY_NAME_CACHE: dict[str, list[dict]] | None = None

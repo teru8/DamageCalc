@@ -13,7 +13,7 @@ from src.data import database as db
 from src.constants import POKEAPI_BASE
 
 _SESSION = requests.Session()
-_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
+_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
 
 
 def _get(url: str, retries: int = 3) -> dict[str, Any]:

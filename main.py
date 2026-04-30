@@ -109,7 +109,7 @@ def main() -> None:
             pass
     app = QApplication(sys.argv)
     app.setApplicationName("DamageCalc")
-    app.setApplicationVersion("0.1.0-alpha")
+    app.setApplicationVersion("0.1.1-alpha")
     icon_path = _resolve_app_icon_path()
     icon = QIcon(str(icon_path)) if icon_path else QIcon()
     if not icon.isNull():
