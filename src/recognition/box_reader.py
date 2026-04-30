@@ -6,6 +6,7 @@ Extraction flow:
 3) Name OCR resolved against the candidates
 4) EV/nature re-estimation from actual stats
 """
+import logging
 import re
 
 import cv2
@@ -88,7 +89,7 @@ def _try_ocr_with_variants(image: np.ndarray, allowlist: str | None = None) -> l
     try:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         variants.append(("clahe", clahe.apply(gray)))
-    except Exception:
+    except cv2.error:
         pass
 
     variants.append(("gauss3", cv2.GaussianBlur(gray, (3, 3), 0)))
@@ -96,12 +97,12 @@ def _try_ocr_with_variants(image: np.ndarray, allowlist: str | None = None) -> l
 
     try:
         variants.append(("adaptive", cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)))
-    except Exception:
+    except cv2.error:
         pass
     try:
         _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         variants.append(("otsu", otsu))
-    except Exception:
+    except cv2.error:
         pass
 
     kernel = np.ones((3, 3), np.uint8)
@@ -111,39 +112,33 @@ def _try_ocr_with_variants(image: np.ndarray, allowlist: str | None = None) -> l
         variants.append(("close", cv2.morphologyEx(adaptive, cv2.MORPH_CLOSE, kernel)))
         variants.append(("dilate", cv2.dilate(adaptive, kernel, iterations=1)))
         variants.append(("erode", cv2.erode(adaptive, kernel, iterations=1)))
-    except Exception:
+    except cv2.error:
         pass
 
     try:
         _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         inv = cv2.bitwise_not(th)
         variants.append(("inv", inv))
-    except Exception:
+    except cv2.error:
         pass
 
     try:
         kernel_sharp = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
         sharp = cv2.filter2D(gray, -1, kernel_sharp)
         variants.append(("sharp", sharp))
-    except Exception:
+    except cv2.error:
         pass
 
     for name, var in variants:
-        try:
-            texts = ocr_engine.read_text(var, allowlist=allowlist)
-        except Exception:
-            texts = ocr_engine.read_text(var)
+        texts = ocr_engine.read_text(var, allowlist=allowlist)
         if texts:
-            print(f"[BOX_OCR] variant '{name}' -> {texts}")
+            logging.debug("[BOX_OCR] variant '%s' -> %s", name, texts)
             return texts
 
-    try:
-        texts = ocr_engine.read_text(image)
-        if texts:
-            print(f"[BOX_OCR] fallback original -> {texts}")
-            return texts
-    except Exception:
-        pass
+    texts = ocr_engine.read_text(image)
+    if texts:
+        logging.debug("[BOX_OCR] fallback original -> %s", texts)
+        return texts
     return []
 
 
@@ -268,7 +263,7 @@ def _read_box_name_candidates(frame: np.ndarray) -> tuple[list[str], list[str]]:
             if text not in raw_candidates:
                 raw_candidates.append(text)
 
-    print("[BOX_OCR] 名前候補: {}".format(raw_candidates))
+    logging.debug("[BOX_OCR] 名前候補: %s", raw_candidates)
 
     species_candidates: list[str] = []
     for raw in raw_candidates:
@@ -372,21 +367,16 @@ def _select_species_name(
         )
         best_fit = fit_scores.get(best_name, float("inf"))
         if best_fit <= _PLAUSIBLE_SPECIES_FIT_SCORE:
-            print(
-                "[BOX_OCR] 名前決定(適合度優先): {}  fit={:.1f}".format(
-                    best_name,
-                    best_fit,
-                )
-            )
+            logging.debug("[BOX_OCR] 名前決定(適合度優先): %s  fit=%.1f", best_name, best_fit)
             return best_name
 
         # Fallback: keep previous behavior preferring OCR-based candidates
         if ocr_species_candidates:
-            print("[BOX_OCR] 名前マッチ: {}".format(ocr_species_candidates[0]))
+            logging.debug("[BOX_OCR] 名前マッチ: %s", ocr_species_candidates[0])
             return ocr_species_candidates[0]
 
     if ocr_species_candidates:
-        print("[BOX_OCR] 名前マッチ: {}".format(ocr_species_candidates[0]))
+        logging.debug("[BOX_OCR] 名前マッチ: %s", ocr_species_candidates[0])
         return ocr_species_candidates[0]
 
     filtered = [
@@ -412,7 +402,7 @@ def _infer_nature_and_fix_evs(
         raw_ev_points,
     )
     if score == float("inf"):
-        print("[BOX_OCR] 性格推定: 種族データなし (name='{}')".format(species_name))
+        logging.debug("[BOX_OCR] 性格推定: 種族データなし (name='%s')", species_name)
         return "まじめ", raw_ev_points
 
     # Recompute predicted stats from species base stats and the estimated EVs
@@ -421,7 +411,7 @@ def _infer_nature_and_fix_evs(
     if not species:
         # fallback: report estimated EVs but can't compute predicted stats
         boost_stat, reduce_stat = NATURES_JA.get(best_nature, (None, None))
-        print("[BOX_OCR] 性格推定: boost={} reduce={}".format(boost_stat, reduce_stat))
+        logging.debug("[BOX_OCR] 性格推定: boost=%s reduce=%s", boost_stat, reduce_stat)
         return best_nature, best_evs
 
     boost_stat, reduce_stat = NATURES_JA.get(best_nature, (None, None))
@@ -451,16 +441,12 @@ def _infer_nature_and_fix_evs(
         points = int(best_evs.get(key, int(raw_ev_points.get(key, 0))))
         ev = points * EV_POINT_FACTOR
         predicted = calc_stat(base, 31, ev, is_hp=is_hp, nature_mult=nature_mult)
-        print(
-            "[BOX_OCR] EV再推定 {} raw_pt={} -> pt={} predicted={}".format(
-                key,
-                int(raw_ev_points.get(key, 0)),
-                points,
-                int(predicted),
-            )
+        logging.debug(
+            "[BOX_OCR] EV再推定 %s raw_pt=%d -> pt=%d predicted=%d",
+            key, int(raw_ev_points.get(key, 0)), points, int(predicted),
         )
 
-    print("[BOX_OCR] 性格推定: boost={} reduce={}".format(boost_stat, reduce_stat))
+    logging.debug("[BOX_OCR] 性格推定: boost=%s reduce=%s", boost_stat, reduce_stat)
     return best_nature, best_evs
 
 
@@ -563,33 +549,33 @@ def read_box_screen(frame: np.ndarray) -> dict:
     for stat_name, roi in BOX_STAT_ROIS.items():
         value = _read_stat_value(frame, roi)
         stats[stat_name] = value
-        print("[BOX_OCR] 実数値 {}: {}".format(stat_name, value))
+        logging.debug("[BOX_OCR] 実数値 %s: %s", stat_name, value)
     data["stats"] = stats
 
     raw_ev_points: dict[str, int] = {}
     for stat_name, roi in BOX_EV_ROIS.items():
         value = _read_ev_point(frame, roi)
         raw_ev_points[stat_name] = value
-        print("[BOX_OCR] 努力値pt(生) {}: {}".format(stat_name, value))
+        logging.debug("[BOX_OCR] 努力値pt(生) %s: %s", stat_name, value)
 
     moves: list[str] = []
     for index, roi in enumerate(BOX_MOVE_ROIS):
         raw_move = _read_text(frame, roi)
         move_name = text_matcher.match_move_name(raw_move)
-        print("[BOX_OCR] 技{}: raw='{}' → matched='{}'".format(index + 1, raw_move, move_name))
+        logging.debug("[BOX_OCR] 技%d: raw='%s' → matched='%s'", index + 1, raw_move, move_name)
         if move_name:
             moves.append(move_name)
     data["moves"] = moves
 
     raw_ability = _read_text(frame, BOX_ABILITY_ROI)
     ability = text_matcher.match_ability_name(raw_ability)
-    print("[BOX_OCR] とくせい: raw='{}' → matched='{}'".format(raw_ability, ability))
+    logging.debug("[BOX_OCR] とくせい: raw='%s' → matched='%s'", raw_ability, ability)
     data["ability"] = ability
 
     raw_name_candidates, ocr_species_candidates = _read_box_name_candidates(frame)
     contextual_candidates = _species_candidates_from_name_and_ability(raw_name_candidates, ability, moves)
     if contextual_candidates:
-        print("[BOX_OCR] 候補種族(名前/特性): {}".format(contextual_candidates[:12]))
+        logging.debug("[BOX_OCR] 候補種族(名前/特性): %s", contextual_candidates[:12])
     name = _select_species_name(
         raw_name_candidates,
         ocr_species_candidates,
@@ -604,8 +590,8 @@ def read_box_screen(frame: np.ndarray) -> dict:
     data["nature"] = nature
     data["ev_points"] = ev_points
     for stat_name in ["hp", "attack", "defense", "sp_attack", "sp_defense", "speed"]:
-        print("[BOX_OCR] 努力値pt(補正後) {}: {}".format(stat_name, ev_points.get(stat_name, 0)))
-    print("[BOX_OCR] 性格: {}".format(nature))
+        logging.debug("[BOX_OCR] 努力値pt(補正後) %s: %s", stat_name, ev_points.get(stat_name, 0))
+    logging.debug("[BOX_OCR] 性格: %s", nature)
 
     # Recompute final stats from species base + inferred EVs/nature
     from src.calc.damage_calc import calc_stat

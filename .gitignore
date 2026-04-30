@@ -99,11 +99,10 @@ src/data/*scraper*.py
 scraper/
 scrapers/
 
+assets/champions_menu_sprites
 .windsurfrules
+flow_guide.md
 AGENTS.md
 CLAUDE.md
-dist/
-node_modules/
-
 node_modules/
 src/calc/node_modules/

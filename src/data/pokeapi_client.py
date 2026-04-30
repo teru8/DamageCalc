@@ -3,8 +3,10 @@ PokeAPI client with SQLite caching.
 Fetches species and move data on first run; subsequent runs use cache.
 All network calls are done in a background thread via PokeApiLoader.
 """
+import logging
 import requests
 import time
+from typing import Any
 from PyQt5.QtCore import QThread, pyqtSignal
 from src.models import SpeciesInfo, MoveInfo
 from src.data import database as db
@@ -14,19 +16,21 @@ _SESSION = requests.Session()
 _SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
 
 
-def _get(url: str, retries: int = 3) -> dict:
+def _get(url: str, retries: int = 3) -> dict[str, Any]:
     for i in range(retries):
         try:
             r = _SESSION.get(url, timeout=10)
             r.raise_for_status()
             return r.json()
-        except Exception:
+        except requests.exceptions.RequestException as e:
             if i < retries - 1:
                 time.sleep(1)
+            else:
+                logging.warning("_fetch failed %s: %s", url, e)
     return {}
 
 
-def _ja_name(names: list[dict]) -> str:
+def _ja_name(names: list[dict[str, Any]]) -> str:
     for n in names:
         if n.get("language", {}).get("name") in ("ja-Hrkt", "ja"):
             return n["name"]
@@ -261,7 +265,7 @@ def fetch_species(species_id: int) -> SpeciesInfo | None:
         move_url = move_entry.get("move", {}).get("url", "")
         try:
             move_id = int(move_url.rstrip("/").split("/")[-1])
-        except Exception:
+        except (ValueError, IndexError):
             continue
         move_ids.append(move_id)
     db.replace_species_learnset(species_id, move_ids)
@@ -624,29 +628,27 @@ class PokeApiLoader(QThread):
 
     def run(self) -> None:
         self.progress.emit(0, "PokeAPIからデータ取得中...")
-        conn = db.get_connection()
-        species_count = conn.execute(
-            "SELECT COUNT(*) FROM species_cache").fetchone()[0]
-        learnset_species_count = conn.execute(
-            "SELECT COUNT(DISTINCT species_id) FROM species_move_cache"
-        ).fetchone()[0]
-        move_count = conn.execute(
-            "SELECT COUNT(*) FROM move_cache WHERE name_ja IS NOT NULL AND name_ja != ''"
-        ).fetchone()[0]
-        regional_count = conn.execute(
-            "SELECT COUNT(*) FROM species_cache WHERE species_id >= 10000"
-        ).fetchone()[0]
-        conn.close()
+        with db.connection() as conn:
+            species_count = conn.execute(
+                "SELECT COUNT(*) FROM species_cache").fetchone()[0]
+            learnset_species_count = conn.execute(
+                "SELECT COUNT(DISTINCT species_id) FROM species_move_cache"
+            ).fetchone()[0]
+            move_count = conn.execute(
+                "SELECT COUNT(*) FROM move_cache WHERE name_ja IS NOT NULL AND name_ja != ''"
+            ).fetchone()[0]
+            regional_count = conn.execute(
+                "SELECT COUNT(*) FROM species_cache WHERE species_id >= 10000"
+            ).fetchone()[0]
 
         needs_base = species_count < self.MAX_SPECIES or learnset_species_count < self.MAX_SPECIES
         # Check if any specific form ID is missing from cache (handles newly added IDs).
         cached_form_ids: set[int] = set()
         if regional_count > 0:
-            conn2 = db.get_connection()
-            rows = conn2.execute(
-                "SELECT species_id FROM species_cache WHERE species_id >= 10000"
-            ).fetchall()
-            conn2.close()
+            with db.connection() as conn:
+                rows = conn.execute(
+                    "SELECT species_id FROM species_cache WHERE species_id >= 10000"
+                ).fetchall()
             cached_form_ids = {row[0] for row in rows}
         # Also check that key forms have the correct name_ja (stale entries with wrong names
         # won't be re-fetched by ID-presence check alone).
@@ -797,28 +799,27 @@ class PokeApiLoader(QThread):
             # Regional forms (Paldea)
             10253: "パルデアウパー",
         }
-        conn3 = db.get_connection()
         stale_ids = []
-        for fid, expected_name in _EXPECTED_FORM_NAMES.items():
-            row = conn3.execute(
-                "SELECT name_ja FROM species_cache WHERE species_id=?", (fid,)
-            ).fetchone()
-            if not row or row[0] != expected_name:
-                stale_ids.append(fid)
-        if stale_ids:
-            # Delete stale entries (both species and learnset) so fetch_species
-            # won't short-circuit on the cached-ID check.
-            placeholders = ",".join("?" * len(stale_ids))
-            conn3.execute(
-                "DELETE FROM species_cache WHERE species_id IN ({})".format(placeholders),
-                stale_ids,
-            )
-            conn3.execute(
-                "DELETE FROM species_move_cache WHERE species_id IN ({})".format(placeholders),
-                stale_ids,
-            )
-            conn3.commit()
-        conn3.close()
+        with db.connection() as conn:
+            for fid, expected_name in _EXPECTED_FORM_NAMES.items():
+                row = conn.execute(
+                    "SELECT name_ja FROM species_cache WHERE species_id=?", (fid,)
+                ).fetchone()
+                if not row or row[0] != expected_name:
+                    stale_ids.append(fid)
+            if stale_ids:
+                # Delete stale entries (both species and learnset) so fetch_species
+                # won't short-circuit on the cached-ID check.
+                placeholders = ",".join("?" * len(stale_ids))
+                conn.execute(
+                    "DELETE FROM species_cache WHERE species_id IN ({})".format(placeholders),
+                    stale_ids,
+                )
+                conn.execute(
+                    "DELETE FROM species_move_cache WHERE species_id IN ({})".format(placeholders),
+                    stale_ids,
+                )
+                conn.commit()
         needs_regional = any(fid not in cached_form_ids for fid in _REGIONAL_FORM_IDS) or bool(stale_ids)
         needs_moves = move_count < self.MIN_MOVES
 

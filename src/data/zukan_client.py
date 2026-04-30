@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -59,7 +60,7 @@ def _masters_path() -> Path:
     return _cache_root() / "masters.json"
 
 
-def _load_cached_index() -> dict | None:
+def _load_cached_index() -> dict[str, Any] | None:
     path = _index_path()
     if not path.exists():
         return None
@@ -69,14 +70,14 @@ def _load_cached_index() -> dict | None:
         return None
 
 
-def _save_index(payload: dict) -> None:
+def _save_index(payload: dict[str, Any]) -> None:
     _index_path().write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def _load_cached_masters() -> dict | None:
+def _load_cached_masters() -> dict[str, Any] | None:
     path = _masters_path()
     if not path.exists():
         return None
@@ -86,14 +87,14 @@ def _load_cached_masters() -> dict | None:
         return None
 
 
-def _save_masters(payload: dict) -> None:
+def _save_masters(payload: dict[str, Any]) -> None:
     _masters_path().write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def _parse_index(payload: dict | None) -> list[ZukanPokemonEntry]:
+def _parse_index(payload: dict[str, Any] | None) -> list[ZukanPokemonEntry]:
     if not payload:
         return []
     results = payload.get("results") or []
@@ -137,7 +138,7 @@ def get_pokemon_index(force_refresh: bool = False) -> list[ZukanPokemonEntry]:
         return _parse_index(cached)
 
 
-def get_masters(force_refresh: bool = False) -> dict:
+def get_masters(force_refresh: bool = False) -> dict[str, Any]:
     cached = _load_cached_masters()
     if not force_refresh and cached:
         fetched_at = float(cached.get("fetched_at") or 0)
@@ -213,7 +214,7 @@ def get_cached_asset_bytes(url: str) -> bytes | None:
         return None
 
 
-def get_pokemon_detail(dex_no: str, force_refresh: bool = False) -> dict:
+def get_pokemon_detail(dex_no: str, force_refresh: bool = False) -> dict[str, Any]:
     dex_no = (dex_no or "").strip()
     if not dex_no:
         return {}
