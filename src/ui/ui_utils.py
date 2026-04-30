@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
@@ -15,6 +16,30 @@ if TYPE_CHECKING:
     from src.models import PokemonInstance
 
 _ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
+
+
+class _LRUDict(OrderedDict):
+    """OrderedDict with a maximum size; evicts the least-recently-used entry."""
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        if len(self) > self._maxsize:
+            self.popitem(last=False)
+
+    def __getitem__(self, key: Any) -> Any:
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if key in self:
+            return self[key]
+        return default
 
 
 def open_pokemon_edit_dialog(
@@ -58,8 +83,8 @@ def open_pokemon_edit_dialog(
 _ICONS_DIR = _ASSETS_DIR / "templates" / "icons"
 _SPRITES_DIR = _ASSETS_DIR / "champions_menu_sprites"
 
-_TYPE_PIXMAP_CACHE: dict[tuple[str, int, int], QPixmap | None] = {}
-_SPRITE_PIXMAP_CACHE: dict[tuple[str, int, int | str], QPixmap | None] = {}
+_TYPE_PIXMAP_CACHE: _LRUDict = _LRUDict(64)    # ~18 types × few sizes
+_SPRITE_PIXMAP_CACHE: _LRUDict = _LRUDict(256)  # Pokemon sprites (QPixmap)
 _SPRITE_BY_NAME_JA: dict[str, str] | None = None
 _SPRITE_ENTRIES: list[dict] | None = None
 
