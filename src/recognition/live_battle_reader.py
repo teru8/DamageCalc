@@ -138,7 +138,7 @@ def _match_sprite_name(
     sprite: np.ndarray,
     candidate_names: list[str],
     current_name: str = "",
-) -> tuple[str, float, list[tuple[str, float]]]:
+) -> tuple[str, float, list[dict]]:
     current_name = (current_name or "").strip()
     if not candidate_names:
         return "", 0.0, []
@@ -153,12 +153,13 @@ def _match_sprite_name(
             return current_name, 0.0, []
         return "", 0.0, []
 
-    top_name, top_score = ranked[0]
-    second_score = ranked[1][1] if len(ranked) >= 2 else 0.0
+    top_name = str(ranked[0]["name_ja"])
+    top_score = float(ranked[0]["score"])
+    second_score = float(ranked[1]["score"]) if len(ranked) >= 2 else 0.0
     current_score = 0.0
-    for name_ja, score in ranked:
-        if name_ja == current_name:
-            current_score = float(score)
+    for r in ranked:
+        if r["name_ja"] == current_name:
+            current_score = float(r["score"])
             break
 
     chosen = ""
@@ -233,7 +234,7 @@ def read_live_battle(
         "my": {
             "name_ja": my_name,
             "match_score": my_score,
-            "match_candidates": [{"name_ja": n, "score": float(s)} for n, s in my_ranked[:4]],
+            "match_candidates": [{"name_ja": r["name_ja"], "form": r["form"], "score": float(r["score"])} for r in my_ranked[:4]],
             "hp_current": int(my_cur),
             "hp_max": int(my_max),
             "hp_percent": float(my_pct),
@@ -242,7 +243,7 @@ def read_live_battle(
         "opponent": {
             "name_ja": opp_name,
             "match_score": opp_score,
-            "match_candidates": [{"name_ja": n, "score": float(s)} for n, s in opp_ranked[:4]],
+            "match_candidates": [{"name_ja": r["name_ja"], "form": r["form"], "score": float(r["score"])} for r in opp_ranked[:4]],
             "hp_percent": float(opp_pct),
             "hp_text": opp_hp_text,
         },

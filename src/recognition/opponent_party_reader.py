@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import cv2
@@ -26,10 +27,33 @@ _TYPE_ICON_REL_ROIS = [
     (160, 8, 191, 39),
 ]
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def _asset_roots() -> list[Path]:
+    roots: list[Path] = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        roots.append(exe_dir / "assets")
+        roots.append(exe_dir / "_internal" / "assets")
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        if str(meipass):
+            roots.append(meipass / "assets")
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        roots.append(project_root / "assets")
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root.resolve()) if root.exists() else str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(root)
+    return deduped
+
+
 _TYPE_TEMPLATE_DIRS = [
-    _PROJECT_ROOT / "assets" / "templates" / "types",
-    _PROJECT_ROOT / "assets" / "type_icon_templates",
+    root / "templates" / "types" for root in _asset_roots()
+] + [
+    root / "type_icon_templates" for root in _asset_roots()
 ]
 _TYPE_TEMPLATE_SIZE = 32
 _TYPE_TEMPLATE_CACHE: dict[str, list[np.ndarray]] | None = None
@@ -55,6 +79,20 @@ _ALL_TYPES: set[str] = {
     "steel",
     "fairy",
 }
+
+
+def _read_image_color(path: Path) -> np.ndarray | None:
+    """Unicode-safe image loader for Windows paths."""
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except Exception:
+        return None
+    if data.size == 0:
+        return None
+    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img is None or img.size == 0:
+        return None
+    return img
 
 
 def _crop(frame: np.ndarray, roi: tuple[int, int, int, int]) -> np.ndarray:
@@ -111,7 +149,7 @@ def _load_type_templates() -> dict[str, list[np.ndarray]]:
             type_name = _normalize_type_name(path.stem.split("__", 1)[0])
             if not type_name:
                 continue
-            img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+            img = _read_image_color(path)
             if img is None or img.size == 0:
                 continue
             icon = cv2.resize(img, (_TYPE_TEMPLATE_SIZE, _TYPE_TEMPLATE_SIZE), interpolation=cv2.INTER_AREA)
@@ -297,36 +335,33 @@ def _type_filtered_species_names(
     candidates = strict_primary or strict_hit or relaxed_primary or relaxed_hit
     if not candidates:
         return []
-    seen: set[str] = set()
+    seen_ids: set[int] = set()
+    seen_names: set[str] = set()
     names: list[str] = []
     for species in sorted(candidates, key=lambda s: (s.species_id, s.name_ja)):
-        name = str(species.name_ja or "").strip()
-        if not name or name in seen:
+        if species.species_id in seen_ids:
             continue
-        seen.add(name)
+        seen_ids.add(species.species_id)
+        name = str(species.name_ja or "").strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
         names.append(name)
 
-    # Form fallback: DB may contain only base species (e.g. ロトム)
-    # while icon types correspond to appliance forms.
-    if "electric" in primary_types and any(t in primary_types for t in ("fire", "water", "grass", "ice", "flying")):
-        if "ロトム" in {s.name_ja for s in season_species} and "ロトム" not in names:
-            names = ["ロトム"] + names
-        elif "ロトム" in names:
-            names.remove("ロトム")
-            names = ["ロトム"] + names
     return names
 
 
 def _match_species_by_sprite(
     slot: np.ndarray,
     candidate_names: list[str],
-) -> tuple[str, list[str], float]:
+) -> tuple[str, str, bool, list[str], float]:
+    """Return (name_ja, form, is_shiny, ordered_candidate_names, confidence)."""
     if not candidate_names or not champions_sprite_matcher.is_ready():
-        return "", [], 0.0
+        return "", "", False, [], 0.0
 
     sprite = _rel_crop(slot, _SPRITE_REL_ROI)
     if sprite.size == 0:
-        return "", [], 0.0
+        return "", "", False, [], 0.0
 
     ranked = champions_sprite_matcher.match_sprite(
         sprite,
@@ -334,21 +369,23 @@ def _match_species_by_sprite(
         top_k=min(10, len(candidate_names)),
     )
     if not ranked:
-        return "", [], 0.0
+        return "", "", False, [], 0.0
 
-    top_name, top_raw_score = ranked[0]
-    ordered_names = [name for name, _ in ranked]
-    second_raw_score = float(ranked[1][1]) if len(ranked) >= 2 else 0.0
-    margin = float(top_raw_score - second_raw_score)
+    top = ranked[0]
+    top_name = str(top["name_ja"])
+    top_form = str(top["form"])
+    top_shiny = bool(top["is_shiny"])
+    top_score = float(top["score"])
+    ordered_names = [r["name_ja"] for r in ranked]
+    second_score = float(ranked[1]["score"]) if len(ranked) >= 2 else 0.0
+    margin = top_score - second_score
 
     # Keep thresholds permissive, but avoid low-confidence ties.
-    if top_raw_score < 0.27:
-        return "", ordered_names, top_raw_score
-    if len(ranked) >= 2 and top_raw_score < 0.36 and margin < 0.020:
-        return "", ordered_names, top_raw_score
-    if len(ranked) >= 2 and top_raw_score < 0.50 and margin < 0.020:
-        return "", ordered_names, top_raw_score
-    return top_name, ordered_names, top_raw_score
+    if top_score < 0.27:
+        return "", "", False, ordered_names, top_score
+    if top_score < 0.50 and margin < 0.020:
+        return "", "", False, ordered_names, top_score
+    return top_name, top_form, top_shiny, ordered_names, top_score
 
 
 def _slot_result(
@@ -357,6 +394,8 @@ def _slot_result(
     primary_types: list[str],
     type_groups: list[list[str]],
     picked_name: str,
+    picked_form: str,
+    picked_shiny: bool,
     species_candidates: list[str],
     confidence: float,
 ) -> dict:
@@ -364,6 +403,8 @@ def _slot_result(
         "slot_index": index,
         "occupied": occupied,
         "name_ja": picked_name,
+        "form": picked_form,
+        "is_shiny": picked_shiny,
         "confidence": float(confidence),
         "types": primary_types,
         "type_groups": type_groups,
@@ -395,6 +436,8 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
                     primary_types=[],
                     type_groups=[],
                     picked_name="",
+                    picked_form="",
+                    picked_shiny=False,
                     species_candidates=[],
                     confidence=0.0,
                 )
@@ -404,7 +447,7 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
         type_groups = _detect_type_groups(slot)
         primary_types = [group[0] for group in type_groups if group]
         candidate_names = _type_filtered_species_names(type_groups, season_species)
-        picked_name, ranked_candidates, confidence = _match_species_by_sprite(
+        picked_name, picked_form, picked_shiny, ranked_candidates, confidence = _match_species_by_sprite(
             slot,
             candidate_names,
         )
@@ -416,6 +459,8 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
                 primary_types=primary_types,
                 type_groups=type_groups,
                 picked_name=picked_name,
+                picked_form=picked_form,
+                picked_shiny=picked_shiny,
                 species_candidates=ranked_candidates,
                 confidence=confidence,
             )

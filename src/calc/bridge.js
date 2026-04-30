@@ -86,10 +86,15 @@ function handleCalc(req) {
   const fd = new Field({
     weather:    WEATHER_MAP[f.weather]  || undefined,
     terrain:    TERRAIN_MAP[f.terrain]  || undefined,
+    isGravity: !!f.isGravity,
     isFairyAura: !!f.isFairyAura,
     isDarkAura:  !!f.isDarkAura,
-    attackerSide: { isHelpingHand: !!f.helpingHand },
-    defenderSide: { isReflect: !!f.reflect, isLightScreen: !!f.lightScreen },
+    attackerSide: { isHelpingHand: !!f.helpingHand, isTailwind: !!f.tailwind },
+    defenderSide: {
+      isReflect: !!f.reflect,
+      isLightScreen: !!f.lightScreen,
+      isFriendGuard: !!f.friendGuard,
+    },
   });
 
   let result;

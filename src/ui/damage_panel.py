@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 import math
-from typing import Callable, Optional
+from typing import Optional
 
-import requests
 from PyQt5.QtCore import QPointF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QPixmap, QPen, QLinearGradient, QPolygonF
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QGroupBox, QScrollArea, QPushButton, QSizePolicy,
@@ -17,121 +17,34 @@ from PyQt5.QtWidgets import (
 )
 
 from src.models import PokemonInstance, MoveInfo, SpeciesInfo
-from src.constants import (
-    TYPE_COLORS, TYPE_EN_TO_JA, TYPE_JA_TO_EN,
-    MULTI_HIT_MOVES_JA,
-    POKEAPI_BASE, STEALTH_ROCK_CHART, NATURES_JA,
-)
 from src.data import zukan_client
+from src.ui.damage_panel_cards import AttackerCard as _AttackerCard
+from src.ui.damage_panel_cards import DefenderCard as _DefenderCard
+from src.ui.damage_panel_forms import FORM_NAME_TO_GROUP as _FORM_NAME_TO_GROUP
+from src.ui.damage_panel_form_apply import apply_form as _apply_form_impl
+from src.ui.damage_panel_hazards import StealthRockRow as _StealthRockRow
+from src.ui.damage_panel_math import nature_mult_from_name as _nature_mult_from_name
+from src.ui.damage_panel_math import rank_mult as _rank_mult
+from src.ui.damage_panel_move_section import MoveSection as _MoveSection
+from src.ui.damage_panel_panels import _AttackerPanel, _DefenderPanel
+from src.ui.damage_panel_party import PartySlot as _PartySlot
+from src.ui.damage_panel_species import species_from_name_en as _species_from_name_en
+from src.ui.damage_panel_ui_helpers import row_label as _row_label
+from src.ui.damage_panel_ui_helpers import sep as _sep
+from src.ui.damage_panel_widgets import RadioGroup as _RadioGroup
+from src.ui.damage_panel_widgets import ToggleBtn as _ToggleBtn
 from src.ui.ui_utils import open_pokemon_edit_dialog
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
-def _rank_mult(rank: int) -> float:
-    table = {-6: 2/8, -5: 2/7, -4: 2/6, -3: 2/5, -2: 2/4, -1: 2/3,
-              0: 1.0, 1: 3/2, 2: 4/2, 3: 5/2, 4: 6/2, 5: 7/2, 6: 8/2}
-    return table.get(max(-6, min(6, rank)), 1.0)
-
-
-def _n_hit_ko(min_dmg: int, max_dmg: int, hp: int) -> str:
-    if max_dmg <= 0 or hp <= 0:
-        return "効果なし"
-
-    min_hits = max(1, math.ceil(hp / max_dmg))
-    if min_dmg <= 0:
-        return "乱数{}発以上".format(min_hits)
-
-    max_hits = max(1, math.ceil(hp / min_dmg))
-    if min_hits == max_hits:
-        if min_dmg * min_hits >= hp:
-            return "確定{}発".format(min_hits)
-        return "乱数{}発".format(min_hits)
-
-    return "乱数{}発".format(min_hits)
-
-
-def _bar_color(min_pct: float, max_pct: float) -> str:
-    if max_pct >= 100:
-        return "#f38ba8"
-    if min_pct >= 50:
-        return "#fab387"
-    if max_pct >= 50:
-        return "#f9e2af"
-    return "#a6e3a1"
-
-
-def _bar_variation_color(min_pct: float, max_pct: float) -> str:
-    if max_pct >= 100:
-        return "#6b1a2a"
-    if min_pct >= 50:
-        return "#5e2d10"
-    if max_pct >= 50:
-        return "#5a4a0a"
-    return "#1e4a1a"
-
-
-def _hp_color(remaining_pct: float) -> str:
-    if remaining_pct <= 20:
-        return "#f38ba8"
-    if remaining_pct <= 50:
-        return "#f9e2af"
-    return "#a6e3a1"
-
-
-def _nature_mult_from_name(nature_ja: str, stat_key: str) -> float:
-    boost, reduce = NATURES_JA.get(nature_ja or "", (None, None))
-    if boost == stat_key:
-        return 1.1
-    if reduce == stat_key:
-        return 0.9
-    return 1.0
-
-
-def _mult_label(value: float) -> str:
-    if value <= 0.95:
-        return "×0.9"
-    if value >= 1.05:
-        return "×1.1"
-    return "×1.0"
-
-
-def _round1(value: float) -> float:
-    # Python round() は銀行丸めになるため、一般的な四捨五入に揃える。
-    if value >= 0:
-        return math.floor(value * 10 + 0.5) / 10
-    return math.ceil(value * 10 - 0.5) / 10
-
-
 _ICON_CACHE: dict[str, QPixmap] = {}
 
 
 def _game_badge(text: str, c_top: str, c_bottom: str, width: int, height: int, font_size: int = 10) -> QPixmap:
-    key = "{}|{}|{}|{}|{}|{}".format(text, c_top, c_bottom, width, height, font_size)
-    if key in _ICON_CACHE:
-        return _ICON_CACHE[key]
+    from src.ui.damage_panel_icons import game_badge
 
-    pm = QPixmap(width, height)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing, True)
-
-    grad = QLinearGradient(0, 0, 0, height)
-    grad.setColorAt(0.0, QColor(c_top))
-    grad.setColorAt(1.0, QColor(c_bottom))
-    p.setBrush(QBrush(grad))
-    p.setPen(QPen(QColor("#dce2ff"), 1))
-    p.drawRoundedRect(0, 0, width - 1, height - 1, 6, 6)
-
-    p.setPen(QColor("#ffffff"))
-    f = QFont("Yu Gothic UI", font_size)
-    f.setBold(True)
-    p.setFont(f)
-    p.drawText(pm.rect(), Qt.AlignCenter, text)
-    p.end()
-
-    _ICON_CACHE[key] = pm
-    return pm
+    return game_badge(text, c_top, c_bottom, width, height, font_size)
 
 
 _REMOTE_ICON_CACHE: dict[str, QPixmap] = {}
@@ -143,363 +56,25 @@ _CATEGORY_ICON_URLS = {
 
 
 def _remote_icon(url: str, width: int, height: int) -> QPixmap | None:
-    cache_key = "{}|{}|{}".format(url, width, height)
-    cached = _REMOTE_ICON_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    payload = zukan_client.get_cached_asset_bytes(url)
-    if not payload:
-        return None
-    source = QPixmap()
-    if not source.loadFromData(payload):
-        return None
-    scaled = source.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    _REMOTE_ICON_CACHE[cache_key] = scaled
-    return scaled
+    from src.ui.damage_panel_icons import remote_icon
+
+    return remote_icon(url, width, height)
 
 
 def _category_icon(category: str, width: int = 66, height: int = 22) -> QPixmap:
-    url = _CATEGORY_ICON_URLS.get(category, "")
-    if url:
-        icon = _remote_icon(url, width, height)
-        if icon is not None:
-            return icon
-    fallback = {
-        "physical": ("ぶつり", "#f87f5a", "#d44936"),
-        "special": ("とくしゅ", "#67a8ff", "#3b69d8"),
-        "status": ("へんか", "#9da5bc", "#707993"),
-    }.get(category, ("-", "#9da5bc", "#707993"))
-    return _game_badge(fallback[0], fallback[1], fallback[2], width, height, 9)
+    from src.ui.damage_panel_icons import category_icon
+
+    return category_icon(category, width, height)
 
 
 def _battle_stat_icon(kind: str, width: int = 60, height: int = 22) -> QPixmap:
-    key = "stat:{}:{}:{}".format(kind, width, height)
-    if key in _ICON_CACHE:
-        return _ICON_CACHE[key]
+    from src.ui.damage_panel_icons import battle_stat_icon
 
-    text = "威力" if kind == "power" else "命中"
-    top_color = "#f7c46a" if kind == "power" else "#8bd6a2"
-    bottom_color = "#d18931" if kind == "power" else "#4f9c6f"
-    icon_color = "#fff6de" if kind == "power" else "#eafff1"
-
-    pm = QPixmap(width, height)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing, True)
-
-    grad = QLinearGradient(0, 0, 0, height)
-    grad.setColorAt(0.0, QColor(top_color))
-    grad.setColorAt(1.0, QColor(bottom_color))
-    p.setBrush(QBrush(grad))
-    p.setPen(QPen(QColor("#dce2ff"), 1))
-    p.drawRoundedRect(0, 0, width - 1, height - 1, 7, 7)
-
-    # Left-side glyph
-    gx = 8
-    gy = height // 2
-    p.setPen(QPen(QColor(icon_color), 2))
-    if kind == "power":
-        points = [
-            (gx, gy - 6), (gx + 3, gy - 1), (gx + 9, gy - 1),
-            (gx + 4, gy + 2), (gx + 6, gy + 7), (gx, gy + 3),
-            (gx - 6, gy + 7), (gx - 4, gy + 2), (gx - 9, gy - 1),
-            (gx - 3, gy - 1),
-        ]
-        poly = QPolygonF([QPointF(float(px), float(py)) for px, py in points])
-        p.setBrush(QColor(icon_color))
-        p.drawPolygon(poly)
-    else:
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(gx - 7, gy - 7, 14, 14)
-        p.drawLine(gx - 10, gy, gx + 10, gy)
-        p.drawLine(gx, gy - 10, gx, gy + 10)
-        p.setBrush(QColor(icon_color))
-        p.drawEllipse(gx - 2, gy - 2, 4, 4)
-
-    p.setPen(QColor("#ffffff"))
-    f = QFont("Yu Gothic UI", 9)
-    f.setBold(True)
-    p.setFont(f)
-    p.drawText(20, 0, width - 20, height, Qt.AlignCenter, text)
-    p.end()
-
-    _ICON_CACHE[key] = pm
-    return pm
-
-
-def _power_option_value(data: object) -> int:
-    if isinstance(data, tuple) and len(data) >= 1:
-        try:
-            return int(data[0])
-        except Exception:
-            return 0
-    try:
-        return int(data)
-    except Exception:
-        return 0
-
-
-def _discrete_options(values: list[int], prefix: str = "威力") -> list[tuple[str, object]]:
-    result: list[tuple[str, object]] = []
-    used: set[int] = set()
-    for value in values:
-        v = int(value)
-        if v <= 0 or v in used:
-            continue
-        used.add(v)
-        result.append(("{} {}".format(prefix, v), v))
-    return result
-
-
-def _hp_percent_options(
-    label_prefix: str,
-    percent_to_power: Callable[[int], int],
-) -> list[tuple[str, object]]:
-    # 1% と 10%刻みだけ表示する要件。
-    hp_steps = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 1]
-    options: list[tuple[str, object]] = []
-    for pct in hp_steps:
-        power = max(1, int(percent_to_power(pct)))
-        options.append(("{}{}% (威力 {})".format(label_prefix, pct, power), (power, pct)))
-    return options
-
-
-def _reversal_flail_power_from_hp_percent(hp_percent: int) -> int:
-    # きしかいせい/じたばた: 現HP/最大HPの閾値で威力が決まる (Gen3+)
-    scaled = int(hp_percent) * 48
-    if scaled <= 100:
-        return 200
-    if scaled <= 400:
-        return 150
-    if scaled <= 900:
-        return 100
-    if scaled <= 1600:
-        return 80
-    if scaled <= 3200:
-        return 40
-    return 20
-
-
-def _eruption_family_power_from_hp_percent(hp_percent: int) -> int:
-    return max(1, (150 * int(hp_percent)) // 100)
-
-
-def _wring_out_family_power_from_hp_percent(hp_percent: int) -> int:
-    return max(1, (120 * int(hp_percent)) // 100 + 1)
-
-
-def _variable_power_options(move: MoveInfo) -> list[tuple[str, object]]:
-    name = move.name_ja
-    base_power = move.power or 1
-
-    if name in ("ころがる", "アイスボール"):
-        normal = [30, 60, 120, 240, 480]
-        rolled = [value * 2 for value in normal]
-        options: list[tuple[str, int]] = []
-        for idx, value in enumerate(normal, start=1):
-            options.append(("{} {}回目 ({})".format(name, idx, value), value))
-        for idx, value in enumerate(rolled, start=1):
-            options.append(("まるくなる後 {}回目 ({})".format(idx, value), value))
-        return options
-
-    if name == "れんぞくぎり":
-        return [
-            ("1回目 (40)", 40),
-            ("2回目 (80)", 80),
-            ("3回目以降 (160)", 160),
-        ]
-
-    if name == "おはかまいり":
-        return [("味方{}体ひんし ({})".format(i, 50 + 50 * i), 50 + 50 * i) for i in range(0, 6)]
-
-    if name == "ふんどのこぶし":
-        return [("被弾{}回 ({})".format(i, 50 + 50 * i), 50 + 50 * i) for i in range(0, 7)]
-
-    if name == "エコーボイス":
-        return [("連続{}回目 ({})".format(i, min(200, 40 * i)), min(200, 40 * i)) for i in range(1, 6)]
-
-    if name in ("アシストパワー", "つけあがる"):
-        return [("上昇ランク合計 {} ({})".format(i, 20 + 20 * i), 20 + 20 * i) for i in range(0, 43)]
-
-    if name == "おしおき":
-        return [("相手上昇ランク合計 {} ({})".format(i, min(200, 60 + 20 * i)), min(200, 60 + 20 * i)) for i in range(0, 8)]
-
-    if name in ("しおふき", "ふんか", "ドラゴンエナジー"):
-        return _hp_percent_options("自分HP ", _eruption_family_power_from_hp_percent)
-
-    if name in ("じたばた", "きしかいせい"):
-        return _hp_percent_options("自分HP ", _reversal_flail_power_from_hp_percent)
-
-    if name in ("しぼりとる", "にぎりつぶす"):
-        return _hp_percent_options("相手HP ", _wring_out_family_power_from_hp_percent)
-
-    if name == "からげんき":
-        return [("通常 (70)", 70), ("状態異常時 (140)", 140)]
-
-    if name in ("たたりめ", "ベノムショック", "しおみず", "かたきうち"):
-        return [("通常 ({})".format(base_power), base_power), ("条件成立 ({})".format(base_power * 2), base_power * 2)]
-
-    if name == "ジャイロボール":
-        return _discrete_options(list(range(150, 0, -1)))
-
-    if name == "エレキボール":
-        return _discrete_options([40, 60, 80, 120, 150])
-
-    if name == "ゆきなだれ":
-        return [("通常 (60)", 60), ("後攻被弾後 (120)", 120)]
-
-    if name == "はたきおとす":
-        return [("通常 (65)", 65), ("道具あり対象 (97)", 97)]
-
-    if name == "マグニチュード":
-        return _discrete_options([10, 30, 50, 70, 90, 110, 150])
-
-    return []
+    return battle_stat_icon(kind, width, height)
 
 
 # ── Form change data ─────────────────────────────────────────────────────
-# Each list: [base_form, alt1, alt2, …]. Cycle on button press.
-_FORM_GROUPS: list[list[str]] = [
-    # ── Dual-branch megas (full-width X/Y to match Zukan display names)
-    ["リザードン",   "メガリザードンＸ", "メガリザードンＹ"],
-    ["ミュウツー",   "メガミュウツーＸ", "メガミュウツーＹ"],
-    ["ライチュウ",   "メガライチュウＸ", "メガライチュウＹ"],
-    # ── Single megas (gen 1–6, standard)
-    ["フシギバナ",   "メガフシギバナ"],
-    ["スピアー",     "メガスピアー"],
-    ["ピジョット",   "メガピジョット"],
-    ["ピクシー",     "メガピクシー"],
-    ["ウツボット",   "メガウツボット"],
-    ["ヤドラン",     "メガヤドラン"],
-    ["ゲンガー",     "メガゲンガー"],
-    ["スターミー",   "メガスターミー"],
-    ["カイロス",     "メガカイロス"],
-    ["ギャラドス",   "メガギャラドス"],
-    ["プテラ",       "メガプテラ"],
-    ["カイリュー",   "メガカイリュー"],
-    ["カメックス",   "メガカメックス"],
-    ["フーディン",   "メガフーディン"],
-    ["ガルーラ",     "メガガルーラ"],
-    ["ハッサム",     "メガハッサム"],
-    ["ヘラクロス",   "メガヘラクロス"],
-    ["ヘルガー",     "メガヘルガー"],
-    ["デンリュウ",   "メガデンリュウ"],
-    ["ハガネール",   "メガハガネール"],
-    ["バンギラス",   "メガバンギラス"],
-    ["ジュカイン",   "メガジュカイン"],
-    ["バシャーモ",   "メガバシャーモ"],
-    ["ラグラージ",   "メガラグラージ"],
-    ["ヤミラミ",     "メガヤミラミ"],
-    ["クチート",     "メガクチート"],
-    ["ボスゴドラ",   "メガボスゴドラ"],
-    ["チャーレム",   "メガチャーレム"],
-    ["ライボルト",   "メガライボルト"],
-    ["サメハダー",   "メガサメハダー"],
-    ["バクーダ",     "メガバクーダ"],
-    ["チルタリス",   "メガチルタリス"],
-    ["ジュペッタ",   "メガジュペッタ"],
-    ["チリーン",     "メガチリーン"],
-    ["アブソル",     "メガアブソル"],
-    ["オニゴーリ",   "メガオニゴーリ"],
-    ["ボーマンダ",   "メガボーマンダ"],
-    ["メタグロス",   "メガメタグロス"],
-    ["ラティアス",   "メガラティアス"],
-    ["ラティオス",   "メガラティオス"],
-    ["サーナイト",   "メガサーナイト"],
-    ["ユキノオー",   "メガユキノオー"],
-    ["ルカリオ",     "メガルカリオ"],
-    ["ガブリアス",   "メガガブリアス"],
-    ["ミミロップ",   "メガミミロップ"],
-    ["エアームド",   "メガエアームド"],
-    ["エルレイド",   "メガエルレイド"],
-    ["ユキメノコ",   "メガユキメノコ"],
-    ["タブンネ",     "メガタブンネ"],
-    ["ムクホーク",   "メガムクホーク"],
-    # ── Single megas (gen 7+, gen9 fan-made)
-    ["メガニウム",   "メガメガニウム"],
-    ["オーダイル",   "メガオーダイル"],
-    ["エンブオー",   "メガエンブオー"],
-    ["ドリュウズ",   "メガドリュウズ"],
-    ["ペンドラー",   "メガペンドラー"],
-    ["ズルズキン",   "メガズルズキン"],
-    ["シビルドン",   "メガシビルドン"],
-    ["シャンデラ",   "メガシャンデラ"],
-    ["ゴルーグ",     "メガゴルーグ"],
-    ["ブリガロン",   "メガブリガロン"],
-    ["マフォクシー", "メガマフォクシー"],
-    ["ゲッコウガ",   "メガゲッコウガ"],
-    ["カエンジシ",   "メガカエンジシ"],
-    ["ニャオニクス", "メガニャオニクス"],
-    ["カラマネロ",   "メガカラマネロ"],
-    ["ガメノデス",   "メガガメノデス"],
-    ["ドラミドロ",   "メガドラミドロ"],
-    ["ルチャブル",   "メガルチャブル"],
-    ["ヒードラン",   "メガヒードラン"],
-    ["ダークライ",   "メガダークライ"],
-    ["ゼラオラ",     "メガゼラオラ"],
-    ["タイレーツ",   "メガタイレーツ"],
-    ["スコヴィラン", "メガスコヴィラン"],
-    ["キラフロル",   "メガキラフロル"],
-    ["セグレイブ",   "メガセグレイブ"],
-    ["ケケンカニ",   "メガケケンカニ"],
-    ["グソクムシャ", "メガグソクムシャ"],
-    ["ジジーロン",   "メガジジーロン"],
-    ["マギアナ",     "メガマギアナ"],
-    # ── Floette: default form is えいえんのはな; Mega requires Floettite
-    ["フラエッテ (えいえんのはな)", "メガフラエッテ"],
-    # ── Primals
-    ["グラードン",   "ゲンシグラードン"],
-    ["カイオーガ",   "ゲンシカイオーガ"],
-    ["レックウザ",   "メガレックウザ"],
-    # ── Battle-only form changes (display_name = DB name_ja or "DB名 (フォルム名)")
-    ["ギルガルド",              "ギルガルド (ブレードフォルム)"],
-    ["チェリム",                "チェリム (ポジフォルム)"],
-    ["メロエッタ",              "メロエッタ (ステップフォルム)"],
-    ["ヒヒダルマ",              "ヒヒダルマ (ダルマモード)"],
-    ["ガラルヒヒダルマ",        "ガラルヒヒダルマ (ダルマモード)"],
-    ["ジガルデ",                "ジガルデ (１０％フォルム)", "ジガルデ (パーフェクトフォルム)", "メガジガルデ"],
-    ["モルペコ",                "モルペコ (はらぺこもよう)"],
-    ["コオリッポ",              "コオリッポ (ナイスフェイス)"],
-    ["メテノ",                  "メテノ (あかいろのコア)"],
-    ["ヨワシ",                  "ヨワシ (むれたすがた)"],
-    ["イルカマン",              "イルカマン (マイティフォルム)"],
-    ["ポワルン",                "ポワルン (たいようのすがた)", "ポワルン (あまみずのすがた)", "ポワルン (ゆきぐものすがた)"],
-    ["テラパゴス",              "テラパゴス (テラスタルフォルム)", "テラパゴス (ステラフォルム)"],
-]
-
-_FORM_NAME_TO_GROUP: dict[str, list[str]] = {
-    name: group for group in _FORM_GROUPS for name in group
-}
-# Spacing-normalized aliases so name_ja variants with no space before "(" still resolve.
-# Also cover the usage-scraper short form "フラエッテ(えいえん)" (without のはな).
-_FLOETTE_ETERNAL_GROUP = _FORM_NAME_TO_GROUP.get("フラエッテ (えいえんのはな)")
-if _FLOETTE_ETERNAL_GROUP is not None:
-    _FORM_NAME_TO_GROUP["フラエッテ(えいえんのはな)"] = _FLOETTE_ETERNAL_GROUP
-    _FORM_NAME_TO_GROUP["フラエッテ(えいえん)"] = _FLOETTE_ETERNAL_GROUP
-    _FORM_NAME_TO_GROUP["フラエッテ (えいえん)"] = _FLOETTE_ETERNAL_GROUP
-
-# Canonical display name: group内のname_ja → UIカード表示名
-# DBのname_ja（= group[0]）がフォルム名を含まない場合のみ登録
-_FORM_CANONICAL_NAME: dict[str, str] = {
-    "ギルガルド":   "ギルガルド (シールドフォルム)",
-    "チェリム":     "チェリム (ネガフォルム)",
-    "メロエッタ":   "メロエッタ (ボイスフォルム)",
-    "ジガルデ":     "ジガルデ (５０％フォルム)",
-    "モルペコ":     "モルペコ (まんぷくもよう)",
-    "コオリッポ":   "コオリッポ (アイスフェイス)",
-    "メテノ":       "メテノ (りゅうせいのすがた)",
-    "ヨワシ":       "ヨワシ (たんどくのすがた)",
-    "イルカマン":   "イルカマン (ナイーブフォルム)",
-    "ポワルン":     "ポワルン (ポワルンのすがた)",
-    # Floette eternal: normalize spacing/shorthand variants for display
-    "フラエッテ(えいえんのはな)": "フラエッテ (えいえんのはな)",
-    "フラエッテ(えいえん)": "フラエッテ (えいえんのはな)",
-    "フラエッテ (えいえん)": "フラエッテ (えいえんのはな)",
-    # Paldea Tauros breed display names
-    "パルデアケンタロス(格闘)": "パルデアケンタロス(格闘)",
-    "パルデアケンタロス(炎)": "パルデアケンタロス(炎)",
-    "パルデアケンタロス(水)": "パルデアケンタロス(水)",
-}
+# Form groups moved to src/ui/damage_panel_forms.py
 
 # PokeAPI english names for non-base forms
 _FORM_POKEAPI_EN: dict[str, str] = {
@@ -627,6 +202,9 @@ _FORM_POKEAPI_EN: dict[str, str] = {
     "ヨワシ (むれたすがた)":             "wishiwashi-school",
     "イルカマン":                        "palafin-zero",
     "イルカマン (マイティフォルム)":     "palafin-hero",
+    "テラパゴス":                        "terapagos-normal",
+    "テラパゴス (テラスタルフォルム)":   "terapagos-terastal",
+    "テラパゴス (ステラフォルム)":       "terapagos-stellar",
     "ポワルン (たいようのすがた)":       "castform-sunny",
     "ポワルン (あまみずのすがた)":       "castform-rainy",
     "ポワルン (ゆきぐものすがた)":       "castform-snowy",
@@ -755,6 +333,9 @@ _FORM_ABILITY_JA: dict[str, str] = {
     # battle-only form changes with ability change
     "ヒヒダルマ (ダルマモード)":              "ダルマモード",
     "ヒヒダルマ (ガラルのすがた・ダルマモード)": "ダルマモード",
+    "テラパゴス":                             "テラスチェンジ",
+    "テラパゴス (テラスタルフォルム)":        "テラスシェル",
+    "テラパゴス (ステラフォルム)":            "ゼロフォーミング",
     "オーガポン":                             "みどりのめん",
     "オーガポン (いどのめん)":               "いどのめん",
     "オーガポン (かまどのめん)":             "かまどのめん",
@@ -817,164 +398,33 @@ _FORM_MISSING_MEGA_STATS: dict[str, tuple] = {
 
 
 def _normalize_form_name(name_ja: str) -> str:
-    """Return the canonical form group key for name_ja, resolving spacing variants."""
-    if name_ja in _FORM_NAME_TO_GROUP:
-        return name_ja
-    # Try adding a space before '(' so 'フラエッテ(えいえんのはな)' → 'フラエッテ (えいえんのはな)'
-    import re as _re
-    spaced = _re.sub(r"(?<!\s)\(", " (", name_ja)
-    if spaced != name_ja and spaced in _FORM_NAME_TO_GROUP:
-        return spaced
-    return name_ja
+    from src.ui.damage_panel_forms import normalize_form_name
+
+    return normalize_form_name(name_ja, _FORM_NAME_TO_GROUP)
 
 
 def _form_group(name_ja: str) -> list[str]:
-    return _FORM_NAME_TO_GROUP.get(_normalize_form_name(name_ja), [])
+    from src.ui.damage_panel_forms import form_group
+
+    return form_group(name_ja, _FORM_NAME_TO_GROUP)
 
 
 def _next_form_name(name_ja: str) -> Optional[str]:
-    key = _normalize_form_name(name_ja)
-    group = _FORM_NAME_TO_GROUP.get(key)
-    if not group or len(group) < 2:
-        return None
-    idx = group.index(key) if key in group else 0
-    return group[(idx + 1) % len(group)]
+    from src.ui.damage_panel_forms import next_form_name
+
+    return next_form_name(name_ja, _FORM_NAME_TO_GROUP)
 
 
 def _apply_form(p: "PokemonInstance", form_name: str, original_ability: str = "") -> "PokemonInstance":
-    """Return a new PokemonInstance with form_name's stats/types/ability, same EVs/nature/moves."""
-    import copy as _copy
-    from src.data.database import get_species_by_name_ja
-    from src.calc.damage_calc import calc_stat
-    from src.calc.smogon_bridge import smogon_mega_species
-
-    new_p = _copy.deepcopy(p)
-    new_p.name_ja = form_name
-    group = _FORM_NAME_TO_GROUP.get(form_name)
-    new_p.usage_name = group[0] if group else (p.usage_name or p.name_ja)
-
-    en = _FORM_POKEAPI_EN.get(form_name, "")
-    if en:
-        # フォルム名が _FORM_POKEAPI_EN に登録されている場合は直接PokeAPIから取得して正確なstatsを使う
-        species = _species_from_name_en(en, name_ja=form_name)
-        # Fallback: use hardcoded stats for megas absent from PokeAPI
-        if species is None and form_name.startswith("メガ"):
-            smogon_name = smogon_mega_species(en, form_name)
-            fb = _FORM_MISSING_MEGA_STATS.get(smogon_name)
-            if fb:
-                fb_en, fb_t1, fb_t2, fb_hp, fb_atk, fb_def, fb_spa, fb_spd, fb_spe, fb_wt = fb
-                species = SpeciesInfo(
-                    species_id=p.species_id if hasattr(p, "species_id") else 0,
-                    name_ja=form_name, name_en=fb_en,
-                    type1=fb_t1, type2=fb_t2,
-                    base_hp=fb_hp, base_attack=fb_atk, base_defense=fb_def,
-                    base_sp_attack=fb_spa, base_sp_defense=fb_spd, base_speed=fb_spe,
-                    weight_kg=fb_wt,
-                )
-    else:
-        species = get_species_by_name_ja(form_name)
-        # Fallback for Mega forms absent from DB: use hardcoded stats
-        if species is None and form_name.startswith("メガ"):
-            base_ja = form_name[2:]  # strip メガ prefix
-            base_species = get_species_by_name_ja(base_ja)
-            smogon_name = smogon_mega_species(base_species.name_en or "" if base_species else "", form_name)
-            fb = _FORM_MISSING_MEGA_STATS.get(smogon_name)
-            if fb:
-                fb_en, fb_t1, fb_t2, fb_hp, fb_atk, fb_def, fb_spa, fb_spd, fb_spe, fb_wt = fb
-                species = SpeciesInfo(
-                    species_id=p.species_id if hasattr(p, "species_id") else 0,
-                    name_ja=form_name, name_en=fb_en,
-                    type1=fb_t1, type2=fb_t2,
-                    base_hp=fb_hp, base_attack=fb_atk, base_defense=fb_def,
-                    base_sp_attack=fb_spa, base_sp_defense=fb_spd, base_speed=fb_spe,
-                    weight_kg=fb_wt,
-                )
-
-    if species:
-        new_p.name_en = species.name_en or new_p.name_en
-        new_p.types = [t for t in [species.type1, species.type2] if t]
-        new_p.weight_kg = species.weight_kg
-        lv = new_p.level or 50
-        nat = new_p.nature or ""
-        new_p.hp = calc_stat(species.base_hp, 31, new_p.ev_hp or 0, level=lv, is_hp=True)
-        new_p.attack = calc_stat(species.base_attack, 31, new_p.ev_attack or 0, level=lv,
-                                  nature_mult=_nature_mult_from_name(nat, "attack"))
-        new_p.defense = calc_stat(species.base_defense, 31, new_p.ev_defense or 0, level=lv,
-                                   nature_mult=_nature_mult_from_name(nat, "defense"))
-        new_p.sp_attack = calc_stat(species.base_sp_attack, 31, new_p.ev_sp_attack or 0, level=lv,
-                                     nature_mult=_nature_mult_from_name(nat, "sp_attack"))
-        new_p.sp_defense = calc_stat(species.base_sp_defense, 31, new_p.ev_sp_defense or 0, level=lv,
-                                      nature_mult=_nature_mult_from_name(nat, "sp_defense"))
-        new_p.speed = calc_stat(species.base_speed, 31, new_p.ev_speed or 0, level=lv,
-                                 nature_mult=_nature_mult_from_name(nat, "speed"))
-        new_p.max_hp = new_p.hp
-        new_p.current_hp = new_p.hp
-
-    ability = _FORM_ABILITY_JA.get(form_name)
-    if ability:
-        new_p.ability = ability
-    elif original_ability:
-        new_p.ability = original_ability
-
-    return new_p
-
-
-_POKEAPI_SPECIES_CACHE_BY_NAME_EN: dict[str, SpeciesInfo | None] = {}
-_POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "PokemonDamageCalc/1.0"
-
-
-def _species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -> SpeciesInfo | None:
-    key = (name_en or "").strip().lower()
-    if not key:
-        return None
-    if key in _POKEAPI_SPECIES_CACHE_BY_NAME_EN:
-        return _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key]
-    try:
-        response = _POKEAPI_SESSION.get("{}/pokemon/{}".format(POKEAPI_BASE, key), timeout=15)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
-            return None
-    except Exception:
-        _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
-        return None
-
-    type_rows = payload.get("types")
-    type_names: list[str] = []
-    if isinstance(type_rows, list):
-        for row in sorted(type_rows, key=lambda x: int((x or {}).get("slot") or 99)):
-            type_name = str(((row or {}).get("type") or {}).get("name") or "").strip()
-            if type_name:
-                type_names.append(type_name)
-
-    stats_map: dict[str, int] = {}
-    for row in payload.get("stats") or []:
-        stat_name = str(((row or {}).get("stat") or {}).get("name") or "").strip()
-        if not stat_name:
-            continue
-        try:
-            stats_map[stat_name] = int(row.get("base_stat") or 0)
-        except Exception:
-            stats_map[stat_name] = 0
-
-    resolved = SpeciesInfo(
-        species_id=species_id or 0,
-        name_ja=name_ja or key,
-        name_en=key,
-        type1=type_names[0] if len(type_names) >= 1 else "normal",
-        type2=type_names[1] if len(type_names) >= 2 else "",
-        base_hp=stats_map.get("hp", 0),
-        base_attack=stats_map.get("attack", 0),
-        base_defense=stats_map.get("defense", 0),
-        base_sp_attack=stats_map.get("special-attack", 0),
-        base_sp_defense=stats_map.get("special-defense", 0),
-        base_speed=stats_map.get("speed", 0),
-        weight_kg=float(payload.get("weight") or 0) / 10.0,
+    return _apply_form_impl(
+        pokemon=p,
+        form_name=form_name,
+        original_ability=original_ability,
+        form_name_to_group=_FORM_NAME_TO_GROUP,
+        form_pokeapi_en=_FORM_POKEAPI_EN,
+        form_missing_mega_stats=_FORM_MISSING_MEGA_STATS,
+        form_ability_ja=_FORM_ABILITY_JA,
     )
-    _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = resolved
-    return resolved
 
 
 # ── Resist berry: Japanese name → type ───────────────────────────────────
@@ -1001,1854 +451,18 @@ _RESIST_BERRIES: dict[str, str] = {
 
 # ── Simple toggle button ──────────────────────────────────────────────────
 
-class _ToggleBtn(QPushButton):
-    def __init__(
-        self,
-        text: str,
-        parent=None,
-        font_size: int = 14,
-        pad_h: int = 8,
-        pad_v: int = 4,
-        cond_style: bool = False,
-    ):
-        super().__init__(text, parent)
-        self._font_size = int(font_size)
-        self._pad_h = int(pad_h)
-        self._pad_v = int(pad_v)
-        self._cond_style = cond_style
-        self.setCheckable(True)
-        self.toggled.connect(lambda _: self._refresh())
-        self._refresh()
-
-    def set_metrics(
-        self,
-        *,
-        font_size: Optional[int] = None,
-        pad_h: Optional[int] = None,
-        pad_v: Optional[int] = None,
-    ) -> None:
-        if font_size is not None:
-            self._font_size = int(font_size)
-        if pad_h is not None:
-            self._pad_h = int(pad_h)
-        if pad_v is not None:
-            self._pad_v = int(pad_v)
-        self._refresh()
-
-    def _refresh(self) -> None:
-        if self.isChecked():
-            if self._cond_style:
-                self.setStyleSheet(
-                    "QPushButton{{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
-                    "border-radius:4px;padding:{}px {}px;font-weight:bold;font-size:{}px;}}".format(
-                        self._pad_v, self._pad_h, self._font_size))
-            else:
-                self.setStyleSheet(
-                    "QPushButton{{background:#89b4fa;color:#1e1e2e;border:none;"
-                    "border-radius:4px;padding:{}px {}px;font-weight:bold;font-size:{}px;}}".format(
-                        self._pad_v, self._pad_h, self._font_size))
-        elif self._cond_style:
-            self.setStyleSheet(
-                "QPushButton{{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:{}px {}px;font-size:{}px;}}".format(
-                    self._pad_v, self._pad_h, self._font_size))
-        else:
-            self.setStyleSheet(
-                "QPushButton{{background:#313244;color:#cdd6f4;border:1px solid #45475a;"
-                "border-radius:4px;padding:{}px {}px;font-size:{}px;}}".format(
-                    self._pad_v, self._pad_h, self._font_size))
-
-
-class _RadioGroup(QWidget):
-    """Row of mutually exclusive toggle buttons."""
-    changed = pyqtSignal()
-
-    def __init__(self, options: list[str], parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 2)
-        layout.setSpacing(3)
-        self._btns: dict[str, _ToggleBtn] = {}
-        self._value = "none"
-        for lbl in options:
-            btn = _ToggleBtn(lbl)
-            btn.setFixedHeight(28)
-            btn.clicked.connect(lambda _, l=lbl: self._click(l))
-            layout.addWidget(btn)
-            self._btns[lbl] = btn
-        layout.addStretch()
-
-    def set_button_metrics(
-        self,
-        *,
-        font_size: int = 14,
-        height: int = 30,
-        min_width: int = 62,
-        pad_h: int = 8,
-        pad_v: int = 3,
-    ) -> None:
-        for btn in self._btns.values():
-            btn.set_metrics(font_size=font_size, pad_h=pad_h, pad_v=pad_v)
-            btn.setFixedHeight(height)
-            btn.setMinimumWidth(min_width)
-
-    def _click(self, label: str) -> None:
-        was = self._value
-        for l, b in self._btns.items():
-            b.blockSignals(True)
-            b.setChecked(l == label and was != label)
-            b.blockSignals(False)
-            b._refresh()
-        self._value = "none" if was == label else label
-        self.changed.emit()
-
-    def value(self) -> str:
-        return self._value
-
-    def set_value(self, val: str) -> None:
-        self._value = val
-        for l, b in self._btns.items():
-            b.blockSignals(True)
-            b.setChecked(l == val)
-            b.blockSignals(False)
-            b._refresh()
-
-
-# ── Inline damage bar ─────────────────────────────────────────────────────
-
-class _DmgBar(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(16)
-        self._mn = 0.0
-        self._mx = 0.0
-        self._error_mode = False
-        self._empty = True   # True = no data, draw blank
-
-    def set_range(self, mn: float, mx: float) -> None:
-        self._mn = max(0.0, mn)
-        self._mx = min(200.0, mx)
-        self._empty = False
-        self.update()
-
-    def set_empty(self) -> None:
-        self._empty = True
-        self._mn = self._mx = 0.0
-        self.update()
-
-    def set_error_mode(self, error: bool) -> None:
-        self._error_mode = error
-        self._empty = False
-        self.update()
-
-    def paintEvent(self, _) -> None:
-        p = QPainter(self)
-        w, h = self.width(), self.height()
-        if self._empty:
-            p.fillRect(0, 0, w, h, QColor("#1e1e2e"))
-            p.setPen(QColor("#45475a"))
-            p.drawRect(0, 0, w - 1, h - 1)
-            return
-        if self._error_mode:
-            p.fillRect(0, 0, w, h, QColor("#f38ba8"))
-            p.setPen(QColor("#000000"))
-            p.drawRect(0, 0, w - 1, h - 1)
-            return
-        mn = max(0.0, self._mn)
-        mx = max(0.0, self._mx)
-        mn_draw = min(100.0, mn)
-        mx_draw = min(100.0, mx)
-
-        # 残HPバーを先に描画（緑/黄/赤）。
-        remaining_worst = max(0.0, 100.0 - mx_draw)
-        hp_color = QColor(_hp_color(remaining_worst))
-        p.fillRect(0, 0, w, h, hp_color)
-
-        # 被ダメージは右側を黒系で塗る（保証分＋乱数幅）。
-        if mx_draw <= 0:
-            p.setPen(QColor("#000000"))
-            p.drawRect(0, 0, w - 1, h - 1)
-            return
-        s = w / 100.0
-        guaranteed_w = int(mn_draw * s)
-        uncertain_w = int(max(0.0, mx_draw - mn_draw) * s)
-        dmg_color = QColor("#101015")
-        var_color = QColor(_bar_variation_color(mn, mx))
-        var_color.setAlpha(235)
-
-        if uncertain_w > 0:
-            p.fillRect(
-                max(0, w - guaranteed_w - uncertain_w),
-                0,
-                min(w, uncertain_w),
-                h,
-                QBrush(var_color),
-            )
-        if guaranteed_w > 0:
-            p.fillRect(max(0, w - guaranteed_w), 0, min(w, guaranteed_w), h, QBrush(dmg_color))
-
-        p.setPen(QColor("#000000"))
-        p.drawRect(0, 0, w - 1, h - 1)
-
-
-# ── One damage bar row (カスタム / HBD0 / HBD32) ────────────────────────
-
-class _DmgRow(QWidget):
-    def __init__(self, tag: str, color: str = "#45475a", parent=None):
-        super().__init__(parent)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(1)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(6)
-        self._tag_lbl = QLabel(tag)
-        self._tag_lbl.setFixedSize(52, 18)
-        self._tag_lbl.setAlignment(Qt.AlignCenter)
-        self._tag_lbl.setStyleSheet(
-            "color:#1e1e2e;background:{};border-radius:3px;"
-            "font-size:11px;font-weight:bold;".format(color)
-        )
-        top.addWidget(self._tag_lbl)
-
-        self._bar = _DmgBar()
-        top.addWidget(self._bar, 1)
-        root.addLayout(top)
-
-        bottom = QVBoxLayout()
-        bottom.setContentsMargins(0, 0, 0, 0)
-        bottom.setSpacing(0)
-
-        ko_row = QHBoxLayout()
-        ko_row.setContentsMargins(0, 0, 0, 0)
-        ko_row.setSpacing(6)
-        spacer = QLabel("")
-        spacer.setFixedWidth(52)
-        ko_row.addWidget(spacer)
-        self._ko_txt = QLabel("")
-        self._ko_txt.setStyleSheet("font-size:14px;color:#f9e2af;font-weight:bold;")
-        ko_row.addWidget(self._ko_txt)
-        self._detail_txt = QLabel("---")
-        self._detail_txt.setStyleSheet("font-size:14px;color:#cdd6f4;")
-        ko_row.addWidget(self._detail_txt)
-        ko_row.addStretch()
-        bottom.addLayout(ko_row)
-
-        root.addLayout(bottom)
-
-    def set_damage(self, min_dmg: int, max_dmg: int, hp: int) -> None:
-        self._bar.set_error_mode(False)
-        if hp <= 0:
-            self._detail_txt.setText("---")
-            self._ko_txt.setText("")
-            self._bar.set_range(0, 0)
-            return
-        mn_pct = _round1(min_dmg / hp * 100)
-        mx_pct = _round1(max_dmg / hp * 100)
-        self._bar.set_range(mn_pct, mx_pct)
-        if max_dmg == 0:
-            self._detail_txt.setText("0-0 (0.0~0.0%)")
-            self._detail_txt.setStyleSheet("font-size:14px;color:#585b70;")
-            self._ko_txt.setText("")
-            return
-        hits_str = _n_hit_ko(min_dmg, max_dmg, hp)
-        self._detail_txt.setText("{}-{} ({:.1f}~{:.1f}%)".format(min_dmg, max_dmg, mn_pct, mx_pct))
-        self._ko_txt.setText(hits_str)
-        color = _bar_color(mn_pct, mx_pct)
-        self._detail_txt.setStyleSheet("font-size:14px;color:{};".format(color))
-        self._ko_txt.setStyleSheet("font-size:14px;color:{};font-weight:bold;".format(color))
-
-    def set_no_damage(self, reason: str = "ダメージなし") -> None:
-        self._bar.set_error_mode(False)
-        if reason == "ダメージなし":
-            self._detail_txt.setText("0-0 (0.0~0.0%)")
-        else:
-            self._detail_txt.setText(reason)
-        self._detail_txt.setStyleSheet("font-size:14px;color:#585b70;")
-        self._ko_txt.setText("")
-        self._bar.set_range(0, 0)
-
-    def set_error(self, reason: str = "計算エラー") -> None:
-        self._bar.set_error_mode(True)
-        self._detail_txt.setText(reason)
-        self._detail_txt.setStyleSheet("font-size:14px;color:#f38ba8;font-weight:bold;")
-        self._ko_txt.setText("")
-
-
-# ── One move section ──────────────────────────────────────────────────────
-
-class _MoveSection(QWidget):
-    """Header + damage bars for a single move slot (self or opponent)."""
-    move_change_requested = pyqtSignal(int)   # slot index
-
-    # row_labels: (custom_label, bulk0_label, bulk32_label)
-    _LEFT_LABELS  = ("使用率", "HBD 0", "HBD 32")
-    _RIGHT_LABELS = ("使用率",   "AC 0",  "AC 32")
-
-    def __init__(self, slot: int, right_side: bool = False, parent=None):
-        super().__init__(parent)
-        self._slot = slot
-        self._right_side = right_side
-        self._move: Optional[MoveInfo] = None
-        self._last_move_name = ""
-        self._details_visible = False
-        self._has_extra_controls = False
-        self._has_modifier_notes = False
-        self._show_bulk_rows = True
-
-        labels = self._RIGHT_LABELS if right_side else self._LEFT_LABELS
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 2, 8, 2)
-        layout.setSpacing(2)
-
-        self._header_wrap = QFrame()
-        self._header_wrap.setCursor(Qt.PointingHandCursor)
-        self._header_wrap.setStyleSheet(
-            "QFrame{background:transparent;border:1px solid transparent;border-radius:5px;}"
-            "QFrame:hover{border-color:#45475a;}"
-        )
-        self._header_wrap.mousePressEvent = lambda _: self._toggle_detail_visibility()
-        hdr = QHBoxLayout(self._header_wrap)
-        hdr.setContentsMargins(4, 2, 4, 2)
-        hdr.setSpacing(4)
-
-        # タイプとカテゴリをグループ化
-        type_cat_wrap = QWidget()
-        type_cat_row = QHBoxLayout(type_cat_wrap)
-        type_cat_row.setContentsMargins(0, 0, 0, 0)
-        type_cat_row.setSpacing(4)
-        self._type_lbl = QLabel("")
-        self._type_lbl.setFixedWidth(48)
-        self._type_lbl.setFixedHeight(22)
-        self._type_lbl.setAlignment(Qt.AlignCenter)
-        self._type_lbl.setStyleSheet(
-            "border-radius:3px;color:white;font-size:11px;font-weight:bold;"
-            "border:2px solid #45475a;"
-        )
-        self._type_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        type_cat_row.addWidget(self._type_lbl)
-
-        self._cat_icon_lbl = QLabel("")
-        self._cat_icon_lbl.setFixedSize(48, 22)
-        self._cat_icon_lbl.setAlignment(Qt.AlignCenter)
-        self._cat_icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        type_cat_row.addWidget(self._cat_icon_lbl)
-        hdr.addWidget(type_cat_wrap)
-
-        self._name_lbl = QLabel("（未設定）")
-        self._name_lbl.setStyleSheet("font-weight:bold;font-size:15px;")
-        self._name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        hdr.addWidget(self._name_lbl, 1)
-
-        self._expand_lbl = QLabel("▼")
-        self._expand_lbl.setFixedWidth(14)
-        self._expand_lbl.setAlignment(Qt.AlignCenter)
-        self._expand_lbl.setStyleSheet("font-size:12px;color:#a6adc8;")
-        self._expand_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        hdr.addWidget(self._expand_lbl)
-
-        chg_btn = QPushButton("わざ変更")
-        chg_btn.setFixedSize(60, 22)
-        chg_btn.setStyleSheet(
-            "QPushButton{background:#313244;border:1px solid #89b4fa;color:#89b4fa;"
-            "font-weight:bold;border-radius:4px;font-size:12px;padding:0px;margin:0px;}"
-            "QPushButton:hover{background:#3b3240;}"
-        )
-        chg_btn.clicked.connect(lambda: self.move_change_requested.emit(self._slot))
-        hdr.addWidget(chg_btn, 0, Qt.AlignVCenter)
-        layout.addWidget(self._header_wrap)
-
-        # 詳細情報
-        if True:
-            self._stats_wrap = QWidget()
-            stat_row = QHBoxLayout(self._stats_wrap)
-            stat_row.setContentsMargins(5, 0, 0, 0)
-            stat_row.setSpacing(6)
-            self._pow_btn = QPushButton("威力")
-            self._pow_btn.setFixedSize(40, 2)
-            self._pow_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #D87C31;color:#D87C31;"
-                "font-weight:bold;border-radius:4px;font-size:12px;padding:0px;margin:0px;}"
-            )
-            self._pow_btn.setAttribute(Qt.WA_TransparentForMouseEvents)
-            stat_row.addWidget(self._pow_btn, 0, Qt.AlignVCenter)
-            self._pow_lbl = QLabel("---")
-            self._pow_lbl.setMinimumWidth(30)
-            self._pow_lbl.setStyleSheet("font-size:14px;color:#cdd6f4;font-weight:bold;")
-            self._pow_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-            stat_row.addWidget(self._pow_lbl, 0, Qt.AlignVCenter)
-            self._acc_btn = QPushButton("命中")
-            self._acc_btn.setFixedSize(40, 22)
-            self._acc_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #4ECDC4;color:#4ECDC4;"
-                "font-weight:bold;border-radius:4px;font-size:12px;padding:0px;margin:0px;}"
-            )
-            self._acc_btn.setAttribute(Qt.WA_TransparentForMouseEvents)
-            stat_row.addWidget(self._acc_btn, 0, Qt.AlignVCenter)
-            self._acc_lbl = QLabel("---")
-            self._acc_lbl.setMinimumWidth(30)
-            self._acc_lbl.setStyleSheet("font-size:14px;color:#cdd6f4;font-weight:bold;")
-            self._acc_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-            stat_row.addWidget(self._acc_lbl, 0, Qt.AlignVCenter)
-            self._eff_lbl = QLabel("")
-            self._eff_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self._eff_lbl.setWordWrap(True)
-            self._eff_lbl.setStyleSheet("font-size:14px;color:#a6adc8;font-weight:bold;")
-            stat_row.addWidget(self._eff_lbl, 1)
-            layout.addWidget(self._stats_wrap, 0, Qt.AlignVCenter)
-
-            self._extra_wrap = QWidget()
-            extra = QVBoxLayout(self._extra_wrap)
-            extra.setContentsMargins(58, 0, 0, 0)
-            extra.setSpacing(2)
-            pow_row = QHBoxLayout()
-            pow_row.setContentsMargins(0, 0, 0, 0)
-            pow_row.setSpacing(8)
-            self._pow_opt_lbl = QLabel("威力設定:")
-            self._pow_opt_lbl.setStyleSheet("font-size:13px;color:#a6adc8;")
-            self._pow_opt_lbl.setFixedWidth(60)
-            pow_row.addWidget(self._pow_opt_lbl)
-            self._pow_combo = QComboBox()
-            self._pow_combo.setFixedWidth(222)
-            self._pow_combo.setFixedHeight(28)
-            self._pow_combo.setVisible(False)
-            pow_row.addWidget(self._pow_combo)
-            pow_row.addStretch()
-            extra.addLayout(pow_row)
-            hit_row = QHBoxLayout()
-            hit_row.setContentsMargins(0, 0, 0, 0)
-            hit_row.setSpacing(8)
-            self._hit_opt_lbl = QLabel("ヒット設定:")
-            self._hit_opt_lbl.setStyleSheet("font-size:13px;color:#a6adc8;")
-            self._hit_opt_lbl.setFixedWidth(60)
-            hit_row.addWidget(self._hit_opt_lbl)
-            self._hit_spin = QSpinBox()
-            self._hit_spin.setRange(1, 10)
-            self._hit_spin.setFixedWidth(150)
-            self._hit_spin.setFixedHeight(28)
-            self._hit_spin.setPrefix("ヒット ")
-            self._hit_spin.setSuffix(" 回")
-            self._hit_spin.setVisible(False)
-            hit_row.addWidget(self._hit_spin)
-            hit_row.addStretch()
-            extra.addLayout(hit_row)
-            self._extra_wrap.setVisible(False)
-            layout.addWidget(self._extra_wrap)
-
-            self._mod_lbl = QLabel("")
-            self._mod_lbl.setWordWrap(True)
-            self._mod_lbl.setStyleSheet("font-size:12px;color:#89b4fa;padding-left:58px;")
-            self._mod_lbl.setVisible(False)
-            layout.addWidget(self._mod_lbl)
-
-        # ダメージ行
-        self._row_custom = _DmgRow(labels[0], color="#89b4fa")
-        self._row_hbd0   = _DmgRow(labels[1], color="#a6e3a1")
-        self._row_hbd252 = _DmgRow(labels[2], color="#fab387")
-        layout.addWidget(self._row_custom)
-        layout.addWidget(self._row_hbd0)
-        layout.addWidget(self._row_hbd252)
-
-        self._status_note = QLabel("変化わざ")
-        self._status_note.setStyleSheet("font-size:14px;color:#a6adc8;padding-left:64px;")
-        self._status_note.setVisible(False)
-        layout.addWidget(self._status_note)
-
-        layout.addStretch()
-        self._apply_detail_visibility()
-
-    def set_bulk_rows_visible(self, visible: bool) -> None:
-        self._show_bulk_rows = bool(visible)
-        is_status = self._move is not None and self._move.category == "status"
-        show = self._show_bulk_rows and not is_status
-        self._row_hbd0.setVisible(show)
-        self._row_hbd252.setVisible(show)
-
-    def _toggle_detail_visibility(self) -> None:
-        if self._move is None:
-            return
-        self._details_visible = not self._details_visible
-        self._apply_detail_visibility()
-
-    def _apply_detail_visibility(self) -> None:
-        visible = self._details_visible and (self._move is not None)
-        self._stats_wrap.setVisible(visible)
-        self._extra_wrap.setVisible(visible and self._has_extra_controls)
-        self._mod_lbl.setVisible(visible and self._has_modifier_notes)
-        self._expand_lbl.setText("▲" if visible else "▼")
-
-    def _set_power_options(self, options: list[tuple[str, object]], preferred_data: object) -> None:
-        self._pow_combo.blockSignals(True)
-        self._pow_combo.clear()
-        selected_index = 0
-        preferred_power = _power_option_value(preferred_data)
-        exact_index = -1
-        power_index = -1
-        for index, (label, option_data) in enumerate(options):
-            self._pow_combo.addItem(label, option_data)
-            if preferred_data is not None and option_data == preferred_data and exact_index < 0:
-                exact_index = index
-            if preferred_power > 0 and _power_option_value(option_data) == preferred_power and power_index < 0:
-                power_index = index
-        if exact_index >= 0:
-            selected_index = exact_index
-        elif power_index >= 0:
-            selected_index = power_index
-        if self._pow_combo.count() > 0:
-            self._pow_combo.setCurrentIndex(selected_index)
-        self._pow_combo.blockSignals(False)
-
-    def setup_move(self, move: Optional[MoveInfo]) -> None:
-        prev_pow_data = self._pow_combo.currentData()
-        prev_hit = self._hit_spin.value()
-        prev_is_var = not self._pow_combo.isHidden()
-        prev_is_multi = not self._hit_spin.isHidden()
-        self._move = move
-        if move is None:
-            self._last_move_name = ""
-            self._details_visible = False
-            self._type_lbl.setText("")
-            self._type_lbl.setStyleSheet("border-radius:3px;color:white;font-size:13px;font-weight:bold;border:2px solid #45475a;")
-            self._name_lbl.setText("（未設定）")
-            self._cat_icon_lbl.clear()
-            self._pow_lbl.setText("---")
-            self._acc_lbl.setText("---")
-            self._eff_lbl.setText("")
-            self._pow_combo.setVisible(False)
-            self._pow_opt_lbl.setVisible(False)
-            self._hit_spin.setVisible(False)
-            self._hit_opt_lbl.setVisible(False)
-            self._has_extra_controls = False
-            self._has_modifier_notes = False
-            self._status_note.setVisible(False)
-            self._row_custom.setVisible(True)
-            self._row_custom.set_no_damage("---")
-            self._row_hbd0.setVisible(self._show_bulk_rows)
-            self._row_hbd0.set_no_damage("---")
-            self._row_hbd252.setVisible(self._show_bulk_rows)
-            self._row_hbd252.set_no_damage("---")
-            self._apply_detail_visibility()
-            return
-
-        from src.ui.ui_utils import type_pixmap as _type_pm
-        _pm = _type_pm(move.type_name, 48, 22)
-        if _pm:
-            self._type_lbl.setPixmap(_pm)
-            self._type_lbl.setText("")
-            self._type_lbl.setStyleSheet("border-radius:3px;border:2px solid #45475a;")
-        else:
-            type_ja = TYPE_EN_TO_JA.get(move.type_name, move.type_name)
-            color = TYPE_COLORS.get(move.type_name, "#888888")
-            self._type_lbl.setPixmap(QPixmap())
-            self._type_lbl.setText(type_ja)
-            self._type_lbl.setStyleSheet(
-                "background-color:{};border-radius:3px;color:white;"
-                "font-size:11px;font-weight:bold;border:2px solid #45475a;".format(color))
-        self._cat_icon_lbl.setPixmap(_category_icon(move.category, 66, 22))
-        self._name_lbl.setText(move.name_ja)
-        same_move = self._last_move_name == move.name_ja
-        if not same_move:
-            self._details_visible = False
-
-        self._pow_lbl.setText(str(move.power) if move.power else "---")
-        self._acc_lbl.setText(str(move.accuracy) if move.accuracy else "---")
-        self._eff_lbl.setText("")
-        self._has_modifier_notes = False
-        self._status_note.setVisible(False)
-
-        options = _variable_power_options(move)
-        if options:
-            default_data = options[0][1]
-            next_data = prev_pow_data if (same_move and prev_is_var and prev_pow_data is not None) else default_data
-            self._set_power_options(options, next_data)
-            self._pow_combo.setVisible(True)
-            self._pow_opt_lbl.setVisible(True)
-            self._pow_lbl.setText(str(self.power_override()))
-        else:
-            self._pow_combo.setVisible(False)
-            self._pow_opt_lbl.setVisible(False)
-
-        if move.name_ja in MULTI_HIT_MOVES_JA:
-            mn, mx, default = MULTI_HIT_MOVES_JA[move.name_ja]
-            self._hit_spin.blockSignals(True)
-            self._hit_spin.setRange(mn, mx)
-            next_hit = prev_hit if (same_move and prev_is_multi) else default
-            self._hit_spin.setValue(max(mn, min(mx, next_hit)))
-            self._hit_spin.blockSignals(False)
-            self._hit_spin.setVisible(True)
-            self._hit_opt_lbl.setVisible(True)
-        else:
-            self._hit_spin.setVisible(False)
-            self._hit_opt_lbl.setVisible(False)
-
-        self._has_extra_controls = (not self._pow_combo.isHidden()) or (not self._hit_spin.isHidden())
-
-        self._last_move_name = move.name_ja
-        self._apply_detail_visibility()
-
-    def _set_all_no_damage(self, reason: str) -> None:
-        for row in (self._row_custom, self._row_hbd0, self._row_hbd252):
-            row.set_no_damage(reason)
-
-    def update_results(
-        self,
-        custom: tuple[int, int, int, bool] | None,
-        bulk0: tuple[int, int, int, bool],
-        bulk32: tuple[int, int, int, bool],
-        show_bulk_rows: bool = True,
-    ) -> None:
-        """Each tuple is (min_dmg, max_dmg, defender_hp, is_error)."""
-        self._show_bulk_rows = bool(show_bulk_rows)
-        if self._move is None:
-            self._set_all_no_damage("---")
-            return
-        if self._move.category == "status":
-            self._status_note.setVisible(True)
-            self._row_custom.setVisible(False)
-            self._row_hbd0.setVisible(False)
-            self._row_hbd252.setVisible(False)
-            return
-        self._status_note.setVisible(False)
-
-        def _apply(row: _DmgRow, data: tuple[int, int, int, bool] | None, show: bool) -> None:
-            if not show or data is None:
-                row.setVisible(False)
-                return
-            row.setVisible(True)
-            mn, mx, hp, is_error = data
-            if is_error:
-                row.set_error("計算エラー")
-            else:
-                row.set_damage(mn, mx, hp)
-
-        _apply(self._row_custom, custom, custom is not None)
-        _apply(self._row_hbd0, bulk0, self._show_bulk_rows)
-        _apply(self._row_hbd252, bulk32, self._show_bulk_rows)
-
-    def set_modifier_notes(self, notes: list[str]) -> None:
-        if not notes:
-            self._has_modifier_notes = False
-            self._mod_lbl.setText("")
-            self._apply_detail_visibility()
-            return
-        text = "補正:\n" + "\n".join(notes)
-        self._mod_lbl.setText(text)
-        self._has_modifier_notes = True
-        self._apply_detail_visibility()
-
-    def power_override(self) -> int:
-        if self._pow_combo.isHidden():
-            return 0
-        return _power_option_value(self._pow_combo.currentData())
-
-    def hit_count(self) -> int:
-        return self._hit_spin.value() if not self._hit_spin.isHidden() else 1
-
-    def set_effectiveness(self, mult: float) -> None:
-        if mult <= 0:
-            self._eff_lbl.setText("無効")
-            self._eff_lbl.setStyleSheet("font-size:14px;color:#f38ba8;font-weight:bold;")
-            return
-        if mult > 1.0:
-            self._eff_lbl.setText("抜群 x{:.1f}".format(mult))
-            self._eff_lbl.setStyleSheet("font-size:14px;color:#f38ba8;font-weight:bold;")
-            return
-        if mult < 1.0:
-            self._eff_lbl.setText("今ひとつ x{:.2g}".format(mult))
-            self._eff_lbl.setStyleSheet("font-size:14px;color:#f9e2af;font-weight:bold;")
-            return
-        self._eff_lbl.setText("等倍")
-        self._eff_lbl.setStyleSheet("font-size:14px;color:#a6adc8;font-weight:bold;")
-
-
-# ── Attacker left panel ───────────────────────────────────────────────────
-
-class _AttackerPanel(QWidget):
-    """Left panel: attacker name, テラスタル, rank, EV slider."""
-    changed = pyqtSignal()
-    edit_requested = pyqtSignal()
-    change_requested = pyqtSignal()
-    new_requested = pyqtSignal()
-    clear_requested = pyqtSignal()
-    ev_section_toggled = pyqtSignal(bool)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumWidth(200)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._base_pokemon: Optional[PokemonInstance] = None
-        self._tera_visible = False
-        self._actions_visible = False
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-
-        ttl = QLabel("自分のポケモン")
-        ttl.setStyleSheet("font-size:15px;font-weight:bold;color:#89b4fa;")
-        layout.addWidget(ttl)
-
-        self._name_lbl = QLabel("（未設定）")
-        self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
-        layout.addWidget(self._name_lbl)
-
-        self._tera_wrap = QWidget()
-        tera_row = QHBoxLayout(self._tera_wrap)
-        tera_row.setContentsMargins(0, 0, 0, 0)
-        tera_row.setSpacing(4)
-        self._tera_cb = QCheckBox("テラスタル")
-        self._tera_cb.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-        self._tera_cb.toggled.connect(self._on_tera_changed)
-        tera_row.addWidget(self._tera_cb)
-        self._tera_combo = QComboBox()
-        self._tera_combo.addItem("（タイプ未選択）", "")
-        for en, ja in TYPE_EN_TO_JA.items():
-            self._tera_combo.addItem(ja, en)
-        self._tera_combo.setStyleSheet("QComboBox { font-size: 15px; min-height: 32px; max-height: 32px; padding: 0px; }")
-        self._tera_combo.setFixedHeight(32)
-        self._tera_combo.setEnabled(False)
-        self._tera_combo.currentIndexChanged.connect(self._emit)
-        tera_row.addWidget(self._tera_combo, 1)
-        layout.addWidget(self._tera_wrap)
-        self._tera_wrap.setVisible(False)
-
-        # Rank modifiers: AC and BD separately
-        def _make_rank_row(label_text: str, adj_cb):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(70)
-            lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-            row.addWidget(lbl)
-            d_btn = QPushButton("−")
-            d_btn.setFixedSize(42, 32)
-            d_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            rank_lbl = QLabel(" 0")
-            rank_lbl.setFixedSize(42, 32)
-            rank_lbl.setAlignment(Qt.AlignCenter)
-            rank_lbl.setStyleSheet(
-                "font-weight:bold;font-size:15px;color:#cdd6f4;background:#181825;"
-                "border:1px solid #45475a;border-radius:4px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;"
-            )
-            u_btn = QPushButton("+")
-            u_btn.setFixedSize(42, 32)
-            u_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            d_btn.clicked.connect(lambda: adj_cb(-1))
-            u_btn.clicked.connect(lambda: adj_cb(1))
-            row.addWidget(d_btn)
-            row.addWidget(rank_lbl)
-            row.addWidget(u_btn)
-            row.addStretch()
-            return row, rank_lbl
-
-        self._ac_rank = 0
-        self._bd_rank = 0
-        ac_row, self._ac_rank_lbl = _make_rank_row("ACランク:", self._adj_ac_rank)
-        bd_row, self._bd_rank_lbl = _make_rank_row("BDランク:", self._adj_bd_rank)
-        layout.addLayout(ac_row)
-        layout.addLayout(bd_row)
-
-        layout.addWidget(_sep())
-
-        # EV slider collapsible section
-        ev_toggle_row = QHBoxLayout()
-        ev_toggle_row.setContentsMargins(0, 0, 0, 0)
-        ev_toggle_row.setSpacing(4)
-        self._ev_toggle_btn = QPushButton("▷ 努力値/性格")
-        self._ev_toggle_btn.setCheckable(True)
-        self._ev_toggle_btn.setChecked(False)
-        self._ev_toggle_btn.setStyleSheet(
-            "QPushButton{background:transparent;border:none;color:#89b4fa;"
-            "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
-            "QPushButton:hover{color:#cdd6f4;}"
-        )
-        self._ev_toggle_btn.clicked.connect(lambda _: self._toggle_ev_section())
-        ev_toggle_row.addWidget(self._ev_toggle_btn)
-        ev_toggle_row.addStretch()
-        layout.addLayout(ev_toggle_row)
-
-        self._ev_section = QWidget()
-        self._ev_section.setVisible(False)
-        ev_section_layout = QVBoxLayout(self._ev_section)
-        ev_section_layout.setContentsMargins(0, 2, 0, 2)
-        ev_section_layout.setSpacing(3)
-
-        # EV sliders for H, A, B, C, D, S
-        for slider_attr, val_attr, lbl_attr, label_char in (
-            ("_ev_slider_h", "_ev_val_lbl_h", "_stat_lbl_h", "H"),
-            ("_ev_slider_a", "_ev_val_lbl_a", "_stat_lbl_a", "A"),
-            ("_ev_slider_b", "_ev_val_lbl_b", "_stat_lbl_b", "B"),
-            ("_ev_slider_c", "_ev_val_lbl_c", "_stat_lbl_c", "C"),
-            ("_ev_slider_d", "_ev_val_lbl_d", "_stat_lbl_d", "D"),
-            ("_ev_slider_s", "_ev_val_lbl_s", "_stat_lbl_s", "S"),
-        ):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(2)
-            stat_lbl = QLabel("{}(---)".format(label_char))
-            stat_lbl.setFixedWidth(50)
-            stat_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            stat_lbl.setStyleSheet("font-size:16px;font-weight:bold;color:#cdd6f4;")
-            setattr(self, lbl_attr, stat_lbl)
-            row.addWidget(stat_lbl)
-            minus_btn = QPushButton("\u2212")
-            minus_btn.setFixedSize(28, 28)
-            minus_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:3px;font-size:16px;padding:0;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            row.addWidget(minus_btn)
-            row.addStretch()
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 32)
-            slider.setValue(0)
-            slider.setFixedHeight(28)
-            slider.valueChanged.connect(self._emit)
-            setattr(self, slider_attr, slider)
-            minus_btn.clicked.connect(lambda _, s=slider: s.setValue(max(0, s.value() - 1)))
-            plus_btn = QPushButton("+")
-            plus_btn.setFixedSize(28, 28)
-            plus_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:3px;font-size:16px;padding:0;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            plus_btn.clicked.connect(lambda _, s=slider: s.setValue(min(32, s.value() + 1)))
-            val_lbl = QLabel("0")
-            val_lbl.setFixedWidth(15)
-            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            val_lbl.setStyleSheet("font-size:13px;color:#a6adc8;")
-            setattr(self, val_attr, val_lbl)
-            row.addWidget(slider, 1)
-            row.addStretch()
-            row.addWidget(plus_btn)
-            row.addWidget(val_lbl)
-            ev_section_layout.addLayout(row)
-            slider.valueChanged.connect(val_lbl.setNum)
-
-        # Nature button (inside collapsible section)
-        nat_row = QHBoxLayout()
-        nat_row.setContentsMargins(0, 4, 0, 0)
-        nat_row.setSpacing(4)
-        nat_lbl = QLabel("性格")
-        nat_lbl.setFixedWidth(50)
-        nat_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-        nat_row.addWidget(nat_lbl)
-        self._nat_btn = QPushButton("がんばりや（補正なし）")
-        self._nat_btn.setFixedHeight(32)
-        self._nat_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._nat_btn.setStyleSheet(
-            "QPushButton{font-size:15px;text-align:left;padding:0 6px;"
-            "background:#313244;border:1px solid #45475a;border-radius:4px;}"
-            "QPushButton:hover{border-color:#89b4fa;}"
-        )
-        self._nat_btn.clicked.connect(self._open_nature_dialog)
-        nat_row.addWidget(self._nat_btn, 1)
-        self._panel_nature: str = "がんばりや"
-        ev_section_layout.addLayout(nat_row)
-
-        layout.addWidget(self._ev_section)
-
-    def _toggle_ev_section(self, from_sync: bool = False) -> None:
-        visible = self._ev_toggle_btn.isChecked()
-        self._ev_section.setVisible(visible)
-        self._ev_toggle_btn.setText("▽ 努力値/性格" if visible else "▷ 努力値/性格")
-        if not from_sync:
-            self.ev_section_toggled.emit(visible)
-
-    def sync_ev_section(self, visible: bool) -> None:
-        self._ev_toggle_btn.blockSignals(True)
-        self._ev_toggle_btn.setChecked(visible)
-        self._ev_toggle_btn.blockSignals(False)
-        self._ev_section.setVisible(visible)
-        self._ev_toggle_btn.setText("▽ 努力値/性格" if visible else "▷ 努力値/性格")
-
-    # ── Public ──────────────────────────────────────────────────────────
-
-    def set_pokemon(self, p: Optional[PokemonInstance]) -> None:
-        if p is None:
-            self._base_pokemon = None
-            self._name_lbl.setText("（未設定）")
-            for _s in (self._ev_slider_h, self._ev_slider_a, self._ev_slider_b,
-                        self._ev_slider_c, self._ev_slider_d, self._ev_slider_s):
-                _s.blockSignals(True)
-                _s.setValue(0)
-                _s.blockSignals(False)
-            self._sync_ev_val_lbls()
-            self._set_panel_nature("まじめ", emit=False)
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
-            self._tera_cb.blockSignals(True)
-            self._tera_cb.setChecked(False)
-            self._tera_cb.blockSignals(False)
-            self._tera_combo.blockSignals(True)
-            self._tera_combo.setCurrentIndex(0)
-            self._tera_combo.blockSignals(False)
-            self._tera_combo.setEnabled(False)
-            for lbl_attr, ch in (
-                ("_stat_lbl_h", "H"), ("_stat_lbl_a", "A"), ("_stat_lbl_b", "B"),
-                ("_stat_lbl_c", "C"), ("_stat_lbl_d", "D"), ("_stat_lbl_s", "S"),
-            ):
-                getattr(self, lbl_attr).setText("{}(---)".format(ch))
-            return
-        self._base_pokemon = copy.deepcopy(p)
-        self._name_lbl.setText(_FORM_CANONICAL_NAME.get(p.name_ja or "", p.name_ja or "---"))
-        ev_map = [
-            (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
-            (self._ev_slider_a, max(0, int((p.ev_attack or 0) / 8))),
-            (self._ev_slider_b, max(0, int((p.ev_defense or 0) / 8))),
-            (self._ev_slider_c, max(0, int((p.ev_sp_attack or 0) / 8))),
-            (self._ev_slider_d, max(0, int((p.ev_sp_defense or 0) / 8))),
-            (self._ev_slider_s, max(0, int((p.ev_speed or 0) / 8))),
-        ]
-        for _s, _v in ev_map:
-            _s.blockSignals(True)
-            _s.setValue(_v)
-            _s.blockSignals(False)
-        self._sync_ev_val_lbls()
-        self._set_panel_nature(p.nature or "まじめ", emit=False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
-        tera = p.terastal_type or ""
-        enable_tera = bool(tera) and self._tera_visible
-        self._tera_cb.blockSignals(True)
-        self._tera_cb.setChecked(enable_tera)
-        self._tera_cb.blockSignals(False)
-        self._tera_combo.blockSignals(True)
-        self._tera_combo.setCurrentIndex(0)
-        self._tera_combo.blockSignals(False)
-        self._tera_combo.setEnabled(enable_tera)
-        self._update_stat_display(p)
-
-    def update_stat_display(self, p: Optional[PokemonInstance]) -> None:
-        if p:
-            self._update_stat_display(p)
-
-    def terastal_type(self) -> str:
-        if not self._tera_visible:
-            return ""
-        if not self._tera_cb.isChecked():
-            return ""
-        return self._tera_combo.currentData() or ""
-
-    def panel_nature(self) -> str:
-        return self._panel_nature
-
-    def nat_mult(self, stat_key: str = "attack") -> float:
-        return _nature_mult_from_name(self._panel_nature, stat_key)
-
-    def ac_rank(self) -> int:
-        return self._ac_rank
-
-    def bd_rank(self) -> int:
-        return self._bd_rank
-
-    def rank(self) -> int:
-        return self._ac_rank
-
-    def ev_hp_pts(self) -> int:
-        return self._ev_slider_h.value()
-
-    def ev_attack_pts(self) -> int:
-        return self._ev_slider_a.value()
-
-    def ev_defense_pts(self) -> int:
-        return self._ev_slider_b.value()
-
-    def ev_sp_attack_pts(self) -> int:
-        return self._ev_slider_c.value()
-
-    def ev_sp_defense_pts(self) -> int:
-        return self._ev_slider_d.value()
-
-    def ev_speed_pts(self) -> int:
-        return self._ev_slider_s.value()
-
-    def ev_points(self) -> int:
-        """後方互換: A/C の大きい方を返す"""
-        return max(self._ev_slider_a.value(), self._ev_slider_c.value())
-
-    def use_sp_attack(self) -> bool:
-        """後方互換: C >= A のとき True"""
-        return self._ev_slider_c.value() >= self._ev_slider_a.value()
-
-    def set_tera_visible(self, visible: bool) -> None:
-        self._tera_visible = bool(visible)
-        self._tera_wrap.setVisible(self._tera_visible)
-        if not self._tera_visible:
-            self._tera_cb.blockSignals(True)
-            self._tera_cb.setChecked(False)
-            self._tera_cb.blockSignals(False)
-            self._tera_combo.blockSignals(True)
-            self._tera_combo.setCurrentIndex(0)
-            self._tera_combo.blockSignals(False)
-            self._tera_combo.setEnabled(False)
-            self._emit()
-
-    # ── Private ─────────────────────────────────────────────────────────
-
-    def _update_stat_display(self, p: PokemonInstance) -> None:
-        self._stat_lbl_h.setText("H({})".format(p.hp or p.max_hp or "--"))
-        if p.ability in ("ちからもち", "ヨガパワー", "Huge Power", "Pure Power"):
-            self._stat_lbl_a.setText("A({}×2)".format(p.attack))
-        else:
-            self._stat_lbl_a.setText("A({})".format(p.attack))
-        self._stat_lbl_b.setText("B({})".format(p.defense))
-        self._stat_lbl_c.setText("C({})".format(p.sp_attack))
-        self._stat_lbl_d.setText("D({})".format(p.sp_defense))
-        self._stat_lbl_s.setText("S({})".format(p.speed))
-
-    def _toggle_actions(self) -> None:
-        self._actions_visible = not self._actions_visible
-        self._action_row_wrap.setVisible(self._actions_visible)
-
-    def _on_tera_changed(self, checked: bool) -> None:
-        self._tera_combo.setEnabled(checked)
-        self._emit()
-
-    def reset_to_base(self) -> None:
-        p = self._base_pokemon
-        if p is None:
-            return
-        ev_map = [
-            (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
-            (self._ev_slider_a, max(0, int((p.ev_attack or 0) / 8))),
-            (self._ev_slider_b, max(0, int((p.ev_defense or 0) / 8))),
-            (self._ev_slider_c, max(0, int((p.ev_sp_attack or 0) / 8))),
-            (self._ev_slider_d, max(0, int((p.ev_sp_defense or 0) / 8))),
-            (self._ev_slider_s, max(0, int((p.ev_speed or 0) / 8))),
-        ]
-        for _s, _v in ev_map:
-            _s.blockSignals(True)
-            _s.setValue(_v)
-            _s.blockSignals(False)
-        self._sync_ev_val_lbls()
-        self._set_panel_nature(p.nature or "まじめ", emit=False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
-        tera = p.terastal_type or ""
-        enable_tera = bool(tera) and self._tera_visible
-        self._tera_cb.blockSignals(True)
-        self._tera_cb.setChecked(enable_tera)
-        self._tera_cb.blockSignals(False)
-        idx = self._tera_combo.findData(tera)
-        if idx < 0:
-            idx = 0
-        self._tera_combo.blockSignals(True)
-        self._tera_combo.setCurrentIndex(idx)
-        self._tera_combo.blockSignals(False)
-        self._tera_combo.setEnabled(enable_tera)
-        self._update_stat_display(p)
-        self._emit()
-
-    def _sync_ev_val_lbls(self) -> None:
-        for slider_attr, val_attr in (
-            ("_ev_slider_h", "_ev_val_lbl_h"),
-            ("_ev_slider_a", "_ev_val_lbl_a"),
-            ("_ev_slider_b", "_ev_val_lbl_b"),
-            ("_ev_slider_c", "_ev_val_lbl_c"),
-            ("_ev_slider_d", "_ev_val_lbl_d"),
-            ("_ev_slider_s", "_ev_val_lbl_s"),
-        ):
-            getattr(self, val_attr).setText(str(getattr(self, slider_attr).value()))
-
-    def _set_panel_nature(self, nature: str, emit: bool = True) -> None:
-        from src.constants import NATURES_JA
-        nature = nature if nature in NATURES_JA else "まじめ"
-        self._panel_nature = nature
-        boost, reduce = NATURES_JA.get(nature, (None, None))
-        if boost and reduce:
-            from src.ui.pokemon_edit_dialog import _STAT_LABELS
-            text = "{}  (↑{} / ↓{})".format(
-                nature,
-                _STAT_LABELS.get(boost, boost),
-                _STAT_LABELS.get(reduce, reduce),
-            )
-        else:
-            text = "{}（補正なし）".format(nature)
-        self._nat_btn.setText(text)
-        if emit:
-            self._emit()
-
-    def _open_nature_dialog(self) -> None:
-        from src.ui.pokemon_edit_dialog import NatureSelectDialog
-        from src.data import database as db
-        usage_name = (self._base_pokemon.usage_name or self._base_pokemon.name_ja) if self._base_pokemon else ""
-        ranked = db.get_natures_by_usage(usage_name)[:4] if usage_name else []
-        dlg = NatureSelectDialog(self._panel_nature, ranked_natures=ranked, parent=self)
-        if dlg.exec_():
-            self._set_panel_nature(dlg.selected_nature())
-
-    def _adj_ac_rank(self, delta: int) -> None:
-        self._ac_rank = max(-6, min(6, self._ac_rank + delta))
-        self._ac_rank_lbl.setText("{:+d}".format(self._ac_rank) if self._ac_rank != 0 else " 0")
-        self._emit()
-
-    def _adj_bd_rank(self, delta: int) -> None:
-        self._bd_rank = max(-6, min(6, self._bd_rank + delta))
-        self._bd_rank_lbl.setText("{:+d}".format(self._bd_rank) if self._bd_rank != 0 else " 0")
-        self._emit()
-
-    def _emit(self) -> None:
-        self.changed.emit()
-
-
-class _DefenderPanel(QWidget):
-    """Left panel: defender quick edit / register select / HP% / rank."""
-    changed = pyqtSignal()
-    edit_requested = pyqtSignal()
-    change_requested = pyqtSignal()
-    new_requested = pyqtSignal()
-    clear_requested = pyqtSignal()
-    ev_section_toggled = pyqtSignal(bool)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumWidth(200)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._base_pokemon: Optional[PokemonInstance] = None
-        self._current_key = ""
-        self._tera_visible = False
-        self._actions_visible = False
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-
-        ttl = QLabel("相手のポケモン")
-        ttl.setStyleSheet("font-size:15px;font-weight:bold;color:#89b4fa;")
-        layout.addWidget(ttl)
-
-        self._name_lbl = QLabel("（未設定）")
-        self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
-        layout.addWidget(self._name_lbl)
-
-        self._tera_wrap = QWidget()
-        tera_row = QHBoxLayout(self._tera_wrap)
-        tera_row.setContentsMargins(0, 0, 0, 0)
-        tera_row.setSpacing(4)
-        self._tera_cb = QCheckBox("テラスタル")
-        self._tera_cb.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-        self._tera_cb.toggled.connect(self._on_tera_changed)
-        tera_row.addWidget(self._tera_cb)
-        self._tera_combo = QComboBox()
-        self._tera_combo.addItem("（タイプ未選択）", "")
-        for en, ja in TYPE_EN_TO_JA.items():
-            self._tera_combo.addItem(ja, en)
-        self._tera_combo.setStyleSheet("QComboBox { font-size: 15px; min-height: 32px; max-height: 32px; padding: 0px; }")
-        self._tera_combo.setFixedHeight(32)
-        self._tera_combo.setEnabled(False)
-        self._tera_combo.currentIndexChanged.connect(self._emit)
-        tera_row.addWidget(self._tera_combo, 1)
-        layout.addWidget(self._tera_wrap)
-        self._tera_wrap.setVisible(False)
-
-        def _make_rank_row(label_text: str, adj_cb):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(70)
-            lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-            row.addWidget(lbl)
-            d_btn = QPushButton("−")
-            d_btn.setFixedSize(42, 32)
-            d_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            rank_lbl = QLabel(" 0")
-            rank_lbl.setFixedSize(42, 32)
-            rank_lbl.setAlignment(Qt.AlignCenter)
-            rank_lbl.setStyleSheet(
-                "font-weight:bold;font-size:15px;color:#cdd6f4;background:#181825;"
-                "border:1px solid #45475a;border-radius:4px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;"
-            )
-            u_btn = QPushButton("+")
-            u_btn.setFixedSize(42, 32)
-            u_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            d_btn.clicked.connect(lambda: adj_cb(-1))
-            u_btn.clicked.connect(lambda: adj_cb(1))
-            row.addWidget(d_btn)
-            row.addWidget(rank_lbl)
-            row.addWidget(u_btn)
-            row.addStretch()
-            return row, rank_lbl
-
-        self._ac_rank = 0
-        self._bd_rank = 0
-        ac_row, self._ac_rank_lbl = _make_rank_row("ACランク:", self._adj_ac_rank)
-        bd_row, self._bd_rank_lbl = _make_rank_row("BDランク:", self._adj_bd_rank)
-        layout.addLayout(ac_row)
-        layout.addLayout(bd_row)
-        layout.addWidget(_sep())
-
-        # EV slider collapsible section
-        ev_toggle_row = QHBoxLayout()
-        ev_toggle_row.setContentsMargins(0, 0, 0, 0)
-        ev_toggle_row.setSpacing(4)
-        self._ev_toggle_btn = QPushButton("▷ 努力値/性格")
-        self._ev_toggle_btn.setCheckable(True)
-        self._ev_toggle_btn.setChecked(False)
-        self._ev_toggle_btn.setStyleSheet(
-            "QPushButton{background:transparent;border:none;color:#89b4fa;"
-            "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
-            "QPushButton:hover{color:#cdd6f4;}"
-        )
-        self._ev_toggle_btn.clicked.connect(lambda _: self._toggle_ev_section())
-        ev_toggle_row.addWidget(self._ev_toggle_btn)
-        ev_toggle_row.addStretch()
-        layout.addLayout(ev_toggle_row)
-
-        self._ev_section = QWidget()
-        self._ev_section.setVisible(False)
-        ev_section_layout = QVBoxLayout(self._ev_section)
-        ev_section_layout.setContentsMargins(0, 2, 0, 2)
-        ev_section_layout.setSpacing(3)
-
-        # EV sliders for H, A, B, C, D, S
-        for slider_attr, val_attr, lbl_attr, label_char in (
-            ("_ev_slider_h", "_ev_val_lbl_h", "_stat_lbl_h", "H"),
-            ("_ev_slider_a", "_ev_val_lbl_a", "_stat_lbl_a", "A"),
-            ("_ev_slider_b", "_ev_val_lbl_b", "_stat_lbl_b", "B"),
-            ("_ev_slider_c", "_ev_val_lbl_c", "_stat_lbl_c", "C"),
-            ("_ev_slider_d", "_ev_val_lbl_d", "_stat_lbl_d", "D"),
-            ("_ev_slider_s", "_ev_val_lbl_s", "_stat_lbl_s", "S"),
-        ):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(2)
-            stat_lbl = QLabel("{}(---)".format(label_char))
-            stat_lbl.setFixedWidth(50)
-            stat_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            stat_lbl.setStyleSheet("font-size:16px;font-weight:bold;color:#cdd6f4;")
-            setattr(self, lbl_attr, stat_lbl)
-            row.addWidget(stat_lbl)
-            minus_btn = QPushButton("\u2212")
-            minus_btn.setFixedSize(28, 28)
-            minus_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:3px;font-size:16px;padding:0;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            row.addWidget(minus_btn)
-            row.addStretch()
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 32)
-            slider.setValue(0)
-            slider.setFixedHeight(28)
-            slider.valueChanged.connect(self._emit)
-            setattr(self, slider_attr, slider)
-            minus_btn.clicked.connect(lambda _, s=slider: s.setValue(max(0, s.value() - 1)))
-            plus_btn = QPushButton("+")
-            plus_btn.setFixedSize(28, 28)
-            plus_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:3px;font-size:16px;padding:0;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            plus_btn.clicked.connect(lambda _, s=slider: s.setValue(min(32, s.value() + 1)))
-            val_lbl = QLabel("0")
-            val_lbl.setFixedWidth(15)
-            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            val_lbl.setStyleSheet("font-size:13px;color:#a6adc8;")
-            setattr(self, val_attr, val_lbl)
-            row.addWidget(slider, 1)
-            row.addStretch()
-            row.addWidget(plus_btn)
-            row.addWidget(val_lbl)
-            ev_section_layout.addLayout(row)
-            slider.valueChanged.connect(val_lbl.setNum)
-
-        # Nature button (inside collapsible section)
-        nat_row = QHBoxLayout()
-        nat_row.setContentsMargins(0, 4, 0, 0)
-        nat_row.setSpacing(4)
-        nat_lbl = QLabel("性格")
-        nat_lbl.setFixedWidth(50)
-        nat_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-        nat_row.addWidget(nat_lbl)
-        self._nat_btn = QPushButton("がんばりや（補正なし）")
-        self._nat_btn.setFixedHeight(32)
-        self._nat_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._nat_btn.setStyleSheet(
-            "QPushButton{font-size:15px;text-align:left;padding:0 6px;"
-            "background:#313244;border:1px solid #45475a;border-radius:4px;}"
-            "QPushButton:hover{border-color:#89b4fa;}"
-        )
-        self._nat_btn.clicked.connect(self._open_nature_dialog)
-        nat_row.addWidget(self._nat_btn, 1)
-        self._panel_nature: str = "がんばりや"
-        ev_section_layout.addLayout(nat_row)
-
-        layout.addWidget(self._ev_section)
-
-        self._disguise_cb = QCheckBox("ばけのかわ有効")
-        self._disguise_cb.setVisible(False)
-        self._disguise_cb.toggled.connect(self._emit)
-        layout.addWidget(self._disguise_cb)
-
-        self._hp_pct_spin = QSpinBox()
-        self._hp_pct_spin.setRange(1, 100)
-        self._hp_pct_spin.setValue(100)
-        self._hp_pct_spin.setSuffix("%")
-        self._hp_pct_spin.setVisible(False)
-        self._hp_pct_spin.valueChanged.connect(self._emit)
-        layout.addWidget(self._hp_pct_spin)
-        self._ability_lbl = QLabel("")
-        self._ability_lbl.setVisible(False)
-        layout.addWidget(self._ability_lbl)
-
-    def set_pokemon(self, p: Optional[PokemonInstance]) -> None:
-        if p is None:
-            self._base_pokemon = None
-            self._name_lbl.setText("（未設定）")
-            self._ability_lbl.setText("")
-            self._hp_pct_spin.blockSignals(True)
-            self._hp_pct_spin.setValue(100)
-            self._hp_pct_spin.blockSignals(False)
-            self._tera_cb.blockSignals(True)
-            self._tera_cb.setChecked(False)
-            self._tera_cb.blockSignals(False)
-            self._tera_combo.blockSignals(True)
-            self._tera_combo.setCurrentIndex(0)
-            self._tera_combo.blockSignals(False)
-            self._tera_combo.setEnabled(False)
-            self._set_panel_nature("まじめ", emit=False)
-            for _s in (self._ev_slider_h, self._ev_slider_a, self._ev_slider_b,
-                        self._ev_slider_c, self._ev_slider_d, self._ev_slider_s):
-                _s.blockSignals(True)
-                _s.setValue(0)
-                _s.blockSignals(False)
-            self._sync_ev_val_lbls()
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
-            self._disguise_cb.setVisible(False)
-            self._disguise_cb.blockSignals(True)
-            self._disguise_cb.setChecked(False)
-            self._disguise_cb.blockSignals(False)
-            for lbl_attr, ch in (
-                ("_stat_lbl_h", "H"), ("_stat_lbl_a", "A"), ("_stat_lbl_b", "B"),
-                ("_stat_lbl_c", "C"), ("_stat_lbl_d", "D"), ("_stat_lbl_s", "S"),
-            ):
-                getattr(self, lbl_attr).setText("{}(---)".format(ch))
-            self._current_key = ""
-            return
-
-        self._base_pokemon = copy.deepcopy(p)
-        self._name_lbl.setText(_FORM_CANONICAL_NAME.get(p.name_ja or "", p.name_ja or "---"))
-        self._ability_lbl.setText("特性: {}".format(p.ability or "---"))
-        key = "{}|{}|{}|{}|{}|{}|{}|{}|{}".format(
-            p.species_id, p.name_ja or "", p.ability or "",
-            p.ev_hp, p.ev_attack, p.ev_defense,
-            p.ev_sp_attack, p.ev_sp_defense, p.ev_speed,
-        )
-        if self._current_key != key:
-            pct = 100
-            max_hp = p.max_hp or p.hp
-            if p.current_hp > 0 and max_hp > 0:
-                pct = int(round(max(1.0, min(100.0, p.current_hp / max_hp * 100.0))))
-            elif p.current_hp_percent > 0:
-                pct = int(round(max(1.0, min(100.0, p.current_hp_percent))))
-            self._hp_pct_spin.blockSignals(True)
-            self._hp_pct_spin.setValue(pct)
-            self._hp_pct_spin.blockSignals(False)
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
-
-            ev_map = [
-                (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
-                (self._ev_slider_a, max(0, int((p.ev_attack or 0) / 8))),
-                (self._ev_slider_b, max(0, int((p.ev_defense or 0) / 8))),
-                (self._ev_slider_c, max(0, int((p.ev_sp_attack or 0) / 8))),
-                (self._ev_slider_d, max(0, int((p.ev_sp_defense or 0) / 8))),
-                (self._ev_slider_s, max(0, int((p.ev_speed or 0) / 8))),
-            ]
-            for _s, _v in ev_map:
-                _s.blockSignals(True)
-                _s.setValue(_v)
-                _s.blockSignals(False)
-            self._sync_ev_val_lbls()
-            self._set_panel_nature(p.nature or "まじめ", emit=False)
-
-            tera = p.terastal_type or ""
-            enable_tera = bool(tera) and self._tera_visible
-            self._tera_cb.blockSignals(True)
-            self._tera_cb.setChecked(enable_tera)
-            self._tera_cb.blockSignals(False)
-            idx = self._tera_combo.findData(tera)
-            if idx < 0:
-                idx = 0
-            self._tera_combo.blockSignals(True)
-            self._tera_combo.setCurrentIndex(idx)
-            self._tera_combo.blockSignals(False)
-            self._tera_combo.setEnabled(enable_tera)
-
-            self._disguise_cb.blockSignals(True)
-            self._disguise_cb.setChecked(False)
-            self._disguise_cb.blockSignals(False)
-            self._current_key = key
-
-        self._disguise_cb.setVisible(p.ability == "ばけのかわ")
-        self._update_stat_display(p)
-
-    def rank(self) -> int:
-        return self._ac_rank
-
-    def ac_rank(self) -> int:
-        return self._ac_rank
-
-    def bd_rank(self) -> int:
-        return self._bd_rank
-
-    def panel_nature(self) -> str:
-        return self._panel_nature
-
-    def nat_mult(self, stat_key: str = "defense") -> float:
-        return _nature_mult_from_name(self._panel_nature, stat_key)
-
-    def current_hp_percent(self) -> int:
-        return self._hp_pct_spin.value()
-
-    def terastal_type(self) -> str:
-        if not self._tera_visible:
-            return ""
-        if not self._tera_cb.isChecked():
-            return ""
-        return self._tera_combo.currentData() or ""
-
-    def ev_hp_pts(self) -> int:
-        return self._ev_slider_h.value()
-
-    def ev_attack_pts(self) -> int:
-        return self._ev_slider_a.value()
-
-    def ev_defense_pts(self) -> int:
-        return self._ev_slider_b.value()
-
-    def ev_sp_attack_pts(self) -> int:
-        return self._ev_slider_c.value()
-
-    def ev_sp_defense_pts(self) -> int:
-        return self._ev_slider_d.value()
-
-    def ev_speed_pts(self) -> int:
-        return self._ev_slider_s.value()
-
-    def ev_points(self) -> int:
-        """後方互換: B/D の大きい方を返す"""
-        return max(self._ev_slider_b.value(), self._ev_slider_d.value())
-
-    def use_sp_defense(self) -> bool:
-        """後方互換: D >= B のとき True"""
-        return self._ev_slider_d.value() >= self._ev_slider_b.value()
-
-    def set_tera_visible(self, visible: bool) -> None:
-        self._tera_visible = bool(visible)
-        self._tera_wrap.setVisible(self._tera_visible)
-        if not self._tera_visible:
-            self._tera_cb.blockSignals(True)
-            self._tera_cb.setChecked(False)
-            self._tera_cb.blockSignals(False)
-            self._tera_combo.blockSignals(True)
-            self._tera_combo.setCurrentIndex(0)
-            self._tera_combo.blockSignals(False)
-            self._tera_combo.setEnabled(False)
-            self._emit()
-
-    def disguise_intact(self) -> bool:
-        return (not self._disguise_cb.isHidden()) and self._disguise_cb.isChecked()
-
-    def update_stat_display(self, p: Optional[PokemonInstance]) -> None:
-        if p:
-            self._update_stat_display(p)
-
-    def _toggle_ev_section(self, from_sync: bool = False) -> None:
-        visible = self._ev_toggle_btn.isChecked()
-        self._ev_section.setVisible(visible)
-        self._ev_toggle_btn.setText("▽ 努力値/性格" if visible else "▷ 努力値/性格")
-        if not from_sync:
-            self.ev_section_toggled.emit(visible)
-
-    def sync_ev_section(self, visible: bool) -> None:
-        self._ev_toggle_btn.blockSignals(True)
-        self._ev_toggle_btn.setChecked(visible)
-        self._ev_toggle_btn.blockSignals(False)
-        self._ev_section.setVisible(visible)
-        self._ev_toggle_btn.setText("▽ 努力値/性格" if visible else "▷ 努力値/性格")
-
-    def _sync_ev_val_lbls(self) -> None:
-        for slider_attr, val_attr in (
-            ("_ev_slider_h", "_ev_val_lbl_h"),
-            ("_ev_slider_a", "_ev_val_lbl_a"),
-            ("_ev_slider_b", "_ev_val_lbl_b"),
-            ("_ev_slider_c", "_ev_val_lbl_c"),
-            ("_ev_slider_d", "_ev_val_lbl_d"),
-            ("_ev_slider_s", "_ev_val_lbl_s"),
-        ):
-            getattr(self, val_attr).setText(str(getattr(self, slider_attr).value()))
-
-    def reset_to_base(self) -> None:
-        p = self._base_pokemon
-        if p is None:
-            return
-        pct = 100
-        max_hp = p.max_hp or p.hp
-        if p.current_hp > 0 and max_hp > 0:
-            pct = int(round(max(1.0, min(100.0, p.current_hp / max_hp * 100.0))))
-        elif p.current_hp_percent > 0:
-            pct = int(round(max(1.0, min(100.0, p.current_hp_percent))))
-        self._hp_pct_spin.blockSignals(True)
-        self._hp_pct_spin.setValue(pct)
-        self._hp_pct_spin.blockSignals(False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
-        ev_map = [
-            (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
-            (self._ev_slider_a, max(0, int((p.ev_attack or 0) / 8))),
-            (self._ev_slider_b, max(0, int((p.ev_defense or 0) / 8))),
-            (self._ev_slider_c, max(0, int((p.ev_sp_attack or 0) / 8))),
-            (self._ev_slider_d, max(0, int((p.ev_sp_defense or 0) / 8))),
-            (self._ev_slider_s, max(0, int((p.ev_speed or 0) / 8))),
-        ]
-        for _s, _v in ev_map:
-            _s.blockSignals(True)
-            _s.setValue(_v)
-            _s.blockSignals(False)
-        self._sync_ev_val_lbls()
-        self._set_panel_nature(p.nature or "まじめ", emit=False)
-        tera = p.terastal_type or ""
-        enable_tera = bool(tera) and self._tera_visible
-        self._tera_cb.blockSignals(True)
-        self._tera_cb.setChecked(enable_tera)
-        self._tera_cb.blockSignals(False)
-        idx = self._tera_combo.findData(tera)
-        if idx < 0:
-            idx = 0
-        self._tera_combo.blockSignals(True)
-        self._tera_combo.setCurrentIndex(idx)
-        self._tera_combo.blockSignals(False)
-        self._tera_combo.setEnabled(enable_tera)
-        self._disguise_cb.blockSignals(True)
-        self._disguise_cb.setChecked(False)
-        self._disguise_cb.blockSignals(False)
-        self._update_stat_display(p)
-        self._emit()
-
-    def _set_panel_nature(self, nature: str, emit: bool = True) -> None:
-        from src.constants import NATURES_JA
-        nature = nature if nature in NATURES_JA else "まじめ"
-        self._panel_nature = nature
-        boost, reduce = NATURES_JA.get(nature, (None, None))
-        if boost and reduce:
-            from src.ui.pokemon_edit_dialog import _STAT_LABELS
-            text = "{}  (↑{} / ↓{})".format(
-                nature,
-                _STAT_LABELS.get(boost, boost),
-                _STAT_LABELS.get(reduce, reduce),
-            )
-        else:
-            text = "{}（補正なし）".format(nature)
-        self._nat_btn.setText(text)
-        if emit:
-            self._emit()
-
-    def _open_nature_dialog(self) -> None:
-        from src.ui.pokemon_edit_dialog import NatureSelectDialog
-        from src.data import database as db
-        usage_name = (self._base_pokemon.usage_name or self._base_pokemon.name_ja) if self._base_pokemon else ""
-        ranked = db.get_natures_by_usage(usage_name)[:4] if usage_name else []
-        dlg = NatureSelectDialog(self._panel_nature, ranked_natures=ranked, parent=self)
-        if dlg.exec_():
-            self._set_panel_nature(dlg.selected_nature())
-
-    def _adj_ac_rank(self, delta: int) -> None:
-        self._ac_rank = max(-6, min(6, self._ac_rank + delta))
-        self._ac_rank_lbl.setText("{:+d}".format(self._ac_rank) if self._ac_rank != 0 else " 0")
-        self._emit()
-
-    def _adj_bd_rank(self, delta: int) -> None:
-        self._bd_rank = max(-6, min(6, self._bd_rank + delta))
-        self._bd_rank_lbl.setText("{:+d}".format(self._bd_rank) if self._bd_rank != 0 else " 0")
-        self._emit()
-
-    def _on_tera_changed(self, checked: bool) -> None:
-        self._tera_combo.setEnabled(checked)
-        self._emit()
-
-    def _update_stat_display(self, p: PokemonInstance) -> None:
-        self._stat_lbl_h.setText("H({})".format(p.hp or p.max_hp or "---"))
-        self._stat_lbl_a.setText("A({})".format(p.attack))
-        self._stat_lbl_b.setText("B({})".format(p.defense))
-        self._stat_lbl_c.setText("C({})".format(p.sp_attack))
-        self._stat_lbl_d.setText("D({})".format(p.sp_defense))
-        self._stat_lbl_s.setText("S({})".format(p.speed))
-
-    def _toggle_actions(self) -> None:
-        self._actions_visible = not self._actions_visible
-        self._action_row_wrap.setVisible(self._actions_visible)
-
-    def _emit(self) -> None:
-        self.changed.emit()
-
-
-# ── Header cards ──────────────────────────────────────────────────────────
-
-def _label_fit_text(lbl: "QLabel", text: str, base_px: int = 13, min_px: int = 10) -> None:
-    """Set text on label, shrinking pixel font size to fit, then elide."""
-    from PyQt5.QtGui import QFont, QFontMetrics
-    if not text:
-        lbl.setText("")
-        return
-    w = lbl.width()
-    if w <= 0:
-        lbl.setText(text)
-        return
-    f = QFont(lbl.font())
-    for px in range(base_px, min_px - 1, -1):
-        f.setPixelSize(px)
-        fm = QFontMetrics(f)
-        if fm.horizontalAdvance(text) <= w:
-            lbl.setFont(f)
-            lbl.setText(text)
-            return
-    f.setPixelSize(min_px)
-    fm = QFontMetrics(f)
-    lbl.setFont(f)
-    lbl.setText(fm.elidedText(text, Qt.ElideRight, w))
-
-
-class _PokemonCard(QWidget):
-    edit_requested = pyqtSignal()
-    form_change_requested = pyqtSignal()
-    ability_change_requested = pyqtSignal()
-    item_change_requested = pyqtSignal()
-    _SPRITE_SIZE = 72
-    _CARD_HEIGHT = 84
-
-    def __init__(self, role_text: str, role_color: str, parent=None):
-        super().__init__(parent)
-        self._pokemon: Optional[PokemonInstance] = None
-        self.setFixedHeight(self._CARD_HEIGHT)
-        frame = QFrame(self)
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame{background:#181825;border:1px solid #45475a;border-radius:6px;}")
-        frame.setFixedHeight(self._CARD_HEIGHT)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(frame)
-
-        frame_vbox = QVBoxLayout(frame)
-        frame_vbox.setContentsMargins(8, 6, 4, 6)
-        frame_vbox.setSpacing(2)
-
-        frame_row = QHBoxLayout()
-        frame_row.setSpacing(4)
-
-        inner = QVBoxLayout()
-        inner.setContentsMargins(0, 0, 0, 0)
-        inner.setSpacing(2)
-
-        row1 = QHBoxLayout()
-        row1.setSpacing(6)
-        self._role_lbl = QLabel(role_text)
-        self._role_lbl.setStyleSheet(f"color:{role_color};font-size:12px;font-weight:bold;")
-        row1.addWidget(self._role_lbl)
-        self._name_lbl = QLabel("（未設定）")
-        self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
-        self._name_lbl.setWordWrap(False)
-        row1.addWidget(self._name_lbl, 1)
-        inner.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.setContentsMargins(0, 0, 0, 0)
-        row2.setSpacing(4)
-        self._ability_lbl = QLabel("")
-        self._ability_lbl.setStyleSheet(
-            "color:#a6adc8;font-size:13px;text-decoration:underline;"
-            "background:transparent;border-radius:3px;padding:1px 3px;")
-        self._ability_lbl.setWordWrap(False)
-        self._ability_lbl.setCursor(Qt.PointingHandCursor)
-        self._ability_lbl.mousePressEvent = lambda _: self.ability_change_requested.emit()
-        row2.addWidget(self._ability_lbl, 1)
-        self._item_lbl = QLabel("")
-        self._item_lbl.setStyleSheet(
-            "color:#f9e2af;font-size:13px;text-decoration:underline;"
-            "background:transparent;border-radius:3px;padding:1px 3px;")
-        self._item_lbl.setWordWrap(False)
-        self._item_lbl.setCursor(Qt.PointingHandCursor)
-        self._item_lbl.mousePressEvent = lambda _: self.item_change_requested.emit()
-        row2.addWidget(self._item_lbl, 1)
-        inner.addLayout(row2)
-
-        self._form_btn = QPushButton("フォルムチェンジ")
-        self._form_btn.setFixedHeight(12)
-        self._form_btn.setStyleSheet(
-            "QPushButton{font-size:12px;background:#313244;color:#A6E3A1;"
-            "border:1px solid #45475a;border-radius:3px;padding:-6 4px;}"
-            "QPushButton:hover{background:#45475a;}"
-        )
-        self._form_btn.clicked.connect(self.form_change_requested.emit)
-        sp = self._form_btn.sizePolicy()
-        sp.setRetainSizeWhenHidden(False)
-        self._form_btn.setSizePolicy(sp)
-        self._form_btn.hide()
-        inner.addWidget(self._form_btn)
-        inner.addStretch()
-
-        frame_row.addLayout(inner, 1)
-
-        self._sprite_lbl = QLabel()
-        self._sprite_lbl.setFixedSize(self._SPRITE_SIZE, self._SPRITE_SIZE)
-        self._sprite_lbl.setAlignment(Qt.AlignCenter)
-        frame_row.addWidget(self._sprite_lbl)
-
-        frame_vbox.addLayout(frame_row)
-
-    def set_pokemon(self, custom: Optional[PokemonInstance]) -> None:
-        self._pokemon = custom
-        if custom:
-            from src.ui.ui_utils import sprite_pixmap_or_zukan
-            pm = sprite_pixmap_or_zukan(
-                custom.name_ja or "",
-                self._SPRITE_SIZE,
-                self._SPRITE_SIZE,
-                name_en=custom.name_en or "",
-            )
-            self._sprite_lbl.setPixmap(pm if pm else QPixmap())
-        else:
-            self._sprite_lbl.setPixmap(QPixmap())
-        self._refresh_text()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._refresh_text()
-
-    def _refresh_text(self) -> None:
-        p = self._pokemon
-        if p:
-            display_name = _FORM_CANONICAL_NAME.get(p.name_ja or "", p.name_ja or "---")
-            self._name_lbl.setText(display_name)
-            _label_fit_text(self._ability_lbl, p.ability or "", 13)
-            _label_fit_text(self._item_lbl, p.item or "", 13)
-            next_form = _next_form_name(p.name_ja or "")
-            if next_form:
-                next_display = _FORM_CANONICAL_NAME.get(next_form, next_form)
-                self._form_btn.setText("→ {}".format(next_display))
-                self._form_btn.show()
-            else:
-                self._form_btn.hide()
-        else:
-            self._name_lbl.setText("（未設定）")
-            self._ability_lbl.setText("")
-            self._item_lbl.setText("")
-            self._form_btn.hide()
-
-
-class _AttackerCard(_PokemonCard):
-    def __init__(self, parent=None):
-        super().__init__("自分", "#F38BA8", parent)
-
-
-class _DefenderCard(_PokemonCard):
-    def __init__(self, parent=None):
-        super().__init__("相手", "#89B4FA", parent)
-
-
-# ── Stealth rock display ──────────────────────────────────────────────────
-
-class _StealthRockRow(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        iro = QLabel("ステロ:")
-        iro.setStyleSheet("color:#a6adc8;font-size:12px;")
-        layout.addWidget(iro)
-        self._lbl = QLabel("---")
-        self._lbl.setStyleSheet("font-size:12px;color:#f9e2af;")
-        layout.addWidget(self._lbl)
-        layout.addStretch()
-
-    def refresh_data(self, defender_types: list[str], hp_custom: int,
-                     hp_hbd0: int, hp_hbd252: int,
-                     show_bulk_rows: bool = True) -> None:
-        from src.calc.damage_calc import calc_stealth_rock_damage
-        parts = []
-        if hp_custom > 0:
-            d = calc_stealth_rock_damage(hp_custom, defender_types)
-            parts.append("調整:{} ({:.1f}%)".format(d, d/hp_custom*100))
-        if show_bulk_rows and hp_hbd0 > 0:
-            d = calc_stealth_rock_damage(hp_hbd0, defender_types)
-            parts.append("無振り:{} ({:.1f}%)".format(d, d/hp_hbd0*100))
-        if show_bulk_rows and hp_hbd252 > 0:
-            d = calc_stealth_rock_damage(hp_hbd252, defender_types)
-            parts.append("極振り:{} ({:.1f}%)".format(d, d/hp_hbd252*100))
-        self._lbl.setText("   ".join(parts) if parts else "---")
-
-
 # ── Ability / Item quick-pick helpers ────────────────────────────────────
 
 def _pick_ability(pokemon: "PokemonInstance", parent: QWidget) -> "str | None":
-    from src.ui.pokemon_edit_dialog import SuggestComboBox, _build_ranked_options, _unique
-    from src.constants import ABILITIES_JA
-    from src.data import database as db
-    all_abilities = sorted(_unique(list(ABILITIES_JA)))
-    usage_name = pokemon.usage_name or pokemon.name_ja
-    ranked = _unique(db.get_abilities_by_usage(usage_name) if usage_name else [])
-    items, sep = _build_ranked_options(ranked, all_abilities)
-    return _show_pick_dialog("特性を選択", items, sep, pokemon.ability or "", parent)
+    from src.ui.damage_panel_pickers import pick_ability
+
+    return pick_ability(pokemon, parent)
 
 
 def _pick_item(pokemon: "PokemonInstance", parent: QWidget) -> "str | None":
-    from src.ui.pokemon_edit_dialog import SuggestComboBox, _build_ranked_options, _unique
-    from src.constants import ITEMS_JA
-    from src.data import database as db
-    from src.data.item_catalog import get_item_names
-    all_items = sorted(_unique(list(ITEMS_JA) + get_item_names()))
-    usage_name = pokemon.usage_name or pokemon.name_ja
-    ranked = _unique(db.get_items_by_usage(usage_name) if usage_name else [])
-    items, sep = _build_ranked_options(ranked, all_items)
-    return _show_pick_dialog("持ち物を選択", items, sep, pokemon.item or "", parent)
+    from src.ui.damage_panel_pickers import pick_item
+
+    return pick_item(pokemon, parent)
 
 
 def _show_pick_dialog(
@@ -2858,83 +472,9 @@ def _show_pick_dialog(
     current: str,
     parent: QWidget,
 ) -> "str | None":
-    from PyQt5.QtWidgets import QDialogButtonBox
-    from src.ui.pokemon_edit_dialog import SuggestComboBox
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(320)
-    lay = QVBoxLayout(dlg)
-    combo = SuggestComboBox(parent=dlg)
-    combo.set_items(items, preserve_text=False, separator_after=separator_after)
-    combo.set_text(current)
-    lay.addWidget(combo)
-    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-    btns.accepted.connect(dlg.accept)
-    btns.rejected.connect(dlg.reject)
-    lay.addWidget(btns)
-    if dlg.exec_():
-        return combo.current_text_stripped()
-    return None
+    from src.ui.damage_panel_pickers import show_pick_dialog
 
-
-# ── Party slot (攻守交替 bottom) ──────────────────────────────────────────
-
-class _PartySlot(QFrame):
-    clicked_signal = pyqtSignal(int)
-    context_menu_requested = pyqtSignal(int, object)
-    _SPRITE_SIZE = 72
-
-    def __init__(self, idx: int, parent=None):
-        super().__init__(parent)
-        self._idx = idx
-        self.setFrameShape(QFrame.StyledPanel)
-        self.setFixedSize(78, 78)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(
-            "QFrame{background:#313244;border:1px solid #45475a;border-radius:4px;}"
-            "QFrame:hover{border-color:#89b4fa;}")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        self._sprite_lbl = QLabel()
-        self._sprite_lbl.setFixedSize(self._SPRITE_SIZE, self._SPRITE_SIZE)
-        self._sprite_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._sprite_lbl, 0, Qt.AlignCenter)
-
-    def set_name(self, name: str, attack_active: bool = False, defense_active: bool = False, sprite_name: str = "") -> None:
-        sprite = sprite_name or name
-        if sprite:
-            from src.ui.ui_utils import sprite_pixmap_or_zukan
-            pm = sprite_pixmap_or_zukan(sprite, self._SPRITE_SIZE, self._SPRITE_SIZE)
-            self._sprite_lbl.setPixmap(pm if pm else QPixmap())
-        else:
-            self._sprite_lbl.setPixmap(QPixmap())
-        if attack_active:
-            border = "#a6e3a1"
-        elif defense_active:
-            border = "#f9e2af"
-        else:
-            border = "#45475a"
-        self.setStyleSheet(
-            "QFrame{{background:#313244;border:2px solid {};border-radius:4px;}}"
-            "QFrame:hover{{border-color:#89b4fa;}}".format(border))
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.RightButton:
-            self.context_menu_requested.emit(self._idx, event.globalPos())
-            event.accept()
-            return
-        self.clicked_signal.emit(self._idx)
-        super().mousePressEvent(event)
-
-
-# ── Utility ───────────────────────────────────────────────────────────────
-
-def _sep() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.HLine)
-    line.setFixedHeight(1)
-    line.setStyleSheet("QFrame{border:none;border-top:1px solid #45475a;}")
-    return line
+    return show_pick_dialog(title, items, separator_after, current, parent)
 
 
 # ── Main DamagePanel ──────────────────────────────────────────────────────
@@ -2943,6 +483,7 @@ class DamagePanel(QWidget):
     attacker_changed = pyqtSignal(object)   # emitted when attacker pokemon changes
     defender_changed = pyqtSignal(object)   # emitted when defender pokemon changes
     registry_maybe_changed = pyqtSignal()
+    bridge_payload_logged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3066,20 +607,37 @@ class DamagePanel(QWidget):
         _weather_col.setSpacing(2)
         _weather_col.addWidget(_row_label("天気"))
         self._weather_grp = _RadioGroup(["はれ", "あめ", "すな", "ゆき"])
-        self._weather_grp.set_button_metrics(font_size=14, height=28, min_width=65, pad_h=6, pad_v=2)
+        self._weather_grp.set_button_metrics(font_size=14, height=28, min_width=48, pad_h=4, pad_v=2)
         self._weather_grp.changed.connect(self.recalculate)
         _weather_col.addWidget(self._weather_grp)
         wf_row.addLayout(_weather_col)
+        wf_row.setAlignment(_weather_col, Qt.AlignTop)
 
         _terrain_col = QVBoxLayout()
         _terrain_col.setContentsMargins(0, 0, 0, 0)
         _terrain_col.setSpacing(2)
         _terrain_col.addWidget(_row_label("フィールド"))
         self._terrain_grp = _RadioGroup(["エレキ", "グラス", "ミスト", "サイコ"])
-        self._terrain_grp.set_button_metrics(font_size=14, height=28, min_width=65, pad_h=6, pad_v=2)
+        self._terrain_grp.set_button_metrics(font_size=14, height=28, min_width=48, pad_h=4, pad_v=2)
         self._terrain_grp.changed.connect(self.recalculate)
         _terrain_col.addWidget(self._terrain_grp)
-        wf_row.addLayout(_terrain_col)
+        wf_row.addLayout(_terrain_col, 4)
+        wf_row.setAlignment(_terrain_col, Qt.AlignTop)
+
+        _gravity_col = QVBoxLayout()
+        _gravity_col.setContentsMargins(0, 0, 0, 0)
+        _gravity_col.setSpacing(2)
+        _gravity_lbl = _row_label("じゅうりょく")
+        _gravity_lbl.setStyleSheet("color: transparent; font-size:14px; font-weight:bold;")
+        _gravity_col.addWidget(_gravity_lbl)
+        self._gravity_btn = _ToggleBtn("じゅうりょく")
+        self._gravity_btn.set_metrics(font_size=14, pad_h=4, pad_v=2)
+        self._gravity_btn.setFixedHeight(28)
+        self._gravity_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._gravity_btn.toggled.connect(lambda _: self.recalculate())
+        _gravity_col.addWidget(self._gravity_btn)
+        wf_row.addLayout(_gravity_col, 1)
+        wf_row.setAlignment(_gravity_col, Qt.AlignTop)
 
         dl.addLayout(wf_row)
 
@@ -3107,16 +665,19 @@ class DamagePanel(QWidget):
         atk_cond1a = QHBoxLayout()        # 常時ボタン1行目: やけど・急所・じゅうでん
         atk_cond1a.setContentsMargins(0, 0, 0, 0)
         atk_cond1a.setSpacing(4)
-        atk_cond1b = QHBoxLayout()        # 常時ボタン2行目: フェアリーオーラ・ダークオーラ・てだすけ
+        atk_cond1b = QHBoxLayout()        # 常時ボタン2行目: フェアリーオーラ・ダークオーラ
         atk_cond1b.setContentsMargins(0, 0, 0, 0)
         atk_cond1b.setSpacing(4)
+        atk_cond1c = QHBoxLayout()        # 常時ボタン3行目: てだすけ・はがねのせいしん
+        atk_cond1c.setContentsMargins(0, 0, 0, 0)
+        atk_cond1c.setSpacing(4)
         self._burn_btn = _ToggleBtn("やけど")
-        self._crit_btn = _ToggleBtn("急所")
+        self._crit_btn = _ToggleBtn("きゅうしょ")
         self._fairy_aura_btn = _ToggleBtn("フェアリーオーラ")
         self._dark_aura_btn = _ToggleBtn("ダークオーラ")
         self._charge_btn = _ToggleBtn("じゅうでん")
         self._helping_btn = _ToggleBtn("てだすけ")
-        self._steel_spirit_btn = _ToggleBtn("はがねのせいしん")
+        self._steel_spirit_btn = _ToggleBtn("はがねのせいしん\n（未対応）")
         self._overgrow_btn = _ToggleBtn("しんりょく", cond_style=True)
         self._blaze_btn = _ToggleBtn("もうか", cond_style=True)
         self._torrent_btn = _ToggleBtn("げきりゅう", cond_style=True)
@@ -3148,7 +709,7 @@ class DamagePanel(QWidget):
         for btn in (self._burn_btn, self._crit_btn, self._fairy_aura_btn,
                     self._dark_aura_btn, self._charge_btn, self._helping_btn,
                     self._steel_spirit_btn):
-            btn.setFixedHeight(28)
+            btn.setFixedHeight(40)
             btn.setMinimumWidth(70)
             btn.toggled.connect(lambda _: self.recalculate())
         for btn in self._attacker_ability_cond_btns.values():
@@ -3165,8 +726,10 @@ class DamagePanel(QWidget):
             atk_cond_ability.addWidget(btn)
         for btn in (self._burn_btn, self._crit_btn, self._charge_btn):
             atk_cond1a.addWidget(btn)
-        for btn in (self._fairy_aura_btn, self._dark_aura_btn, self._helping_btn, self._steel_spirit_btn):
+        for btn in (self._fairy_aura_btn, self._dark_aura_btn):
             atk_cond1b.addWidget(btn)
+        for btn in (self._helping_btn, self._steel_spirit_btn):
+            atk_cond1c.addWidget(btn)
 
         self._supreme_combo = QComboBox()
         self._supreme_combo.setFixedHeight(24)
@@ -3203,10 +766,12 @@ class DamagePanel(QWidget):
         atk_cond4.addStretch()
         atk_cond1a.addStretch()
         atk_cond1b.addStretch()
+        atk_cond1c.addStretch()
         self_side_col.addLayout(atk_cond_ability)
         self_side_col.addLayout(atk_cond4)
         self_side_col.addLayout(atk_cond1a)
         self_side_col.addLayout(atk_cond1b)
+        self_side_col.addLayout(atk_cond1c)
 
         # 自分側 防御補助 (相手→自分 計算に使用)
         self_side_col.addSpacing(8)
@@ -3217,13 +782,21 @@ class DamagePanel(QWidget):
         self._self_reflect_btn = _ToggleBtn("リフレクター")
         self._self_lightscreen_btn = _ToggleBtn("ひかりのかべ")
         self._self_friend_guard_btn = _ToggleBtn("フレンドガード")
-        for btn in (self._self_reflect_btn, self._self_lightscreen_btn, self._self_friend_guard_btn):
-            btn.setFixedHeight(28)
+        self._self_tailwind_btn = _ToggleBtn("おいかぜ")
+        self_def_cond2 = QHBoxLayout()
+        self_def_cond2.setContentsMargins(0, 0, 0, 4)
+        self_def_cond2.setSpacing(4)
+        for btn in (self._self_reflect_btn, self._self_lightscreen_btn, self._self_tailwind_btn, self._self_friend_guard_btn):
+            btn.setFixedHeight(40)
             btn.setMinimumWidth(70)
             btn.toggled.connect(lambda _: self.recalculate())
+        for btn in (self._self_reflect_btn, self._self_lightscreen_btn, self._self_tailwind_btn):
             self_def_cond.addWidget(btn)
+        self_def_cond2.addWidget(self._self_friend_guard_btn)
         self_def_cond.addStretch()
+        self_def_cond2.addStretch()
         self_side_col.addLayout(self_def_cond)
+        self_side_col.addLayout(self_def_cond2)
         self_side_col.addStretch()
 
         # ── 相手側補助 (右カラム) ────────────────────────────────
@@ -3243,26 +816,31 @@ class DamagePanel(QWidget):
         opp_atk_cond1a = QHBoxLayout()          # 常時ボタン1行目: やけど・急所・じゅうでん
         opp_atk_cond1a.setContentsMargins(0, 0, 0, 0)
         opp_atk_cond1a.setSpacing(4)
-        opp_atk_cond1b = QHBoxLayout()          # 常時ボタン2行目: フェアリーオーラ・ダークオーラ・てだすけ
+        opp_atk_cond1b = QHBoxLayout()          # 常時ボタン2行目: フェアリーオーラ・ダークオーラ
         opp_atk_cond1b.setContentsMargins(0, 0, 0, 0)
         opp_atk_cond1b.setSpacing(4)
+        opp_atk_cond1c = QHBoxLayout()          # 常時ボタン3行目: てだすけ・はがねのせいしん
+        opp_atk_cond1c.setContentsMargins(0, 0, 0, 0)
+        opp_atk_cond1c.setSpacing(4)
         self._opp_burn_btn = _ToggleBtn("やけど")
-        self._opp_crit_btn = _ToggleBtn("急所")
+        self._opp_crit_btn = _ToggleBtn("きゅうしょ")
         self._opp_fairy_aura_btn = _ToggleBtn("フェアリーオーラ")
         self._opp_dark_aura_btn = _ToggleBtn("ダークオーラ")
         self._opp_charge_btn = _ToggleBtn("じゅうでん")
         self._opp_helping_btn = _ToggleBtn("てだすけ")
-        self._opp_steel_spirit_btn = _ToggleBtn("はがねのせいしん")
+        self._opp_steel_spirit_btn = _ToggleBtn("はがねのせいしん\n（未対応）")
         for btn in (self._opp_burn_btn, self._opp_crit_btn, self._opp_fairy_aura_btn,
                     self._opp_dark_aura_btn, self._opp_charge_btn, self._opp_helping_btn,
                     self._opp_steel_spirit_btn):
-            btn.setFixedHeight(28)
+            btn.setFixedHeight(40)
             btn.setMinimumWidth(70)
             btn.toggled.connect(lambda _: self.recalculate())
         for btn in (self._opp_burn_btn, self._opp_crit_btn, self._opp_charge_btn):
             opp_atk_cond1a.addWidget(btn)
-        for btn in (self._opp_fairy_aura_btn, self._opp_dark_aura_btn, self._opp_helping_btn, self._opp_steel_spirit_btn):
+        for btn in (self._opp_fairy_aura_btn, self._opp_dark_aura_btn):
             opp_atk_cond1b.addWidget(btn)
+        for btn in (self._opp_helping_btn, self._opp_steel_spirit_btn):
+            opp_atk_cond1c.addWidget(btn)
         self._opp_overgrow_btn = _ToggleBtn("しんりょく", cond_style=True)
         self._opp_blaze_btn = _ToggleBtn("もうか", cond_style=True)
         self._opp_torrent_btn = _ToggleBtn("げきりゅう", cond_style=True)
@@ -3339,10 +917,12 @@ class DamagePanel(QWidget):
         opp_atk_cond4.addStretch()
         opp_atk_cond1a.addStretch()
         opp_atk_cond1b.addStretch()
+        opp_atk_cond1c.addStretch()
         opp_side_col.addLayout(opp_atk_cond_ability)
         opp_side_col.addLayout(opp_atk_cond4)
         opp_side_col.addLayout(opp_atk_cond1a)
         opp_side_col.addLayout(opp_atk_cond1b)
+        opp_side_col.addLayout(opp_atk_cond1c)
 
         # 相手側 防御補助 (自分→相手 計算に使用)
         opp_side_col.addSpacing(8)
@@ -3353,13 +933,21 @@ class DamagePanel(QWidget):
         self._reflect_btn = _ToggleBtn("リフレクター")
         self._lightscreen_btn = _ToggleBtn("ひかりのかべ")
         self._friend_guard_btn = _ToggleBtn("フレンドガード")
-        for btn in (self._reflect_btn, self._lightscreen_btn, self._friend_guard_btn):
-            btn.setFixedHeight(28)
+        self._tailwind_btn = _ToggleBtn("おいかぜ")
+        def_cond2 = QHBoxLayout()
+        def_cond2.setContentsMargins(0, 0, 0, 4)
+        def_cond2.setSpacing(4)
+        for btn in (self._reflect_btn, self._lightscreen_btn, self._tailwind_btn, self._friend_guard_btn):
+            btn.setFixedHeight(40)
             btn.setMinimumWidth(70)
             btn.toggled.connect(lambda _: self.recalculate())
+        for btn in (self._reflect_btn, self._lightscreen_btn, self._tailwind_btn):
             def_cond.addWidget(btn)
+        def_cond2.addWidget(self._friend_guard_btn)
         def_cond.addStretch()
+        def_cond2.addStretch()
         opp_side_col.addLayout(def_cond)
+        opp_side_col.addLayout(def_cond2)
         opp_side_col.addStretch()
 
         both_sides_row.addLayout(self_side_col, 1)
@@ -3373,6 +961,8 @@ class DamagePanel(QWidget):
         self._opp_steel_spirit_btn.setVisible(False)
         self._self_friend_guard_btn.setVisible(False)
         self._friend_guard_btn.setVisible(False)
+        self._self_tailwind_btn.setVisible(False)
+        self._tailwind_btn.setVisible(False)
 
         sp.addStretch()
         sp.addWidget(_sep())
@@ -3424,6 +1014,11 @@ class DamagePanel(QWidget):
             slot.context_menu_requested.connect(lambda idx, pos: self._on_party_slot_context_menu("opp", idx, pos))
             opp_party_row.addWidget(slot)
             self._opp_party_slots.append(slot)
+        self._opp_party_action_host = QWidget()
+        self._opp_party_action_layout = QVBoxLayout(self._opp_party_action_host)
+        self._opp_party_action_layout.setContentsMargins(0, 0, 0, 0)
+        self._opp_party_action_layout.setSpacing(0)
+        opp_party_row.addWidget(self._opp_party_action_host, 0, Qt.AlignVCenter)
         opp_party_row.addStretch()
         cl.addLayout(opp_party_row)
 
@@ -3502,6 +1097,18 @@ class DamagePanel(QWidget):
         self._refresh_party_slots()
         self.recalculate()
 
+    def set_opp_party_action_widget(self, widget: QWidget | None) -> None:
+        if not hasattr(self, "_opp_party_action_layout"):
+            return
+        layout = self._opp_party_action_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            child = item.widget()
+            if child is not None:
+                child.setParent(None)
+        if widget is not None:
+            layout.addWidget(widget, 0, Qt.AlignVCenter)
+
     def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
         from PyQt5.QtWidgets import QMenu, QAction
 
@@ -3569,7 +1176,7 @@ class DamagePanel(QWidget):
             return
 
         pokemon = party[idx]
-        db.save_pokemon(pokemon)
+        pokemon.db_id = db.save_pokemon(pokemon)
         self.registry_maybe_changed.emit()
 
     def _add_party_slot(self, side: str, idx: int) -> None:
@@ -3595,14 +1202,24 @@ class DamagePanel(QWidget):
         self._my_party = [copy.deepcopy(p) if p else None for p in party]
         self._refresh_party_slots()
 
-    def set_opponent_options(self, options: list[PokemonInstance]) -> None:
-        if not options:
+    def set_opponent_options(
+        self,
+        party: list[Optional[PokemonInstance]],
+        active: Optional[PokemonInstance] = None,
+    ) -> None:
+        if not any(p for p in party):
             return
-        self._opp_party = [copy.deepcopy(p) if p else None for p in options[:6]]
-        self._def_custom = copy.deepcopy(options[0])
-        self._def_species_name = options[0].name_ja or ""
+        self._opp_party = [(copy.deepcopy(p) if p else None) for p in (list(party) + [None] * 6)[:6]]
+        defender = active or next((p for p in self._opp_party if p), None)
+        if not defender:
+            return
+        self._def_custom = copy.deepcopy(defender)
+        self._def_species_name = defender.name_ja or ""
         self._def_party_side = "opp"
-        self._def_party_idx = 0
+        self._def_party_idx = next(
+            (i for i, p in enumerate(self._opp_party) if p and p.name_ja == defender.name_ja),
+            None,
+        )
         self._def_panel.set_pokemon(self._def_custom)
         self.defender_changed.emit(self._def_custom)
         self._refresh_party_slots()
@@ -3623,6 +1240,12 @@ class DamagePanel(QWidget):
         self._refresh_party_slots()
         self._refresh_defender_card()
         self.recalculate()
+
+    def get_my_party_snapshot(self) -> list[Optional[PokemonInstance]]:
+        return [copy.deepcopy(p) if p else None for p in self._my_party]
+
+    def get_opp_party_snapshot(self) -> list[Optional[PokemonInstance]]:
+        return [copy.deepcopy(p) if p else None for p in self._opp_party]
 
     def set_weather(self, weather: str) -> None:
         _map = {"sun": "はれ", "rain": "あめ", "sand": "すな", "hail": "ゆき"}
@@ -4053,6 +1676,9 @@ class DamagePanel(QWidget):
         self_lightscreen = self._self_lightscreen_btn.isChecked()
         friend_guard = self._friend_guard_btn.isChecked()
         self_friend_guard = self._self_friend_guard_btn.isChecked()
+        tailwind = self._tailwind_btn.isChecked()
+        self_tailwind = self._self_tailwind_btn.isChecked()
+        gravity = self._gravity_btn.isChecked()
         def_ac_rank = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
         def_bd_rank = self._def_panel.bd_rank() if hasattr(self, "_def_panel") else 0
         def_rank = def_bd_rank
@@ -4157,10 +1783,28 @@ class DamagePanel(QWidget):
         if parental_bond and ABILITY_JA_TO_EN.get(atk.ability, "") != "Parental Bond":
             _atk_d["ability"] = "Parental Bond"
         _field_d = smogon_field_to_dict(
-            weather, terrain, reflect, lightscreen, helping, fairy_aura, dark_aura
+            weather,
+            terrain,
+            reflect,
+            lightscreen,
+            helping,
+            fairy_aura,
+            dark_aura,
+            friend_guard=friend_guard,
+            tailwind=tailwind,
+            gravity=gravity,
         )
         _field_d_rev = smogon_field_to_dict(
-            weather, terrain, self_reflect, self_lightscreen, opp_helping, fairy_aura, dark_aura
+            weather,
+            terrain,
+            self_reflect,
+            self_lightscreen,
+            opp_helping,
+            fairy_aura,
+            dark_aura,
+            friend_guard=self_friend_guard,
+            tailwind=self_tailwind,
+            gravity=gravity,
         )
 
         slot_to_move: dict[int, tuple[str, Optional[MoveInfo]]] = {}
@@ -4187,21 +1831,29 @@ class DamagePanel(QWidget):
                 effective_move = move
                 pre_resolve_type = effective_move.type_name
                 resolved_type = resolve_effective_move_type(atk, effective_move, tera)
+                resolved_power = effective_move.power
+                weather_ball_active_type = ""
                 if effective_move.name_ja == "ウェザーボール":
-                    weather_ball_type = {
+                    weather_ball_active_type = {
                         "sun": "fire",
                         "rain": "water",
                         "sand": "rock",
                         "hail": "ice",
                     }.get(weather, "")
-                    if weather_ball_type:
-                        resolved_type = weather_ball_type
+                    if weather_ball_active_type:
+                        resolved_type = weather_ball_active_type
+                        resolved_power = 100
+                if effective_move.name_ja == "オーラぐるま" and "はらぺこもよう" in atk.name_ja:
+                    resolved_type = "dark"
                 resolved_category = resolve_effective_move_category(
                     atk, effective_move, atk_rank=rank, terastal_type=tera,
                 )
-                if resolved_type != effective_move.type_name or resolved_category != effective_move.category:
+                if (resolved_type != effective_move.type_name
+                        or resolved_category != effective_move.category
+                        or resolved_power != effective_move.power):
                     effective_move = dataclasses.replace(
-                        effective_move, type_name=resolved_type, category=resolved_category
+                        effective_move, type_name=resolved_type,
+                        category=resolved_category, power=resolved_power,
                     )
                 sec.setup_move(effective_move)
 
@@ -4268,15 +1920,26 @@ class DamagePanel(QWidget):
             ):
                 bridge_forced_type = "dragon"
                 bridge_bp_multiplier = 1.2
-            _mv_d = smogon_move_to_dict(
-                effective_move,
-                is_crit=is_crit,
-                hits=hits if hits > 1 else 0,
-                bp_override=pow_override,
-                charged=charged,
-                forced_type=bridge_forced_type,
-                bp_multiplier=bridge_bp_multiplier,
-            )
+            if weather_ball_active_type:
+                # Smogon が Weather Ball をノーマルタイプ固定で計算するため、
+                # 天気あり時は type/basePower を直接 override した汎用技として渡す。
+                _smogon_type = TYPE_TO_SMOGON.get(weather_ball_active_type, "Normal")
+                _wb_overrides: dict = {
+                    "basePower": 100,
+                    "type": _smogon_type,
+                    "category": "Special",
+                }
+                _mv_d = {"name": "Tackle", "isCrit": is_crit, "overrides": _wb_overrides}
+            else:
+                _mv_d = smogon_move_to_dict(
+                    effective_move,
+                    is_crit=is_crit,
+                    hits=hits if hits > 1 else 0,
+                    bp_override=pow_override,
+                    charged=charged,
+                    forced_type=bridge_forced_type,
+                    bp_multiplier=bridge_bp_multiplier,
+                )
             _atk_d_for_move = _atk_d
             if effective_move.name_ja == "からげんき" and pow_override > 0:
                 # 「状態異常時 140」を手動指定した場合は、からげんき固有の状態異常依存計算を重ねない。
@@ -4344,6 +2007,23 @@ class DamagePanel(QWidget):
                 d_copy = dict(def_d)
                 if cur_hp < hp:
                     d_copy["curHP"] = cur_hp
+                try:
+                    self.bridge_payload_logged.emit(
+                        "[SmogonReq] {}".format(
+                            json.dumps(
+                                {
+                                    "dir": "atk->def",
+                                    "attacker": _atk_d_for_move,
+                                    "defender": d_copy,
+                                    "move": _mv_d,
+                                    "field": _field_d,
+                                },
+                                ensure_ascii=False,
+                            )
+                        )
+                    )
+                except Exception:
+                    pass
                 mn, mx, is_error = _bridge.calc(_atk_d_for_move, d_copy, _mv_d, _field_d)
                 return (mn, mx, hp or 1, is_error)
 
@@ -4445,8 +2125,9 @@ class DamagePanel(QWidget):
                 _custom_d["evs"]["spa"] = def_ev_pts_c * 8
                 _custom_d["evs"]["spd"] = def_ev_pts_d * 8
                 _custom_d["evs"]["spe"] = def_ev_pts_s * 8
-                if def_types_override:
-                    _custom_d["teraType"] = TYPE_TO_SMOGON.get(def_types_override[0], "")
+                # Always align tera payload with panel toggle state.
+                # When the tera checkbox is OFF, force empty teraType.
+                _custom_d["teraType"] = TYPE_TO_SMOGON.get(def_tera, "") if def_tera else ""
 
                 custom_result = _call_bridge(_custom_d, cd.hp)
                 mod_target = cd
@@ -4518,23 +2199,46 @@ class DamagePanel(QWidget):
                     _opp_skin_forced_type = _opp_skin_type
                     _opp_skin_bp_mult = 1.2
 
+                _opp_aura_wheel_type = ""
+                if (opp_move_info.name_ja == "オーラぐるま"
+                        and self._def_custom
+                        and "はらぺこもよう" in (self._def_custom.name_ja or "")):
+                    _opp_aura_wheel_type = "dark"
+
                 _mv_d_opp = smogon_move_to_dict(
                     opp_move_info, is_crit=_opp_is_crit,
                     hits=_opp_hits if _opp_hits > 1 else 0,
                     bp_override=_opp_pow_override,
-                    forced_type=_opp_skin_forced_type,
+                    forced_type=_opp_aura_wheel_type or _opp_skin_forced_type,
                     bp_multiplier=_opp_skin_bp_mult,
                 )
 
                 _self_types = atk.types or ["normal"]
                 _self_ability = atk.ability or ""
-                _opp_effective_type = _opp_skin_forced_type or opp_move_info.type_name
+                _opp_effective_type = _opp_aura_wheel_type or _opp_skin_forced_type or opp_move_info.type_name
                 _opp_type_eff = move_type_effectiveness(
                     opp_move_info, _opp_effective_type, _self_types, _self_ability
                 )
 
                 def _call_bridge_rev(opp_atk_d: dict) -> tuple[int, int, int, bool]:
                     self_hp = atk.hp if atk.hp > 0 else 1
+                    try:
+                        self.bridge_payload_logged.emit(
+                            "[SmogonReq] {}".format(
+                                json.dumps(
+                                    {
+                                        "dir": "def->atk",
+                                        "attacker": opp_atk_d,
+                                        "defender": _self_def_d,
+                                        "move": _mv_d_opp,
+                                        "field": _field_d_rev,
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            )
+                        )
+                    except Exception:
+                        pass
                     mn, mx, is_error = _bridge.calc(opp_atk_d, _self_def_d, _mv_d_opp, _field_d_rev)
                     return (mn, mx, self_hp, is_error)
 
@@ -4589,7 +2293,7 @@ class DamagePanel(QWidget):
                 _opp_custom_atk_d = pokemon_to_attacker_dict(
                     _opp_atk_instance,
                     atk_rank=_opp_def_ac_rank,
-                    terastal_type=self._def_custom.terastal_type or "",
+                    terastal_type=def_tera,
                     ability_on=_opp_ability_on,
                     allies_fainted=_opp_allies_fainted,
                     apply_both=True,
@@ -4601,6 +2305,7 @@ class DamagePanel(QWidget):
                 # AC 0: 攻撃/特攻 EV=0, 無補正性格
                 _opp_ac0_atk_d = attacker_scenario_dict(
                     _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
+                    ev_hp=int(_opp_atk_instance.ev_hp or 0),
                     ev_atk=0,
                     ev_spa=0,
                     nature_en="Hardy",
@@ -4608,6 +2313,9 @@ class DamagePanel(QWidget):
                     item_en=_opp_item_en,
                     atk_rank=_opp_def_ac_rank,
                     is_physical=_is_opp_phys,
+                    terastal_type=def_tera,
+                    allies_fainted=_opp_allies_fainted,
+                    ability_on=_opp_ability_on,
                     gender=defender_gender,
                     apply_both=True,
                 )
@@ -4619,6 +2327,7 @@ class DamagePanel(QWidget):
                 # AC 32: 攻撃/特攻 EV=252, 有利性格
                 _opp_ac32_atk_d = attacker_scenario_dict(
                     _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
+                    ev_hp=int(_opp_atk_instance.ev_hp or 0),
                     ev_atk=252 if _is_opp_phys else 0,
                     ev_spa=0 if _is_opp_phys else 252,
                     nature_en=_opp_best_nat_en,
@@ -4626,6 +2335,9 @@ class DamagePanel(QWidget):
                     item_en=_opp_item_en,
                     atk_rank=_opp_def_ac_rank,
                     is_physical=_is_opp_phys,
+                    terastal_type=def_tera,
+                    allies_fainted=_opp_allies_fainted,
+                    ability_on=_opp_ability_on,
                     gender=defender_gender,
                     apply_both=True,
                 )
@@ -4661,7 +2373,7 @@ class DamagePanel(QWidget):
                         has_reflect=self_reflect, has_light_screen=self_lightscreen,
                         helping_hand=opp_helping, steel_spirit=opp_steel_spirit, charged=opp_charged,
                         fairy_aura=fairy_aura, dark_aura=dark_aura,
-                        terastal_type=self._def_custom.terastal_type or "",
+                        terastal_type=def_tera,
                         atk_rank=self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0,
                         def_rank=def_bd_rank,
                         defender_def_rank=def_bd_rank,
@@ -5039,7 +2751,8 @@ class DamagePanel(QWidget):
                     self._analytic_btn, self._flare_boost_btn,
                     self._guts_btn,
                     self._self_reflect_btn, self._self_lightscreen_btn, self._self_friend_guard_btn,
-                    self._reflect_btn, self._lightscreen_btn, self._friend_guard_btn,
+                    self._self_tailwind_btn,
+                    self._reflect_btn, self._lightscreen_btn, self._friend_guard_btn, self._tailwind_btn,
                     self._opp_burn_btn, self._opp_crit_btn,
                     self._opp_fairy_aura_btn, self._opp_dark_aura_btn,
                     self._opp_charge_btn, self._opp_helping_btn, self._opp_steel_spirit_btn,
@@ -5047,7 +2760,8 @@ class DamagePanel(QWidget):
                     self._opp_swarm_btn, self._opp_toxic_boost_btn,
                     self._opp_stakeout_btn, self._opp_flash_fire_btn,
                     self._opp_protosynthesis_btn, self._opp_quark_drive_btn,
-                    self._opp_analytic_btn, self._opp_flare_boost_btn, self._opp_guts_btn):
+                    self._opp_analytic_btn, self._opp_flare_boost_btn, self._opp_guts_btn,
+                    self._gravity_btn):
             btn.setChecked(False)
         if hasattr(self, "_supreme_combo"):
             self._supreme_combo.setCurrentIndex(0)
@@ -5265,6 +2979,8 @@ class DamagePanel(QWidget):
             self._opp_steel_spirit_btn.setVisible(is_double)
             self._self_friend_guard_btn.setVisible(is_double)
             self._friend_guard_btn.setVisible(is_double)
+            self._self_tailwind_btn.setVisible(is_double)
+            self._tailwind_btn.setVisible(is_double)
         self.recalculate()
 
     def _toggle_details(self, checked: bool) -> None:
@@ -5301,9 +3017,3 @@ class DamagePanel(QWidget):
         return {"エレキ": "electric", "グラス": "grassy",
                 "ミスト": "misty", "サイコ": "psychic"}.get(
             self._terrain_grp.value(), "none")
-
-
-def _row_label(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("color:#89b4fa;font-size:14px;font-weight:bold;")
-    return lbl

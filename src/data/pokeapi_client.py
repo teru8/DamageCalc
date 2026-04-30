@@ -11,7 +11,7 @@ from src.data import database as db
 from src.constants import POKEAPI_BASE
 
 _SESSION = requests.Session()
-_SESSION.headers["User-Agent"] = "PokemonDamageCalc/1.0"
+_SESSION.headers["User-Agent"] = "DamageCalc/0.1.0-alpha"
 
 
 def _get(url: str, retries: int = 3) -> dict:
@@ -232,15 +232,11 @@ def fetch_species(species_id: int) -> SpeciesInfo | None:
     type1 = types_raw[0]["type"]["name"] if len(types_raw) > 0 else "normal"
     type2 = types_raw[1]["type"]["name"] if len(types_raw) > 1 else ""
 
-    # For regional forms, build 'アローラキュウコン' style names from base species name + region prefix.
-    # PokeAPI form_names only contains e.g. 'アローラのすがた', not the full Pokemon name.
-    if is_form:
-        base_name_ja = _ja_name(spec.get("names", []))
-        name_en = poke.get("name", "")
-        name_ja = _build_regional_name_ja(name_en, base_name_ja) or base_name_ja
-    else:
-        name_ja = _ja_name(spec.get("names", []))
+    # Apply special-form display names for both base species IDs and form IDs.
+    # Example: deoxys-normal (species_id=386) should be "デオキシス（ノーマルフォルム）".
+    base_name_ja = _ja_name(spec.get("names", []))
     name_en = poke.get("name", "")
+    name_ja = _build_regional_name_ja(name_en, base_name_ja) or base_name_ja
 
     if not name_ja:
         return None

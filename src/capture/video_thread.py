@@ -73,16 +73,20 @@ class VideoThread(QThread):
     def list_cameras(max_index: int = 10) -> list[tuple[int, str]]:
         """Returns list of (index, label) for available cameras."""
         import os
+        import sys
         cameras = []
-        old_val = os.environ.get("OPENCV_LOG_LEVEL")
-        os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
-        for i in range(max_index):
-            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            if cap.isOpened():
-                cameras.append((i, f"Camera {i}"))
-                cap.release()
-        if old_val is None:
-            os.environ.pop("OPENCV_LOG_LEVEL", None)
-        else:
-            os.environ["OPENCV_LOG_LEVEL"] = old_val
+        # OpenCVのDSHOW警告をstderrリダイレクトで抑制
+        devnull = open(os.devnull, "w")
+        old_stderr_fd = os.dup(2)
+        os.dup2(devnull.fileno(), 2)
+        try:
+            for i in range(max_index):
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    cameras.append((i, f"Camera {i}"))
+                    cap.release()
+        finally:
+            os.dup2(old_stderr_fd, 2)
+            os.close(old_stderr_fd)
+            devnull.close()
         return cameras

@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -76,7 +75,7 @@ class PokemonInstance:
     # Terastal
     terastal_type: str = ""  # English type name, "" = not terastalized
     # DB registration id
-    db_id: Optional[int] = None
+    db_id: int | None = None
 
     @property
     def is_registered(self) -> bool:
@@ -99,10 +98,10 @@ class DamageResult:
 
 @dataclass
 class BattleState:
-    my_pokemon: Optional[PokemonInstance] = None
-    opponent_pokemon: Optional[PokemonInstance] = None
-    my_party: list[Optional[PokemonInstance]] = field(default_factory=list)
-    opponent_party: list[Optional[PokemonInstance]] = field(default_factory=list)
+    my_pokemon: PokemonInstance | None = None
+    opponent_pokemon: PokemonInstance | None = None
+    my_party: list[PokemonInstance | None] = field(default_factory=list)
+    opponent_party: list[PokemonInstance | None] = field(default_factory=list)
     last_opponent_move: str = ""
     weather: str = "none"        # sun / rain / sand / hail / none
     terrain: str = "none"        # electric / grassy / misty / psychic / none

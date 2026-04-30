@@ -2,9 +2,32 @@ import re
 import sqlite3
 from pathlib import Path
 from src.models import PokemonInstance, SpeciesInfo, MoveInfo
+from src.constants import TYPE_EN_TO_JA, TYPE_JA_TO_EN
 
 DEFAULT_USAGE_SEASON = "M-1"
 _ACTIVE_USAGE_SEASON = DEFAULT_USAGE_SEASON
+_TERA_EN_TO_JA: dict[str, str] = {
+    **TYPE_EN_TO_JA,
+    "stellar": "ステラ",
+}
+_TERA_JA_TO_EN: dict[str, str] = {
+    **TYPE_JA_TO_EN,
+    "ステラ": "stellar",
+}
+
+
+def _terastal_to_db_ja(terastal_type_en: str) -> str:
+    en = (terastal_type_en or "").strip().lower()
+    if not en:
+        return "ノーマル"
+    return _TERA_EN_TO_JA.get(en, "ノーマル")
+
+
+def _terastal_from_db_ja(terastal_type_db: str) -> str:
+    ja = (terastal_type_db or "").strip()
+    if not ja:
+        return "normal"
+    return _TERA_JA_TO_EN.get(ja, "normal")
 
 
 def normalize_season_token(season: str | None) -> str:
@@ -223,6 +246,7 @@ def init_db() -> None:
         ev_sp_attack  INTEGER DEFAULT 0,
         ev_sp_defense INTEGER DEFAULT 0,
         ev_speed      INTEGER DEFAULT 0,
+        terastal_type TEXT DEFAULT 'ノーマル',
         move1         TEXT DEFAULT '',
         move2         TEXT DEFAULT '',
         move3         TEXT DEFAULT '',
@@ -283,6 +307,11 @@ def init_db() -> None:
         ON usage_effort(season, pokemon_name_ja, usage_rank);
     CREATE INDEX IF NOT EXISTS idx_species_move_lookup
         ON species_move_cache(species_id, move_id);
+
+    CREATE TABLE IF NOT EXISTS app_meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
     """)
     _migrate_legacy_usage_tables(conn)
     species_cols = [row["name"] for row in c.execute("PRAGMA table_info(species_cache)").fetchall()]
@@ -291,6 +320,50 @@ def init_db() -> None:
     pokemon_cols = [row["name"] for row in c.execute("PRAGMA table_info(registered_pokemon)").fetchall()]
     if "usage_name" not in pokemon_cols:
         c.execute("ALTER TABLE registered_pokemon ADD COLUMN usage_name TEXT DEFAULT ''")
+    if "terastal_type" not in pokemon_cols:
+        c.execute("ALTER TABLE registered_pokemon ADD COLUMN terastal_type TEXT DEFAULT 'ノーマル'")
+    # Normalize terastal_type storage to Japanese labels in DB.
+    c.execute(
+        """
+        UPDATE registered_pokemon
+        SET terastal_type='ノーマル'
+        WHERE terastal_type IS NULL OR TRIM(terastal_type)=''
+        """
+    )
+    for en, ja in _TERA_EN_TO_JA.items():
+        c.execute(
+            "UPDATE registered_pokemon SET terastal_type=? WHERE terastal_type=?",
+            (ja, en),
+        )
+    c.execute(
+        """
+        UPDATE registered_pokemon
+        SET terastal_type='ノーマル'
+        WHERE terastal_type IS NULL OR TRIM(terastal_type)=''
+        """
+    )
+    ev_migration_done = c.execute(
+        "SELECT value FROM app_meta WHERE key='registered_pokemon_ev_storage_v2'"
+    ).fetchone()
+    if ev_migration_done is None:
+        c.execute(
+            """
+            UPDATE registered_pokemon
+            SET
+                ev_hp = CASE WHEN ev_hp > 0 THEN MAX(ev_hp - 4, 0) ELSE 0 END,
+                ev_attack = CASE WHEN ev_attack > 0 THEN MAX(ev_attack - 4, 0) ELSE 0 END,
+                ev_defense = CASE WHEN ev_defense > 0 THEN MAX(ev_defense - 4, 0) ELSE 0 END,
+                ev_sp_attack = CASE WHEN ev_sp_attack > 0 THEN MAX(ev_sp_attack - 4, 0) ELSE 0 END,
+                ev_sp_defense = CASE WHEN ev_sp_defense > 0 THEN MAX(ev_sp_defense - 4, 0) ELSE 0 END,
+                ev_speed = CASE WHEN ev_speed > 0 THEN MAX(ev_speed - 4, 0) ELSE 0 END
+            """
+        )
+        c.execute(
+            """
+            INSERT OR REPLACE INTO app_meta (key, value)
+            VALUES ('registered_pokemon_ev_storage_v2', '1')
+            """
+        )
     conn.commit()
     conn.close()
     
@@ -397,8 +470,22 @@ def get_move_by_name_ja(name_ja: str) -> MoveInfo | None:
 
 def save_pokemon(pokemon: PokemonInstance) -> int:
     import json
+    def _to_db_ev(ev_value: int) -> int:
+        # Champions points are handled as multiples of 8 in-app.
+        # Persist to DB as (8x points - 4), with zero staying zero.
+        value = int(ev_value or 0)
+        if value <= 0:
+            return 0
+        return max(0, value - 4)
+
     conn = get_connection()
     moves = (pokemon.moves + ["", "", "", ""])[:4]
+    ev_hp_db = _to_db_ev(pokemon.ev_hp)
+    ev_attack_db = _to_db_ev(pokemon.ev_attack)
+    ev_defense_db = _to_db_ev(pokemon.ev_defense)
+    ev_sp_attack_db = _to_db_ev(pokemon.ev_sp_attack)
+    ev_sp_defense_db = _to_db_ev(pokemon.ev_sp_defense)
+    ev_speed_db = _to_db_ev(pokemon.ev_speed)
     if pokemon.db_id:
         conn.execute("""
             UPDATE registered_pokemon SET
@@ -406,6 +493,7 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
             nature=?, ability=?, item=?,
             hp=?, attack=?, defense=?, sp_attack=?, sp_defense=?, speed=?,
             ev_hp=?, ev_attack=?, ev_defense=?, ev_sp_attack=?, ev_sp_defense=?, ev_speed=?,
+            terastal_type=?,
             move1=?, move2=?, move3=?, move4=?,
             updated_at=CURRENT_TIMESTAMP
             WHERE id=?
@@ -413,8 +501,9 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
               json.dumps(pokemon.types), pokemon.nature, pokemon.ability, pokemon.item,
               pokemon.hp, pokemon.attack, pokemon.defense,
               pokemon.sp_attack, pokemon.sp_defense, pokemon.speed,
-              pokemon.ev_hp, pokemon.ev_attack, pokemon.ev_defense,
-              pokemon.ev_sp_attack, pokemon.ev_sp_defense, pokemon.ev_speed,
+              ev_hp_db, ev_attack_db, ev_defense_db,
+              ev_sp_attack_db, ev_sp_defense_db, ev_speed_db,
+              _terastal_to_db_ja(pokemon.terastal_type),
               moves[0], moves[1], moves[2], moves[3],
               pokemon.db_id))
         new_id = pokemon.db_id
@@ -425,14 +514,16 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
              nature, ability, item,
              hp, attack, defense, sp_attack, sp_defense, speed,
              ev_hp, ev_attack, ev_defense, ev_sp_attack, ev_sp_defense, ev_speed,
+             terastal_type,
              move1, move2, move3, move4)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (pokemon.species_id, pokemon.name_ja, pokemon.usage_name, pokemon.name_en,
               json.dumps(pokemon.types), pokemon.nature, pokemon.ability, pokemon.item,
               pokemon.hp, pokemon.attack, pokemon.defense,
               pokemon.sp_attack, pokemon.sp_defense, pokemon.speed,
-              pokemon.ev_hp, pokemon.ev_attack, pokemon.ev_defense,
-              pokemon.ev_sp_attack, pokemon.ev_sp_defense, pokemon.ev_speed,
+              ev_hp_db, ev_attack_db, ev_defense_db,
+              ev_sp_attack_db, ev_sp_defense_db, ev_speed_db,
+              _terastal_to_db_ja(pokemon.terastal_type),
               moves[0], moves[1], moves[2], moves[3]))
         new_id = cur.lastrowid
     conn.commit()
@@ -442,6 +533,13 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
 
 def load_all_pokemon() -> list[PokemonInstance]:
     import json
+    def _from_db_ev(ev_value: int) -> int:
+        # Restore in-app representation from persisted (8x points - 4).
+        value = int(ev_value or 0)
+        if value <= 0:
+            return 0
+        return value + 4
+
     conn = get_connection()
     rows = conn.execute(
         "SELECT * FROM registered_pokemon ORDER BY updated_at DESC").fetchall()
@@ -460,9 +558,10 @@ def load_all_pokemon() -> list[PokemonInstance]:
             hp=row["hp"], attack=row["attack"], defense=row["defense"],
             sp_attack=row["sp_attack"], sp_defense=row["sp_defense"],
             speed=row["speed"],
-            ev_hp=row["ev_hp"], ev_attack=row["ev_attack"],
-            ev_defense=row["ev_defense"], ev_sp_attack=row["ev_sp_attack"],
-            ev_sp_defense=row["ev_sp_defense"], ev_speed=row["ev_speed"],
+            ev_hp=_from_db_ev(row["ev_hp"]), ev_attack=_from_db_ev(row["ev_attack"]),
+            ev_defense=_from_db_ev(row["ev_defense"]), ev_sp_attack=_from_db_ev(row["ev_sp_attack"]),
+            ev_sp_defense=_from_db_ev(row["ev_sp_defense"]), ev_speed=_from_db_ev(row["ev_speed"]),
+            terastal_type=_terastal_from_db_ja(row["terastal_type"]),
             moves=[m for m in [row["move1"], row["move2"],
                                 row["move3"], row["move4"]] if m],
             db_id=row["id"],
@@ -1092,8 +1191,13 @@ def export_usage_to_json(season: str | None = None) -> bool:
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
-    except Exception:
-        conn.close()
+    except Exception as e:
+        import logging
+        logging.warning("export_usage_snapshot failed: %s", e)
+        try:
+            conn.close()
+        except Exception:
+            pass
         return False
 
 
@@ -1141,7 +1245,9 @@ def import_usage_from_json(season: str | None = None) -> bool:
             season=season_token,
         )
         return True
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.warning("import_usage_from_json failed: %s", e)
         return False
 
 

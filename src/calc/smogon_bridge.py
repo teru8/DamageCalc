@@ -9,9 +9,9 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
-from typing import Optional
 
 from src.data.item_catalog import get_item_name_en
 from src.models import PokemonInstance, MoveInfo
@@ -32,7 +32,25 @@ def _find_node() -> str:
             return p
     raise FileNotFoundError("node.exe が見つかりません。Node.js をインストールしてください。")
 
-_BRIDGE_JS = Path(__file__).resolve().parent / "bridge.js"
+def _resolve_bridge_js() -> Path:
+    """Resolve bridge.js path for both dev and PyInstaller builds."""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        candidates: list[Path] = []
+        meipass_raw = getattr(sys, "_MEIPASS", "")
+        if meipass_raw:
+            candidates.append(Path(meipass_raw) / "src" / "calc" / "bridge.js")
+        candidates.append(exe_dir / "_internal" / "src" / "calc" / "bridge.js")
+        candidates.append(exe_dir / "src" / "calc" / "bridge.js")
+        for path in candidates:
+            if path.exists():
+                return path
+        # Fallback to the most likely onedir location for clearer errors upstream.
+        return exe_dir / "_internal" / "src" / "calc" / "bridge.js"
+    return Path(__file__).resolve().parent / "bridge.js"
+
+
+_BRIDGE_JS = _resolve_bridge_js()
 
 # ── Name mapping tables ───────────────────────────────────────────────────
 
@@ -937,14 +955,14 @@ TYPE_TO_SMOGON: dict[str, str] = {
     t: t.capitalize() for t in [
         "normal", "fire", "water", "electric", "grass", "ice",
         "fighting", "poison", "ground", "flying", "psychic", "bug",
-        "rock", "ghost", "dragon", "dark", "steel", "fairy",
+        "rock", "ghost", "dragon", "dark", "steel", "fairy", "stellar",
     ]
 }
 
 # ── Singleton bridge process ──────────────────────────────────────────────
 
 class SmogonBridge:
-    _instance: Optional["SmogonBridge"] = None
+    _instance: "SmogonBridge | None" = None
     _lock = threading.Lock()
 
     @classmethod
@@ -956,12 +974,24 @@ class SmogonBridge:
         return cls._instance
 
     def __init__(self) -> None:
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
         self._io_lock = threading.Lock()
         self._start()
 
     def _start(self) -> None:
         node = _find_node()
+        bridge_cwd = _BRIDGE_JS.parent
+        if not bridge_cwd.is_dir():
+            raise FileNotFoundError(
+                "bridge.js の実行ディレクトリが見つかりません: {}".format(bridge_cwd)
+            )
+        creationflags = 0
+        startupinfo = None
+        if os.name == "nt":
+            creationflags = subprocess.CREATE_NO_WINDOW
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0
         self._proc = subprocess.Popen(
             [node, str(_BRIDGE_JS)],
             stdin=subprocess.PIPE,
@@ -969,7 +999,9 @@ class SmogonBridge:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            cwd=str(_BRIDGE_JS.parent),
+            cwd=str(bridge_cwd),
+            creationflags=creationflags,
+            startupinfo=startupinfo,
         )
 
     def _send(self, req: dict) -> dict:
@@ -990,10 +1022,24 @@ class SmogonBridge:
                "move": move_d, "field": field_d}
         try:
             res = self._send(req)
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.warning("SmogonBridge calc error: %s", e)
             return (0, 0, True)
         is_error = bool(res.get("error"))
         return (max(0, res.get("min", 0)), max(0, res.get("max", 0)), is_error)
+
+    def close(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+
+    def __del__(self) -> None:
+        self.close()
 
 
 # ── Public helpers ────────────────────────────────────────────────────────
@@ -1128,6 +1174,7 @@ def defender_scenario_dict(
 
 def attacker_scenario_dict(
     species_name_en: str,
+    ev_hp: int,
     ev_atk: int,
     ev_spa: int,
     nature_en: str = "Hardy",
@@ -1135,6 +1182,9 @@ def attacker_scenario_dict(
     item_en: str = "",
     atk_rank: int = 0,
     is_physical: bool = True,
+    terastal_type: str = "",
+    allies_fainted: int = 0,
+    ability_on: bool = False,
     gender: str = "",
     apply_both: bool = False,
 ) -> dict:
@@ -1147,18 +1197,23 @@ def attacker_scenario_dict(
         else:
             boosts["atk" if not is_physical else "spa"] = atk_rank
 
+    tera_en = TYPE_TO_SMOGON.get(terastal_type, "")
     result = {
         "species":  _normalize_smogon_species(species_name_en) or "Bulbasaur",
         "level":    50,
         "nature":   nature_en,
-        "evs":      {"hp": 0, "atk": ev_atk, "def": 0, "spa": ev_spa, "spd": 0, "spe": 0},
+        "evs":      {"hp": ev_hp, "atk": ev_atk, "def": 0, "spa": ev_spa, "spd": 0, "spe": 0},
         "ivs":      {"hp": 31, "atk": 31, "def": 31, "spa": 31, "spd": 31, "spe": 31},
         "ability":  ability_en or "No Ability",
         "item":     item_en,
         "status":   "",
-        "teraType": "",
+        "teraType": tera_en,
         "boosts":   boosts,
     }
+    if allies_fainted > 0:
+        result["alliesFainted"] = int(allies_fainted)
+    if ability_on:
+        result["abilityOn"] = True
     if gender in ("M", "F", "N"):
         result["gender"] = gender
     if ability_en in ("Protosynthesis", "Quark Drive"):
@@ -1272,6 +1327,9 @@ def field_to_dict(
     helping_hand: bool = False,
     fairy_aura: bool = False,
     dark_aura: bool = False,
+    friend_guard: bool = False,
+    tailwind: bool = False,
+    gravity: bool = False,
 ) -> dict:
     return {
         "weather":     weather if weather != "none" else "",
@@ -1279,6 +1337,9 @@ def field_to_dict(
         "reflect":     reflect,
         "lightScreen": lightscreen,
         "helpingHand": helping_hand,
+        "friendGuard": friend_guard,
+        "tailwind":    tailwind,
+        "isGravity":   gravity,
         "isFairyAura": fairy_aura,
         "isDarkAura":  dark_aura,
     }

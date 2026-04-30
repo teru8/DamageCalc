@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
@@ -19,15 +20,32 @@ _CATEGORY_URLS = {
     "shiny": _BASE_URL + "/wiki/Category:Champions_Shiny_menu_sprites",
 }
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_CACHE_ROOT = _PROJECT_ROOT / "assets" / "champions_menu_sprites"
+def _resolve_cache_root() -> Path:
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "assets" / "champions_menu_sprites")
+        candidates.append(exe_dir / "_internal" / "assets" / "champions_menu_sprites")
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        if str(meipass):
+            candidates.append(meipass / "assets" / "champions_menu_sprites")
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        candidates.append(project_root / "assets" / "champions_menu_sprites")
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+_CACHE_ROOT = _resolve_cache_root()
 _NORMAL_DIR = _CACHE_ROOT / "normal"
 _SHINY_DIR = _CACHE_ROOT / "shiny"
 _MANIFEST_PATH = _CACHE_ROOT / "manifest.json"
 _TIMEOUT_SECONDS = 25
 
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "PokemonDamageCalc/1.0"})
+_SESSION.headers.update({"User-Agent": "DamageCalc/0.1.0-alpha"})
 
 _MANIFEST_CACHE: dict | None = None
 _REFS_BY_NAME_CACHE: dict[str, list[dict]] | None = None
@@ -42,8 +60,20 @@ _MATCH_SCALES = (0.40, 0.50, 0.60, 0.70, 0.82, 0.94)
 _MATCH_DX = (-8, -4, 0, 4, 8)
 _MATCH_DY = (-12, -8, -4, 0, 4)
 _COLOR_DELTA_NORM = 66.0
-_FORM_REF_PENALTY = 0.018
-_SHINY_REF_PENALTY = 0.050
+
+# Battle-only transformations that never appear on the party screen.
+_EXCLUDED_FORMS: frozenset[str] = frozenset({
+    # 恒久的バトル専用変身
+    "mega", "mega x", "mega y", "mega z",
+    "gigantamax",
+    "primal",
+    "eternamax",
+    # バトル中フォルムチェンジ（PT画面は base のみ）
+    "rainy", "snowy", "sunny",   # ポワルン
+    "blade",                     # ギルガルド
+    "hangry",                    # モルペコ
+    "hero",                      # イルカマン
+})
 
 # Primary (first-priority) color template match on red-filled backgrounds.
 _RED_BG_BGRS = (
@@ -174,6 +204,24 @@ def _safe_token(text: str) -> str:
     return token.strip("._") or "base"
 
 
+def _resolve_form_name_ja(name_en: str, form: str) -> str:
+    """Return form-specific Japanese name (e.g. 'アローラライチュウ'), or '' if not applicable."""
+    from src.data.pokeapi_client import _SPECIAL_FORM_NAME_MAP  # noqa: PLC0415
+
+    base_en = (name_en or "").lower().replace(" ", "-").replace("_", "-")
+    form_slug = (form or "").lower().replace(" ", "-").replace("_", "-")
+    if not base_en or not form_slug:
+        return ""
+    prefix = f"{base_en}-{form_slug}"
+    if prefix in _SPECIAL_FORM_NAME_MAP:
+        return _SPECIAL_FORM_NAME_MAP[prefix]
+    # Prefix match handles suffixes like "-breed" (e.g. "tauros-paldea-aqua" → "tauros-paldea-aqua-breed")
+    for k, v in _SPECIAL_FORM_NAME_MAP.items():
+        if k.startswith(prefix):
+            return v
+    return ""
+
+
 def clear_cache() -> None:
     global _MANIFEST_CACHE, _REFS_BY_NAME_CACHE
     _MANIFEST_CACHE = None
@@ -295,12 +343,14 @@ def download_catalog(
                 binary = _SESSION.get(image_url, timeout=_TIMEOUT_SECONDS).content
                 local_path.write_bytes(binary)
 
+            form_name_ja = _resolve_form_name_ja(name_en, form)
             key = (species_id, form.casefold(), is_shiny, local_name)
             row = {
                 "species_id": species_id,
                 "name_ja": name_ja,
                 "name_en": name_en,
                 "form": form,
+                "form_name_ja": form_name_ja,
                 "is_shiny": is_shiny,
                 "category": category,
                 "file_page_url": file_page_url,
@@ -343,23 +393,29 @@ def _refs_by_name() -> dict[str, list[dict]]:
         if not isinstance(row, dict):
             continue
         name_ja = str(row.get("name_ja") or "").strip()
+        form_name_ja = str(row.get("form_name_ja") or "").strip()
         rel_path = str(row.get("local_path") or "").strip()
         if not name_ja or not rel_path:
             continue
         path = _CACHE_ROOT / rel_path
         if not path.exists():
             continue
-        grouped.setdefault(name_ja, []).append(
-            {
-                "path": str(path),
-                "is_shiny": bool(row.get("is_shiny")),
-                "form": str(row.get("form") or ""),
-            }
-        )
+        ref = {
+            "path": str(path),
+            "is_shiny": bool(row.get("is_shiny")),
+            "form": str(row.get("form") or ""),
+        }
+        grouped.setdefault(name_ja, []).append(ref)
+        if form_name_ja and form_name_ja != name_ja:
+            grouped.setdefault(form_name_ja, []).append(ref)
 
     for name_ja, rows in grouped.items():
-        rows.sort(key=lambda row: (1 if row.get("is_shiny") else 0, row.get("form") or ""))
-        grouped[name_ja] = rows[:8]
+        filtered = [
+            row for row in rows
+            if (row.get("form") or "").strip().casefold() not in _EXCLUDED_FORMS
+        ]
+        filtered.sort(key=lambda row: (1 if row.get("is_shiny") else 0, row.get("form") or ""))
+        grouped[name_ja] = filtered
 
     _REFS_BY_NAME_CACHE = grouped
     return grouped
@@ -622,20 +678,16 @@ def _score_reference(query: dict, ref_rgb: np.ndarray, ref_alpha: np.ndarray) ->
     return best_score
 
 
-def _reference_penalty(ref: dict) -> float:
-    penalty = 0.0
-    if bool(ref.get("is_shiny")):
-        penalty += _SHINY_REF_PENALTY
-    if str(ref.get("form") or "").strip():
-        penalty += _FORM_REF_PENALTY
-    return penalty
-
-
 def match_sprite(
     sprite: np.ndarray,
     candidate_names: list[str],
     top_k: int = 6,
-) -> list[tuple[str, float]]:
+) -> list[dict]:
+    """Return matches sorted by score descending.
+
+    Each dict contains: name_ja, form, is_shiny, score.
+    Form variants (gender, regional, item-based) are scored individually.
+    """
     if not candidate_names:
         return []
     refs_by_name = _refs_by_name()
@@ -646,52 +698,57 @@ def match_sprite(
     if not query:
         return []
 
-    # Stage 1 (first priority): simple image comparison after filling transparent
-    # area with red background tones close to in-game party UI.
-    color_results: list[tuple[str, float]] = []
+    def _ref_key(name_ja: str, ref: dict) -> tuple[str, str, bool]:
+        return (name_ja, str(ref.get("form") or ""), bool(ref.get("is_shiny")))
+
+    def _to_result(key: tuple[str, str, bool], score: float) -> dict:
+        return {
+            "name_ja": key[0],
+            "form": key[1],
+            "is_shiny": key[2],
+            "score": float(min(score, 1.0)),
+        }
+
+    # Stage 1: color-fill matching — score each (name_ja, form, is_shiny) entry.
+    color_scores: dict[tuple[str, str, bool], float] = {}
     for name_ja in candidate_names:
-        refs = refs_by_name.get(name_ja) or []
-        if not refs:
-            continue
-        best = 0.0
-        for ref in refs:
+        for ref in refs_by_name.get(name_ja) or []:
             parsed = _load_ref_image(str(ref.get("path") or ""))
             if not parsed:
                 continue
             score = _score_reference_by_color_fill(query, parsed[0], parsed[1])
-            if score > best:
-                best = score
-            if best >= 0.90:
-                break
-        if best > 0.16:
-            color_results.append((name_ja, float(min(best, 1.0))))
+            key = _ref_key(name_ja, ref)
+            if score > color_scores.get(key, 0.0):
+                color_scores[key] = score
 
-    color_results.sort(key=lambda item: item[1], reverse=True)
+    color_results = sorted(
+        [_to_result(k, v) for k, v in color_scores.items() if v > 0.16],
+        key=lambda x: x["score"],
+        reverse=True,
+    )
     if color_results:
-        top_color = float(color_results[0][1])
-        second_color = float(color_results[1][1]) if len(color_results) >= 2 else 0.0
-        if top_color >= _COLOR_PRIMARY_ACCEPT and (len(color_results) == 1 or (top_color - second_color) >= _COLOR_PRIMARY_MARGIN):
+        top_color = float(color_results[0]["score"])
+        second_color = float(color_results[1]["score"]) if len(color_results) >= 2 else 0.0
+        if top_color >= _COLOR_PRIMARY_ACCEPT and (
+            len(color_results) == 1 or (top_color - second_color) >= _COLOR_PRIMARY_MARGIN
+        ):
             return color_results[:max(1, int(top_k))]
 
     # Stage 2 fallback: shape/edge-aware matching.
-    results: list[tuple[str, float]] = []
+    shape_scores: dict[tuple[str, str, bool], float] = {}
     for name_ja in candidate_names:
-        refs = refs_by_name.get(name_ja) or []
-        if not refs:
-            continue
-        best = 0.0
-        for ref in refs:
+        for ref in refs_by_name.get(name_ja) or []:
             parsed = _load_ref_image(str(ref.get("path") or ""))
             if not parsed:
                 continue
-            raw_score = _score_reference(query, parsed[0], parsed[1])
-            score = max(0.0, raw_score - _reference_penalty(ref))
-            if score > best:
-                best = score
-            if best >= 0.74:
-                break
-        if best > 0.10:
-            results.append((name_ja, float(min(best, 1.0))))
+            score = _score_reference(query, parsed[0], parsed[1])
+            key = _ref_key(name_ja, ref)
+            if score > shape_scores.get(key, 0.0):
+                shape_scores[key] = score
 
-    results.sort(key=lambda item: item[1], reverse=True)
+    results = sorted(
+        [_to_result(k, v) for k, v in shape_scores.items() if v > 0.10],
+        key=lambda x: x["score"],
+        reverse=True,
+    )
     return results[:max(1, int(top_k))]

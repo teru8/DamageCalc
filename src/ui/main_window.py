@@ -1,6 +1,10 @@
 from __future__ import annotations
 import copy
 import json
+import re
+import sys
+import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -10,8 +14,8 @@ from PyQt5.QtWidgets import (
     QSplitter, QTabWidget, QLabel, QComboBox, QPushButton,
     QStatusBar, QGroupBox, QListWidget, QListWidgetItem,
     QProgressBar, QCheckBox, QMessageBox, QTextEdit,
-    QDialog, QInputDialog, QLineEdit, QGridLayout,
-    QMenu, QAction, QScrollArea, QFrame,
+    QDialog, QInputDialog, QLineEdit, QGridLayout, QPlainTextEdit, QFileDialog,
+    QMenu, QAction, QScrollArea, QFrame, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QThread, QObject, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -20,14 +24,14 @@ from src.models import PokemonInstance, BattleState
 from src.capture.video_thread import VideoThread
 from src.capture.ocr_engine import OcrInitThread
 from src.data.pokeapi_client import PokeApiLoader
-from src.data.usage_scraper import UsageScraper, USAGE_SOURCES, USAGE_SOURCE_DEFAULT
 from src.data import database as db
 from src.recognition import text_matcher
 from src.recognition import opponent_party_reader
 from src.recognition import live_battle_reader
-from src.constants import OCR_INTERVAL_MS, TYPE_EN_TO_JA
-from src.ui.battle_panel import PartySlot
+from src.recognition import opponent_party_auto_trigger
+from src.constants import OCR_INTERVAL_MS, TYPE_EN_TO_JA, TYPE_JA_TO_EN
 from src.ui.damage_panel import DamagePanel
+from src.ui.main_window_panels import _DraggableCell, _SavedPartyPanel, _MyPartyPanel
 from src.ui.pokemon_edit_dialog import ChipButton, TypeIconButton
 from src.ui.ui_utils import open_pokemon_edit_dialog
 
@@ -35,40 +39,166 @@ _RIGHT_PANEL_MIN_WIDTH = 760
 _CAM_PANEL_WIDTH = 600
 _PREVIEW_W, _PREVIEW_H = 320, 180
 _WINDOW_WIDTH_PADDING = 28
+_USAGE_SOURCE_DEFAULT_FALLBACK = "pokedb_tokyo"
+_USAGE_SOURCES_FALLBACK = {
+    "pokedb_tokyo": "pokedb.tokyo",
+}
+_SAMPLE_PARTY_TEXT = """\
+ガブリアス @ きあいのタスキ
+テラスタイプ: ノーマル
+特性: さめはだ
+性格: ようき
+185(12)-182(252)-115-90-105-169(252)
+じしん / げきりん / がんせきふうじ / どくづき
+アシレーヌ @ オボンのみ
+テラスタイプ: ノーマル
+特性: げきりゅう
+性格: ひかえめ
+187(252)-84-94-195(252)-136-82(12)
+ムーンフォース / うたかたのアリア / アクアジェット / クイックターン
+リザードン @ リザードナイトＹ
+テラスタイプ: ノーマル
+特性: もうか
+性格: おくびょう
+155(12)-93-98-161(252)-105-167(252)
+ソーラービーム / ニトロチャージ / かえんほうしゃ / フレアドライブ
+アーマーガア @ たべのこし
+テラスタイプ: ノーマル
+特性: プレッシャー
+性格: わんぱく
+205(252)-107-172(252)-65-105-89(12)
+ボディプレス / とんぼがえり / アイアンヘッド / ブレイブバード
+ブリジュラス @ たべのこし
+テラスタイプ: ノーマル
+特性: じきゅうりょく
+性格: ひかえめ
+167(12)-112-150-194(252)-85-137(252)
+ラスターカノン / りゅうせいぐん / １０まんボルト / はどうだん
+カバルドン @ オボンのみ
+テラスタイプ: ノーマル
+特性: すなおこし
+性格: わんぱく
+215(252)-132-151-79-124(252)-69(12)
+じしん / がんせきふうじ / こおりのキバ / じわれ
+"""
+
+
+def _parse_sample_party() -> list[PokemonInstance]:
+    """コード内埋め込みのサンプルパーティを解析して PokemonInstance リストを返す。"""
+    text = _SAMPLE_PARTY_TEXT
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if "@" in line and current:
+            blocks.append(current)
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        blocks.append(current)
+    result: list[PokemonInstance] = []
+    stat_re = re.compile(r"(\d+)(?:\((\d+)\))?")
+    for block_lines in blocks:
+        if len(block_lines) < 6:
+            continue
+        # Line 0: name @ item
+        head = block_lines[0].split("@")
+        name_ja = head[0].strip()
+        item = head[1].strip() if len(head) > 1 else ""
+        # Line 1: テラスタイプ
+        tera_ja = block_lines[1].split(":")[-1].strip() if ":" in block_lines[1] else ""
+        tera_en = TYPE_JA_TO_EN.get(tera_ja, "")
+        # Line 2: 特性
+        ability = block_lines[2].split(":")[-1].strip() if ":" in block_lines[2] else ""
+        # Line 3: 性格
+        nature = block_lines[3].split(":")[-1].strip() if ":" in block_lines[3] else "まじめ"
+        # Line 4: 実数値(EV)-...
+        parts = block_lines[4].split("-")
+        stats: list[int] = []
+        evs: list[int] = []
+        for p in parts[:6]:
+            m = stat_re.match(p.strip())
+            if m:
+                stats.append(int(m.group(1)))
+                evs.append(int(m.group(2)) if m.group(2) else 0)
+            else:
+                stats.append(0)
+                evs.append(0)
+        while len(stats) < 6:
+            stats.append(0)
+            evs.append(0)
+        # Line 5: わざ
+        moves = [m.strip() for m in block_lines[5].split("/")][:4]
+        # DBから種族情報を補完
+        species = db.get_species_by_name_ja(name_ja)
+        p = PokemonInstance(
+            species_id=species.species_id if species else 0,
+            name_ja=name_ja,
+            name_en=species.name_en if species else "",
+            types=[species.type1] + ([species.type2] if species and species.type2 else []) if species else [],
+            weight_kg=species.weight_kg if species else 0.0,
+            nature=nature,
+            ability=ability,
+            item=item,
+            hp=stats[0], attack=stats[1], defense=stats[2],
+            sp_attack=stats[3], sp_defense=stats[4], speed=stats[5],
+            ev_hp=evs[0], ev_attack=evs[1], ev_defense=evs[2],
+            ev_sp_attack=evs[3], ev_sp_defense=evs[4], ev_speed=evs[5],
+            moves=moves,
+            terastal_type=tera_en,
+        )
+        result.append(p)
+    return result
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PokéDamageCalc — Pokemon Champions")
+        self.setWindowTitle("DamageCalc α — Pokemon Champions")
         self.setMinimumSize(_RIGHT_PANEL_MIN_WIDTH + _CAM_PANEL_WIDTH + _WINDOW_WIDTH_PADDING, 720)
 
         self._battle_state = BattleState()
         self._registered_pokemon: list[PokemonInstance] = []
         self._video_thread: VideoThread | None = None
         self._api_loader: PokeApiLoader | None = None
-        self._scraper: UsageScraper | None = None
-        self._party_presets: dict[str, dict] = {}
+        self._scraper: QThread | None = None
+        self._party_presets: list[dict] = []
         self._fetch_api_btn: QPushButton | None = None
         self._fetch_usage_btn: QPushButton | None = None
         self._option_data_status_lbl: QLabel | None = None
         self._option_damage_tera_cb: QCheckBox | None = None
         self._option_damage_bulk_cb: QCheckBox | None = None
         self._option_damage_double_cb: QCheckBox | None = None
+        self._option_detailed_log_cb: QCheckBox | None = None
         self._option_season_combo: QComboBox | None = None
         self._option_source_combo: QComboBox | None = None
         self._options_dialog: QDialog | None = None
         self._tab_damage_btn: QPushButton | None = None
         self._tab_box_btn: QPushButton | None = None
+        self._box_side_scroll: QScrollArea | None = None
         self._box_type_filter: set[str] = set()
         self._box_type_buttons: dict[str, object] = {}
         self._log_edit: QTextEdit | None = None
+        self._main_log_edit: QTextEdit | None = None
+        self._detect_opponent_btn: QPushButton | None = None
         self._auto_detect_btn: QPushButton | None = None
+        self._auto_detect_pending = False
+        self._auto_detect_cooldown_until = 0.0
+        self._auto_detect_score_log_last = 0.0
+        self._auto_detect_debug_dump_last = 0.0
         self._damage_tera_visible = False
+        self._detailed_log_enabled = False
+        self._sample_party_pending = False
+        self._syncing_battle_state_to_panels = False
+        self._saved_party_list_layout: QVBoxLayout | None = None
         self._live_battle_timer = QTimer(self)
         self._live_battle_timer.setInterval(max(300, int(OCR_INTERVAL_MS)))
         self._live_battle_timer.timeout.connect(self._poll_live_battle)
         self._live_battle_signature = ""
+        self._opp_auto_detect_timer = QTimer(self)
+        self._opp_auto_detect_timer.setInterval(250)
+        self._opp_auto_detect_timer.timeout.connect(self._poll_opponent_party_auto_detect)
 
         db.init_db()
         self._registered_pokemon = db.load_all_pokemon()
@@ -78,9 +208,18 @@ class MainWindow(QMainWindow):
         self._sync_battle_state_to_panels()
         self._apply_saved_settings()
         self._load_party_presets()
+        self._apply_top_saved_party_on_startup()
         self._refresh_party_presets_ui()
         self._set_initial_window_size()
         self._start_background_tasks()
+
+    def _get_usage_scraper_symbols(self):
+        try:
+            from src.data.usage_scraper import UsageScraper, USAGE_SOURCES, USAGE_SOURCE_DEFAULT
+
+            return UsageScraper, dict(USAGE_SOURCES), str(USAGE_SOURCE_DEFAULT), None
+        except Exception as exc:
+            return None, dict(_USAGE_SOURCES_FALLBACK), _USAGE_SOURCE_DEFAULT_FALLBACK, str(exc)
 
     # ── UI Build ──────────────────────────────────────────────────────
 
@@ -105,6 +244,7 @@ class MainWindow(QMainWindow):
         self._damage_panel.attacker_changed.connect(self._on_damage_panel_atk_changed)
         self._damage_panel.defender_changed.connect(self._on_damage_panel_def_changed)
         self._damage_panel.registry_maybe_changed.connect(self._refresh_registry_list)
+        self._damage_panel.bridge_payload_logged.connect(self._on_bridge_payload_log)
         self._tabs.addTab(self._damage_panel, "ダメージ計算")
 
         reg_widget = self._build_registry_tab()
@@ -131,28 +271,40 @@ class MainWindow(QMainWindow):
 
         self._tab_damage_btn = QPushButton("ダ\nメ\n|\nジ\n計\n算")
         self._tab_damage_btn.setCheckable(True)
+        self._tab_damage_btn.setFlat(True)
         self._tab_damage_btn.setFixedSize(40, 130)
         self._tab_damage_btn.setStyleSheet(
             "QPushButton{"
             "font-weight:bold;border-top-left-radius:0px;border-bottom-left-radius:0px;"
             "border-top-right-radius:4px;border-bottom-right-radius:4px;font-size:13px;padding:0px;margin:0px;"
             "min-height:130px;max-height:130px;min-width:40px;max-width:40px;"
-            "border-left:0px;}"
+            "border-left:0px;border-top:1px solid #45475a;border-right:1px solid #45475a;border-bottom:1px solid #45475a;}"
+            "QPushButton:checked{background-color:#1E1E2E;color:#CDD6F4;}"
+            "QPushButton:checked:disabled{background-color:#1E1E2E;color:#CDD6F4;}"
+            "QPushButton:!checked{background-color:#CDD6F4;color:#1E1E2E;}"
+            "QPushButton:!checked:disabled{background-color:#CDD6F4;color:#1E1E2E;}"
+            "QPushButton:!checked:hover{background-color:#89b4fa;color:#1E1E2E;}"
         )
-        self._tab_damage_btn.clicked.connect(lambda: self._tabs.setCurrentIndex(0))
+        self._tab_damage_btn.clicked.connect(lambda: self._tabs.setCurrentIndex(0) if self._tabs.currentIndex() != 0 else None)
         switcher_col.addWidget(self._tab_damage_btn)
 
         self._tab_box_btn = QPushButton("ボ\nッ\nク\nス")
         self._tab_box_btn.setCheckable(True)
+        self._tab_box_btn.setFlat(True)
         self._tab_box_btn.setFixedSize(40, 90)
         self._tab_box_btn.setStyleSheet(
             "QPushButton{"
             "font-weight:bold;border-top-left-radius:0px;border-bottom-left-radius:0px;"
             "border-top-right-radius:4px;border-bottom-right-radius:4px;font-size:13px;padding:0px;margin:0px;"
             "min-height:90px;max-height:90px;min-width:40px;max-width:40px;"
-            "border-left:0px;}"
+            "border-left:0px;border-top:1px solid #45475a;border-right:1px solid #45475a;border-bottom:1px solid #45475a;}"
+            "QPushButton:checked{background-color:#1E1E2E;color:#CDD6F4;}"
+            "QPushButton:checked:disabled{background-color:#1E1E2E;color:#CDD6F4;}"
+            "QPushButton:!checked{background-color:#CDD6F4;color:#1E1E2E;}"
+            "QPushButton:!checked:disabled{background-color:#CDD6F4;color:#1E1E2E;}"
+            "QPushButton:!checked:hover{background-color:#89b4fa;color:#1E1E2E;}"
         )
-        self._tab_box_btn.clicked.connect(lambda: self._tabs.setCurrentIndex(1))
+        self._tab_box_btn.clicked.connect(lambda: self._tabs.setCurrentIndex(1) if self._tabs.currentIndex() != 1 else None)
         switcher_col.addWidget(self._tab_box_btn)
         switcher_col.addStretch()
 
@@ -169,14 +321,16 @@ class MainWindow(QMainWindow):
         self._options_btn = QPushButton("オプション")
         self._options_btn.clicked.connect(self._open_options_dialog)
         opt_row.addWidget(self._options_btn)
-        self._shot_btn = QPushButton("スクリーンショット保存")
+        self._shot_btn = QPushButton("キャプチャ")
         self._shot_btn.clicked.connect(self._save_screenshot)
         opt_row.addWidget(self._shot_btn)
-        self._auto_detect_btn = QPushButton("相手PT検出")
+        self._auto_detect_btn = QPushButton("相手PT自動検出")
         self._auto_detect_btn.setStyleSheet(
             "QPushButton { background-color: #f38ba8; color: #11111b; font-weight: bold; }"
         )
-        self._auto_detect_btn.clicked.connect(self._auto_detect_opponent_party)
+        self._auto_detect_btn.setCheckable(True)
+        self._auto_detect_btn.toggled.connect(self._on_auto_detect_toggled)
+        self._refresh_auto_detect_button_style()
         opt_row.addWidget(self._auto_detect_btn)
         opt_row.addStretch()
         left_column.addLayout(opt_row)
@@ -190,17 +344,37 @@ class MainWindow(QMainWindow):
         left_column.addWidget(self._preview_lbl)
 
         combined_row.addLayout(left_column)
+
+        # 右側：ログ表示（ボタンなし）
+        self._main_log_edit = QTextEdit()
+        self._main_log_edit.setReadOnly(True)
+        self._main_log_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self._main_log_edit.setLineWrapMode(QTextEdit.NoWrap)  # 折り返しを抑えて同じ高さで表示行数を確保
+        self._main_log_edit.setMaximumWidth(250)  # 最大幅を制限してカメラパネルが広がりすぎないように
+        self._main_log_edit.setStyleSheet(
+            "QTextEdit{background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;"
+            "border-radius:4px;font-size:11px;}"
+        )
+        combined_row.addWidget(self._main_log_edit, 1)
+
         cam_layout.addLayout(combined_row, 0)
 
         # ダメージ計算タブのサイドパネル（攻守詳細＋天気等）
         self._damage_side = self._damage_panel.side_panel
         cam_layout.addWidget(self._damage_side, 1)
         self._damage_side.setVisible(False)
+        self._detect_opponent_btn = QPushButton("相手PT検出")
+        self._detect_opponent_btn.clicked.connect(self._auto_detect_opponent_party)
+        self._damage_panel.set_opp_party_action_widget(self._detect_opponent_btn)
 
         # ボックスタブのサイドパネル（自分のパーティ）
         self._box_side = self._build_box_side_panel()
-        cam_layout.addWidget(self._box_side, 1)
-        self._box_side.setVisible(False)
+        self._box_side_scroll = QScrollArea()
+        self._box_side_scroll.setWidgetResizable(True)
+        self._box_side_scroll.setFrameShape(QFrame.NoFrame)
+        self._box_side_scroll.setWidget(self._box_side)
+        cam_layout.addWidget(self._box_side_scroll, 1)
+        self._box_side_scroll.setVisible(False)
 
         # 余白を下に寄せる
         cam_layout.addStretch()
@@ -238,7 +412,7 @@ class MainWindow(QMainWindow):
         read_box_btn.clicked.connect(self._read_box_and_register)
         btn_row.addWidget(read_box_btn)
         add_btn = QPushButton("+ 新規登録")
-        add_btn.clicked.connect(lambda: self._open_edit_dialog(None))
+        add_btn.clicked.connect(self._open_register_input_dialog)
         btn_row.addWidget(add_btn)
 
         hint_col = QVBoxLayout()
@@ -301,7 +475,7 @@ class MainWindow(QMainWindow):
         self._reg_scroll = QScrollArea()
         self._reg_scroll.setWidgetResizable(True)
         self._reg_scroll.setFrameShape(QFrame.NoFrame)
-        self._reg_scroll.setMinimumHeight(300)
+        self._reg_scroll.setMinimumHeight(180)
         self._reg_scroll.setContextMenuPolicy(Qt.CustomContextMenu)
         self._reg_scroll.customContextMenuRequested.connect(self._on_registry_context_menu)
         self._reg_grid_widget = QWidget()
@@ -325,61 +499,111 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
 
         party_box = QGroupBox("自分のパーティ")
+        party_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         party_layout = QVBoxLayout(party_box)
 
-        my_row = QHBoxLayout()
-        my_lbl = QLabel("自分:")
-        my_lbl.setFixedWidth(36)
-        my_row.addWidget(my_lbl)
-        self._box_my_slots: list[PartySlot] = []
-        for i in range(6):
-            slot = PartySlot(i)
-            slot.clicked_signal.connect(lambda idx, own=True: self._on_party_slot_clicked(idx, True))
-            my_row.addWidget(slot)
-            self._box_my_slots.append(slot)
-        my_row.addStretch()
-        party_layout.addLayout(my_row)
-
-        preset_box = QGroupBox("パーティ保存")
-        preset_layout = QHBoxLayout(preset_box)
-        preset_layout.setSpacing(6)
-        preset_layout.addWidget(QLabel("プリセット:"))
-        self._box_preset_combo = QComboBox()
-        self._box_preset_combo.setEditable(True)
-        self._box_preset_combo.setInsertPolicy(QComboBox.NoInsert)
-        self._box_preset_combo.setMinimumWidth(200)
-        preset_layout.addWidget(self._box_preset_combo, 1)
-
-        save_btn = QPushButton("保存")
-        save_btn.clicked.connect(lambda: self._save_party_preset(self._box_preset_combo.currentText()))
-        preset_layout.addWidget(save_btn)
-        load_btn = QPushButton("読込")
-        load_btn.clicked.connect(lambda: self._load_party_preset(self._box_preset_combo.currentText()))
-        preset_layout.addWidget(load_btn)
-        del_btn = QPushButton("削除")
-        del_btn.setStyleSheet("QPushButton { color: #f38ba8; }")
-        del_btn.clicked.connect(lambda: self._delete_party_preset(self._box_preset_combo.currentText()))
-        preset_layout.addWidget(del_btn)
-
-        reset_btn = QPushButton("パーティ全リセット")
-        reset_btn.setStyleSheet("QPushButton { color: #f38ba8; border: 1px solid #f38ba8; font-weight: bold; }")
-        reset_btn.clicked.connect(self._reset_all_party)
-        preset_layout.addWidget(reset_btn)
-
-        party_layout.addWidget(preset_box)
+        party_row = QHBoxLayout()
+        party_row.setContentsMargins(0, 0, 0, 0)
+        party_row.setSpacing(6)
+        self._box_my_panel = _MyPartyPanel(self)
+        self._box_my_panel.dropped_signal.connect(self._on_my_party_panel_dropped)
+        self._box_my_panel.clear_signal.connect(self._on_my_party_panel_cleared)
+        self._box_my_panel.context_menu_signal.connect(self._on_my_party_panel_context_menu)
+        party_row.addWidget(self._box_my_panel, 1)
+        self._box_my_save_btn = QPushButton("保\n存")
+        self._box_my_save_btn.setFixedWidth(41)
+        self._box_my_save_btn.setFixedHeight(self._box_my_panel.minimumHeight())
+        self._box_my_save_btn.clicked.connect(self._save_party_preset)
+        party_row.addWidget(self._box_my_save_btn)
+        party_layout.addLayout(party_row)
         layout.addWidget(party_box)
-        layout.addStretch()
+
+        saved_box = QGroupBox("保存済みパーティ")
+        saved_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        saved_layout = QVBoxLayout(saved_box)
+        saved_layout.setContentsMargins(6, 6, 6, 6)
+        saved_layout.setSpacing(4)
+        saved_scroll = QScrollArea()
+        saved_scroll.setWidgetResizable(True)
+        saved_scroll.setFrameShape(QFrame.NoFrame)
+        saved_scroll.setMinimumHeight(240)
+        saved_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        saved_widget = QWidget()
+        self._saved_party_list_layout = QVBoxLayout(saved_widget)
+        self._saved_party_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._saved_party_list_layout.setSpacing(4)
+        saved_scroll.setWidget(saved_widget)
+        saved_layout.addWidget(saved_scroll)
+        layout.addWidget(saved_box)
+        layout.setStretch(0, 0)
+        layout.setStretch(1, 1)
         return widget
 
     def _build_options_dialog(self) -> None:
         self._options_dialog = QDialog(self)
         self._options_dialog.setWindowTitle("オプション")
         self._options_dialog.setModal(False)
-        self._options_dialog.setMinimumWidth(420)
+        self._options_dialog.setMinimumSize(760, 600)
 
         layout = QVBoxLayout(self._options_dialog)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(8)
+        left_col = QVBoxLayout()
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(8)
+        right_col = QVBoxLayout()
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(8)
+        layout.addLayout(content_row, 1)
+        content_row.addLayout(left_col, 1)
+        content_row.addLayout(right_col, 1)
+
+        # ── データ更新 ──
+        data_box = QGroupBox("データ更新")
+        data_layout = QVBoxLayout(data_box)
+        fetch_row = QHBoxLayout()
+        self._fetch_api_btn = QPushButton("PokeAPI取得")
+        self._fetch_api_btn.clicked.connect(self._fetch_pokeapi_data)
+        fetch_row.addWidget(self._fetch_api_btn)
+        self._fetch_usage_btn = QPushButton("使用率取得")
+        self._fetch_usage_btn.setEnabled(False)
+        self._fetch_usage_btn.installEventFilter(self)
+        fetch_row.addWidget(self._fetch_usage_btn)
+        fetch_row.addStretch()
+        data_layout.addLayout(fetch_row)
+        self._option_data_status_lbl = QLabel()
+        self._option_data_status_lbl.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        data_layout.addWidget(self._option_data_status_lbl)
+        data_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        data_box.setFixedHeight(110)
+        left_col.addWidget(data_box)
+
+        # ── ダメージ計算 ──
+        damage_box = QGroupBox("ダメージ計算")
+        damage_layout = QVBoxLayout(damage_box)
+        self._option_damage_tera_cb = QCheckBox("テラスタル設定を表示")
+        self._option_damage_tera_cb.toggled.connect(self._toggle_damage_tera_option)
+        damage_layout.addWidget(self._option_damage_tera_cb)
+
+        self._option_damage_bulk_cb = QCheckBox("無振り/極振りダメージを表示")
+        self._option_damage_bulk_cb.setChecked(True)
+        self._option_damage_bulk_cb.toggled.connect(self._toggle_damage_bulk_option)
+        damage_layout.addWidget(self._option_damage_bulk_cb)
+
+        self._option_damage_double_cb = QCheckBox("ダブルバトル（仮）")
+        self._option_damage_double_cb.toggled.connect(self._toggle_damage_double_option)
+        damage_layout.addWidget(self._option_damage_double_cb)
+        reset_btn = QPushButton("パーティ全リセット")
+        reset_btn.setStyleSheet("QPushButton { color: #f38ba8; border: 1px solid #f38ba8; font-weight: bold; }")
+        reset_btn.clicked.connect(self._reset_all_party)
+        damage_layout.addWidget(reset_btn)
+        damage_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        damage_box.setFixedHeight(170)
+
+        left_col.addWidget(damage_box)
 
         # ── カメラ ──
         cam_box = QGroupBox("カメラ")
@@ -397,78 +621,40 @@ class MainWindow(QMainWindow):
         cam_ctrl.addWidget(self._refresh_cam_btn)
         cam_ctrl.addStretch()
         cam_box_layout.addLayout(cam_ctrl)
-        topmost_row = QHBoxLayout()
+        cam_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        cam_box.setFixedHeight(90)
+        left_col.addWidget(cam_box)
+
+        # ── その他 ──
+        other_box = QGroupBox("その他")
+        other_layout = QVBoxLayout(other_box)
         self._topmost_cb = QCheckBox("最前面")
         self._topmost_cb.toggled.connect(self._toggle_topmost)
-        topmost_row.addWidget(self._topmost_cb)
-        topmost_row.addStretch()
-        cam_box_layout.addLayout(topmost_row)
-        layout.addWidget(cam_box)
+        other_layout.addWidget(self._topmost_cb)
+        self._option_detailed_log_cb = QCheckBox("詳細ログ")
+        self._option_detailed_log_cb.toggled.connect(self._toggle_detailed_log_option)
+        other_layout.addWidget(self._option_detailed_log_cb)
+        other_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        other_box.setFixedHeight(90)
+        left_col.addWidget(other_box)
 
-        data_box = QGroupBox("データ更新")
-        data_layout = QVBoxLayout(data_box)
-        season_row = QHBoxLayout()
-        season_row.addWidget(QLabel("シーズン:"))
-        self._option_season_combo = QComboBox()
-        self._option_season_combo.setEditable(True)
-        self._option_season_combo.setMinimumWidth(100)
-        self._option_season_combo.currentTextChanged.connect(self._on_usage_season_changed)
-        season_row.addWidget(self._option_season_combo)
-        season_row.addSpacing(20)
-        season_row.addWidget(QLabel("データ源:"))
-        self._option_source_combo = QComboBox()
-        self._option_source_combo.setMinimumWidth(150)
-        for source_key, source_label in USAGE_SOURCES.items():
-            self._option_source_combo.addItem(source_label, source_key)
-        self._option_source_combo.setCurrentIndex(0)
-        season_row.addWidget(self._option_source_combo)
-        season_row.addStretch()
-        data_layout.addLayout(season_row)
-        fetch_row = QHBoxLayout()
-        self._fetch_api_btn = QPushButton("PokeAPI取得")
-        self._fetch_api_btn.clicked.connect(self._fetch_pokeapi_data)
-        fetch_row.addWidget(self._fetch_api_btn)
-        self._fetch_usage_btn = QPushButton("使用率取得")
-        self._fetch_usage_btn.setEnabled(False)
-        self._fetch_usage_btn.installEventFilter(self)
-        fetch_row.addWidget(self._fetch_usage_btn)
-        fetch_row.addStretch()
-        data_layout.addLayout(fetch_row)
-        self._option_data_status_lbl = QLabel()
-        self._option_data_status_lbl.setStyleSheet("color: #a6adc8; font-size: 11px;")
-        data_layout.addWidget(self._option_data_status_lbl)
-        layout.addWidget(data_box)
-
+        # ── ログ ──
         log_box = QGroupBox("ログ")
+        log_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         log_layout = QVBoxLayout(log_box)
         log_layout.setContentsMargins(6, 6, 6, 6)
         self._log_edit = QTextEdit()
         self._log_edit.setReadOnly(True)
-        self._log_edit.setMinimumHeight(180)
         log_layout.addWidget(self._log_edit, 1)
+        log_btn_row = QHBoxLayout()
         option_log_clear_btn = QPushButton("ログクリア")
-        option_log_clear_btn.setStyleSheet("QPushButton { min-height: 0px; padding: 2px 4px; font-size: 10px; }")
-        option_log_clear_btn.setFixedHeight(24)
         option_log_clear_btn.clicked.connect(self._log_edit.clear)
-        log_layout.addWidget(option_log_clear_btn, 0)
-        layout.addWidget(log_box)
-
-        damage_box = QGroupBox("ダメージ計算")
-        damage_layout = QVBoxLayout(damage_box)
-        self._option_damage_tera_cb = QCheckBox("右ペーンのテラスタル設定を表示")
-        self._option_damage_tera_cb.toggled.connect(self._toggle_damage_tera_option)
-        damage_layout.addWidget(self._option_damage_tera_cb)
-
-        self._option_damage_bulk_cb = QCheckBox("無振り/極振りダメージを表示")
-        self._option_damage_bulk_cb.setChecked(True)
-        self._option_damage_bulk_cb.toggled.connect(self._toggle_damage_bulk_option)
-        damage_layout.addWidget(self._option_damage_bulk_cb)
-
-        self._option_damage_double_cb = QCheckBox("ダブルバトルモード（仮）")
-        self._option_damage_double_cb.toggled.connect(self._toggle_damage_double_option)
-        damage_layout.addWidget(self._option_damage_double_cb)
-
-        layout.addWidget(damage_box)
+        log_btn_row.addWidget(option_log_clear_btn, 1)
+        option_log_export_btn = QPushButton("ログをTXT出力")
+        option_log_export_btn.clicked.connect(self._export_log_to_txt)
+        log_btn_row.addWidget(option_log_export_btn, 1)
+        log_layout.addLayout(log_btn_row)
+        right_col.addWidget(log_box, 1)
 
         close_btn = QPushButton("閉じる")
         close_btn.clicked.connect(self._options_dialog.close)
@@ -480,6 +666,10 @@ class MainWindow(QMainWindow):
             self._option_damage_tera_cb.blockSignals(True)
             self._option_damage_tera_cb.setChecked(self._damage_tera_visible)
             self._option_damage_tera_cb.blockSignals(False)
+        if self._option_detailed_log_cb:
+            self._option_detailed_log_cb.blockSignals(True)
+            self._option_detailed_log_cb.setChecked(self._detailed_log_enabled)
+            self._option_detailed_log_cb.blockSignals(False)
 
     def _open_options_dialog(self) -> None:
         if not self._options_dialog:
@@ -489,6 +679,10 @@ class MainWindow(QMainWindow):
             self._option_damage_tera_cb.blockSignals(True)
             self._option_damage_tera_cb.setChecked(self._damage_tera_visible)
             self._option_damage_tera_cb.blockSignals(False)
+        if self._option_detailed_log_cb:
+            self._option_detailed_log_cb.blockSignals(True)
+            self._option_detailed_log_cb.setChecked(self._detailed_log_enabled)
+            self._option_detailed_log_cb.blockSignals(False)
         self._options_dialog.show()
         self._options_dialog.raise_()
         self._options_dialog.activateWindow()
@@ -497,7 +691,8 @@ class MainWindow(QMainWindow):
         if self._fetch_api_btn:
             self._fetch_api_btn.setEnabled(enabled)
         if self._fetch_usage_btn:
-            self._fetch_usage_btn.setEnabled(enabled)
+            # ビルド版では使用率取得を無効化（開発環境のみ有効）
+            self._fetch_usage_btn.setEnabled(enabled and not getattr(sys, "frozen", False))
 
     def _refresh_usage_season_options(self, selected: str | None = None) -> None:
         if not self._option_season_combo:
@@ -548,12 +743,28 @@ class MainWindow(QMainWindow):
         self._damage_panel._set_battle_format("double" if checked else "single")
         self._save_settings(damage_battle_double=bool(checked))
 
+    def _toggle_detailed_log_option(self, checked: bool) -> None:
+        self._detailed_log_enabled = bool(checked)
+        self._save_settings(detailed_log_enabled=self._detailed_log_enabled)
+
     # ── Background tasks ──────────────────────────────────────────────
 
     def _start_background_tasks(self) -> None:
         self._ocr_thread = OcrInitThread(use_gpu=False)
         self._ocr_thread.finished.connect(self._on_ocr_ready)
         self._ocr_thread.start()
+
+        settings = self._load_settings()
+        if settings.get("sample_party_applied"):
+            return
+        status = db.get_local_data_status()
+        if status["species_count"] == 0 or status["move_count"] == 0:
+            self._sample_party_pending = True
+            self._log("DBが空のため PokeAPI データを自動取得します...")
+            self._show_loading_overlay("PokeAPI データを取得中...\nしばらくお待ちください")
+            self._fetch_pokeapi_data()
+        else:
+            self._apply_sample_party()
 
     # ── Slots ─────────────────────────────────────────────────────────
 
@@ -568,6 +779,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int, str)
     def _on_api_progress(self, pct: int, msg: str) -> None:
         self._status_bar.showMessage(msg)
+        if self._sample_party_pending:
+            self._show_loading_overlay("PokeAPI データを取得中... {}%\n{}".format(pct, msg))
 
     @pyqtSlot()
     def _on_api_done(self) -> None:
@@ -576,6 +789,24 @@ class MainWindow(QMainWindow):
         self._refresh_data_status()
         self._status_bar.showMessage("PokeAPIデータ取得完了")
         self._log("PokeAPIデータ取得完了")
+        if self._sample_party_pending:
+            self._sample_party_pending = False
+            self._hide_loading_overlay()
+            self._apply_sample_party()
+
+    def _apply_sample_party(self) -> None:
+        party = _parse_sample_party()
+        if not party:
+            return
+        none_padded: list[PokemonInstance | None] = list(party) + [None] * (6 - len(party))
+        self._battle_state.my_party = none_padded[:]
+        self._battle_state.opponent_party = none_padded[:]
+        if party:
+            self._battle_state.my_pokemon = party[0]
+            self._battle_state.opponent_pokemon = party[0]
+        self._sync_battle_state_to_panels()
+        self._save_settings(sample_party_applied=True)
+        self._log("サンプルパーティを適用しました（{}体）".format(len(party)))
 
     @pyqtSlot(bool, str)
     def _on_scraper_done(self, ok: bool, msg: str) -> None:
@@ -602,7 +833,15 @@ class MainWindow(QMainWindow):
 
     def _fetch_usage_data(self) -> None:
         season = self._current_usage_season()
-        source = self._option_source_combo.currentData() if self._option_source_combo else USAGE_SOURCE_DEFAULT
+        scraper_cls, usage_sources, usage_default, import_error = self._get_usage_scraper_symbols()
+        if scraper_cls is None:
+            QMessageBox.information(
+                self,
+                "使用率取得は利用不可",
+                "usage_scraper が見つからないため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
+            )
+            return
+        source = self._option_source_combo.currentData() if self._option_source_combo else usage_default
         db.set_active_usage_season(season)
         status = db.get_local_data_status(season)
         if status["species_count"] == 0 or status["move_count"] == 0:
@@ -614,11 +853,11 @@ class MainWindow(QMainWindow):
             return
         if self._scraper and self._scraper.isRunning():
             return
-        self._scraper = UsageScraper(season=season, source=source)
+        self._scraper = scraper_cls(season=season, source=source)
         self._scraper.progress.connect(self._on_usage_progress)
         self._scraper.finished.connect(self._on_scraper_done)
         self._set_fetch_buttons_enabled(False)
-        source_label = USAGE_SOURCES.get(source, source)
+        source_label = usage_sources.get(source, source)
         self._status_bar.showMessage("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
         self._log("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
         self._scraper.start()
@@ -642,6 +881,7 @@ class MainWindow(QMainWindow):
     def _toggle_camera(self) -> None:
         if self._video_thread and self._video_thread.isRunning():
             self._stop_live_battle_tracking(show_message=False, write_log=False)
+            self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
             self._video_thread.stop()
             self._video_thread = None
             self._connect_btn.setText("接続")
@@ -705,14 +945,19 @@ class MainWindow(QMainWindow):
         damage_idx = self._tabs.indexOf(self._damage_panel)
         box_idx = 1
         self._damage_side.setVisible(index == damage_idx)
-        self._box_side.setVisible(index == box_idx and index != damage_idx)
+        is_box = index == box_idx and index != damage_idx
+        self._box_side_scroll.setVisible(is_box)
+        if is_box:
+            self._refresh_party_presets_ui()
         self._sync_tab_switcher_buttons(index)
 
     def _sync_tab_switcher_buttons(self, index: int) -> None:
         if self._tab_damage_btn:
             self._tab_damage_btn.setChecked(index == 0)
+            self._tab_damage_btn.setEnabled(index != 0)
         if self._tab_box_btn:
             self._tab_box_btn.setChecked(index == 1)
+            self._tab_box_btn.setEnabled(index != 1)
 
     # ── Event Filter ───────────────────────────────────────────────────
 
@@ -720,18 +965,175 @@ class MainWindow(QMainWindow):
         from PyQt5.QtCore import QEvent
         from PyQt5.QtGui import QMouseEvent
         if obj == self._fetch_usage_btn and event.type() == QEvent.MouseButtonDblClick:
+            if getattr(sys, "frozen", False):
+                return True
             me = QMouseEvent(event)
             if me.button() == Qt.RightButton:
-                self._fetch_usage_data()
+                self._show_usage_password_dialog()
                 return True
         return super().eventFilter(obj, event)
 
     # ── Logging ───────────────────────────────────────────────────────
 
+    def _show_usage_password_dialog(self) -> None:
+        from datetime import date
+        from PyQt5.QtWidgets import QLineEdit
+        today = date.today().strftime("%Y%m%d")
+        
+        password, ok = QInputDialog.getText(
+            self,
+            "",
+            "",
+            echo=QLineEdit.Password,
+        )
+        
+        if not ok or not password:
+            return
+        
+        if password == today:
+            self._show_usage_fetch_dialog()
+        else:
+            QMessageBox.warning(self, "エラー", "パスワードが間違っています。")
+
+    def _show_usage_fetch_dialog(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("使用率取得設定")
+        dlg.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        
+        # シーズン選択
+        season_row = QHBoxLayout()
+        season_row.addWidget(QLabel("シーズン:"))
+        season_combo = QComboBox()
+        season_combo.setEditable(True)
+        season_combo.setMinimumWidth(150)
+        seasons = list(db.get_available_usage_seasons())
+        current = db.get_active_usage_season()
+        if current not in seasons:
+            seasons.insert(0, current)
+        for season in seasons:
+            season_combo.addItem(season)
+        if current:
+            season_combo.setEditText(current)
+        season_row.addWidget(season_combo)
+        season_row.addStretch()
+        layout.addLayout(season_row)
+        
+        # データ源選択
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("データ源:"))
+        source_combo = QComboBox()
+        source_combo.setMinimumWidth(150)
+        _, usage_sources, _, _ = self._get_usage_scraper_symbols()
+        for source_key, source_label in usage_sources.items():
+            source_combo.addItem(source_label, source_key)
+        # デフォルトをpokedb_tokyoに設定
+        for i in range(source_combo.count()):
+            if source_combo.itemData(i) == "pokedb_tokyo":
+                source_combo.setCurrentIndex(i)
+                break
+        source_row.addWidget(source_combo)
+        source_row.addStretch()
+        layout.addLayout(source_row)
+        
+        # ボタン
+        btn_row = QHBoxLayout()
+        start_btn = QPushButton("開始")
+        cancel_btn = QPushButton("キャンセル")
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(start_btn)
+        layout.addLayout(btn_row)
+        
+        def on_start():
+            season = db.normalize_season_token(season_combo.currentText())
+            source = source_combo.currentData()
+            if not season:
+                QMessageBox.warning(dlg, "エラー", "シーズンを入力してください。")
+                return
+            db.set_active_usage_season(season)
+            dlg.accept()
+            self._fetch_usage_data_with_source(season, source)
+        
+        start_btn.clicked.connect(on_start)
+        cancel_btn.clicked.connect(dlg.reject)
+        
+        dlg.exec_()
+
+    def _fetch_usage_data_with_source(self, season: str, source: str) -> None:
+        scraper_cls, usage_sources, _, import_error = self._get_usage_scraper_symbols()
+        if scraper_cls is None:
+            QMessageBox.information(
+                self,
+                "使用率取得は利用不可",
+                "usage_scraper が見つからないため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
+            )
+            return
+        status = db.get_local_data_status(season)
+        if status["species_count"] == 0 or status["move_count"] == 0:
+            QMessageBox.information(
+                self,
+                "データ不足",
+                "先に PokeAPI データを取得してください。",
+            )
+            return
+        if self._scraper and self._scraper.isRunning():
+            return
+        self._scraper = scraper_cls(season=season, source=source)
+        self._scraper.progress.connect(self._on_usage_progress)
+        self._scraper.finished.connect(self._on_scraper_done)
+        self._set_fetch_buttons_enabled(False)
+        source_label = usage_sources.get(source, source)
+        self._status_bar.showMessage("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
+        self._log("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
+        self._scraper.start()
+
     def _log(self, msg: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
+        log_text = "[{}] {}".format(ts, msg)
         if self._log_edit:
-            self._log_edit.append("[{}] {}".format(ts, msg))
+            self._log_edit.append(log_text)
+        if self._main_log_edit:
+            self._main_log_edit.append(log_text)
+            self._main_log_edit.horizontalScrollBar().setValue(0)
+        self._status_bar.showMessage(log_text)
+
+    def _on_bridge_payload_log(self, msg: str) -> None:
+        if not self._detailed_log_enabled:
+            return
+        self._log(msg)
+
+    def _export_log_to_txt(self) -> None:
+        if not self._log_edit:
+            return
+        text = self._log_edit.toPlainText().strip()
+        if not text:
+            self._status_bar.showMessage("ログが空のため出力をスキップしました", 3000)
+            return
+        default_name = "app_log_{}.txt".format(datetime.now().strftime("%Y%m%d_%H%M%S"))
+        logs_dir = Path.cwd() / "logs"
+        try:
+            logs_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        default_path = logs_dir / default_name
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "ログをTXT出力",
+            str(default_path),
+            "Text files (*.txt);;All files (*.*)",
+        )
+        if not selected_path:
+            return
+        try:
+            Path(selected_path).write_text(text + "\n", encoding="utf-8")
+        except Exception as exc:
+            self._log("[ERROR] ログ出力失敗: {}".format(exc))
+            return
+        self._log("ログを出力しました: {}".format(selected_path))
 
     def _init_battle_state(self) -> None:
         self._battle_state = BattleState(
@@ -746,22 +1148,19 @@ class MainWindow(QMainWindow):
     def _sync_battle_state_to_panels(self) -> None:
         self._ensure_party_slots()
         self._update_box_party_ui()
+        self._syncing_battle_state_to_panels = True
+        try:
+            self._damage_panel.set_my_party(self._battle_state.my_party)
+            if self._battle_state.my_pokemon:
+                self._damage_panel.set_my_pokemon(self._battle_state.my_pokemon)
 
-        self._damage_panel.set_my_party(self._battle_state.my_party)
-        if self._battle_state.my_pokemon:
-            self._damage_panel.set_my_pokemon(self._battle_state.my_pokemon)
-
-        opp_options: list[PokemonInstance] = []
-        if self._battle_state.opponent_pokemon:
-            opp_options.append(copy.deepcopy(self._battle_state.opponent_pokemon))
-        for pokemon in self._battle_state.opponent_party:
-            if not pokemon:
-                continue
-            if any(existing.name_ja == pokemon.name_ja for existing in opp_options):
-                continue
-            opp_options.append(copy.deepcopy(pokemon))
-        if opp_options:
-            self._damage_panel.set_opponent_options(opp_options)
+            if any(self._battle_state.opponent_party):
+                self._damage_panel.set_opponent_options(
+                    list(self._battle_state.opponent_party),
+                    active=copy.deepcopy(self._battle_state.opponent_pokemon),
+                )
+        finally:
+            self._syncing_battle_state_to_panels = False
 
     def _on_party_slot_clicked(self, index: int, is_my: bool) -> None:
         self._ensure_party_slots()
@@ -788,6 +1187,76 @@ class MainWindow(QMainWindow):
             elif previous and self._battle_state.opponent_pokemon and self._battle_state.opponent_pokemon.name_ja == previous.name_ja:
                 self._battle_state.opponent_pokemon = copy.deepcopy(next((p for p in target_party if p), None))
 
+        self._sync_battle_state_to_panels()
+
+    def _on_my_party_panel_dropped(self, name_ja: str) -> None:
+        self._try_add_to_my_party(name_ja, source="D&D")
+
+    def _try_add_to_my_party(self, name_ja: str, source: str = "click") -> None:
+        self._ensure_party_slots()
+        pokemon = next((p for p in self._registered_pokemon if p and p.name_ja == name_ja), None)
+        if pokemon is None:
+            return
+        empty_idx = next((i for i, p in enumerate(self._battle_state.my_party) if p is None), -1)
+        if empty_idx < 0:
+            self._log("自分PT追加失敗[{}]: 空きスロットがありません".format(source))
+            self._status_bar.showMessage("自分PTに空きがありません", 3000)
+            return
+        previous = self._battle_state.my_party[empty_idx]
+        self._battle_state.my_party[empty_idx] = copy.deepcopy(pokemon)
+        if (
+            not self._battle_state.my_pokemon
+            or (
+                previous is not None
+                and self._battle_state.my_pokemon.name_ja == previous.name_ja
+            )
+        ):
+            self._battle_state.my_pokemon = copy.deepcopy(pokemon)
+        self._sync_battle_state_to_panels()
+
+    def _on_registry_cell_left_click(self, name_ja: str) -> None:
+        self._try_add_to_my_party(name_ja, source="左クリック")
+
+    def _on_my_party_panel_cleared(self) -> None:
+        self._battle_state.my_party = [None] * 6
+        self._battle_state.my_pokemon = None
+        self._sync_battle_state_to_panels()
+
+    def _on_my_party_panel_context_menu(self, global_pos) -> None:
+        menu = QMenu(self)
+        act_clear = QAction("削除", menu)
+        act_clear.triggered.connect(self._on_my_party_panel_cleared)
+        menu.addAction(act_clear)
+        act_save = QAction("保存", menu)
+        act_save.triggered.connect(lambda: self._save_party_preset(to_top=True))
+        menu.addAction(act_save)
+        menu.exec_(global_pos)
+
+    def _on_party_slot_dropped(self, index: int, name_ja: str) -> None:
+        self._ensure_party_slots()
+        pokemon = next((p for p in self._registered_pokemon if p and p.name_ja == name_ja), None)
+        if pokemon is None:
+            return
+        previous = self._battle_state.my_party[index]
+        self._battle_state.my_party[index] = copy.deepcopy(pokemon)
+        if (
+            not self._battle_state.my_pokemon
+            or (
+                previous is not None
+                and self._battle_state.my_pokemon.name_ja == previous.name_ja
+            )
+        ):
+            self._battle_state.my_pokemon = copy.deepcopy(pokemon)
+        self._sync_battle_state_to_panels()
+
+    def _on_party_slot_cleared(self, index: int) -> None:
+        self._ensure_party_slots()
+        previous = self._battle_state.my_party[index]
+        self._battle_state.my_party[index] = None
+        if previous and self._battle_state.my_pokemon and self._battle_state.my_pokemon.name_ja == previous.name_ja:
+            self._battle_state.my_pokemon = copy.deepcopy(
+                next((p for p in self._battle_state.my_party if p), None)
+            )
         self._sync_battle_state_to_panels()
 
     def _select_registered_pokemon(self, title: str, current_name: str = "") -> tuple[bool, PokemonInstance | None]:
@@ -1027,6 +1496,7 @@ class MainWindow(QMainWindow):
             return
 
         self._set_auto_detect_enabled(False)
+        self._show_loading_overlay("相手PT検出中...")
         try:
             slot_results = opponent_party_reader.detect_opponent_party(frame, season=season)
             detected_party: list[PokemonInstance | None] = []
@@ -1049,10 +1519,135 @@ class MainWindow(QMainWindow):
             self._battle_state.opponent_party = (detected_party + [None] * 6)[:6]
             self._battle_state.opponent_pokemon = copy.deepcopy(next((p for p in self._battle_state.opponent_party if p), None))
             self._sync_battle_state_to_panels()
-            self._log("相手PT自動検出[{}]: {}".format(season, " | ".join(summary)))
-            self._status_bar.showMessage("相手PTを自動検出しました [{}]".format(season))
+            self._log("相手PT検出[{}]: {}".format(season, " | ".join(summary)))
+            self._status_bar.showMessage("相手PTを検出しました")
         finally:
+            self._hide_loading_overlay()
             self._set_auto_detect_enabled(True)
+
+    def _on_auto_detect_toggled(self, checked: bool) -> None:
+        checked = bool(checked)
+        if checked:
+            if not self._video_thread or not self._video_thread.isRunning():
+                QMessageBox.information(self, "情報", "カメラを接続してください")
+                if self._auto_detect_btn:
+                    self._auto_detect_btn.blockSignals(True)
+                    self._auto_detect_btn.setChecked(False)
+                    self._auto_detect_btn.blockSignals(False)
+                    self._refresh_auto_detect_button_style()
+                return
+            self._opp_auto_detect_timer.start()
+            self._refresh_auto_detect_button_style()
+            self._status_bar.showMessage("相手PT自動検出を開始しました", 3000)
+            self._log("相手PT自動検出: ON")
+            return
+        self._stop_opponent_party_auto_detect(show_message=True, write_log=True)
+
+    def _stop_opponent_party_auto_detect(self, show_message: bool, write_log: bool) -> None:
+        was_active = self._opp_auto_detect_timer.isActive()
+        self._opp_auto_detect_timer.stop()
+        self._auto_detect_pending = False
+        if self._auto_detect_btn and self._auto_detect_btn.isChecked():
+            self._auto_detect_btn.blockSignals(True)
+            self._auto_detect_btn.setChecked(False)
+            self._auto_detect_btn.blockSignals(False)
+        self._refresh_auto_detect_button_style()
+        if was_active and show_message:
+            self._status_bar.showMessage("相手PT自動検出を停止しました", 3000)
+        if was_active and write_log:
+            self._log("相手PT自動検出: OFF")
+
+    def _refresh_auto_detect_button_style(self) -> None:
+        if not self._auto_detect_btn:
+            return
+        active = self._auto_detect_btn.isChecked()
+        if active:
+            self._auto_detect_btn.setText("相手PT自動検出中...")
+            self._auto_detect_btn.setStyleSheet(
+                "QPushButton { background-color: #11111b; color: #f38ba8; font-weight: bold; border: 1px solid #f38ba8; }"
+            )
+        else:
+            self._auto_detect_btn.setText("相手PT自動検出")
+            self._auto_detect_btn.setStyleSheet(
+                "QPushButton { background-color: #f38ba8; color: #11111b; font-weight: bold; }"
+            )
+
+    def _poll_opponent_party_auto_detect(self) -> None:
+        if self._auto_detect_pending:
+            return
+        if time.monotonic() < self._auto_detect_cooldown_until:
+            return
+        if not self._video_thread or not self._video_thread.isRunning():
+            return
+        frame = self._video_thread.get_last_frame()
+        if frame is None or frame.size == 0:
+            return
+        self._dump_auto_detect_debug_frame(frame)
+        matched, scores = opponent_party_auto_trigger.evaluate_auto_detect(frame)
+        now = time.monotonic()
+        if self._detailed_log_enabled and now - self._auto_detect_score_log_last >= 1.0:
+            self._auto_detect_score_log_last = now
+            score_text = " / ".join(
+                "{}={:.3f}[{}]".format(name, score, reason) if reason.startswith("ok") else "{}=N/A({})".format(name, reason)
+                for name, score, reason in scores
+            ) or "score=N/A"
+            self._log("相手PT自動検出スコア: {} (閾値 ccorr>=0.850 or sqdiff<=0.150)".format(score_text))
+        if not matched:
+            return
+        self._auto_detect_pending = True
+        self._auto_detect_cooldown_until = time.monotonic() + 120.0
+
+        def _run_detect() -> None:
+            try:
+                self._auto_detect_opponent_party()
+            finally:
+                self._auto_detect_pending = False
+
+        QTimer.singleShot(100, _run_detect)
+
+    def _dump_auto_detect_debug_frame(self, frame) -> None:
+        now = time.monotonic()
+        if now - self._auto_detect_debug_dump_last < 2.0:
+            return
+        self._auto_detect_debug_dump_last = now
+        try:
+            import cv2
+            import numpy as np
+            from pathlib import Path
+
+            dbg = frame.copy()
+            if dbg is None or getattr(dbg, "size", 0) == 0:
+                return
+            h, w = dbg.shape[:2]
+            base_w, base_h = 1280.0, 720.0
+            sx, sy = w / base_w, h / base_h
+            rects = [
+                ((88, 609, 182, 649), "temp1", (0, 255, 255)),
+                ((229, 606, 331, 652), "temp2", (255, 255, 0)),
+            ]
+            for (x1, y1, x2, y2), label, color in rects:
+                rx1 = int(round(x1 * sx))
+                ry1 = int(round(y1 * sy))
+                rx2 = int(round(x2 * sx))
+                ry2 = int(round(y2 * sy))
+                cv2.rectangle(dbg, (rx1, ry1), (rx2, ry2), color, 2)
+                cv2.putText(
+                    dbg,
+                    "{} ({},{})-({},{})".format(label, rx1, ry1, rx2, ry2),
+                    (max(0, rx1), max(18, ry1 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+            out_dir = Path.cwd() / "captures" / "auto_detect_debug"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            out_path = out_dir / "opp_auto_detect_{}.png".format(ts)
+            cv2.imwrite(str(out_path), dbg)
+        except Exception:
+            return
 
     def _toggle_live_battle_tracking(self, enabled: bool) -> None:
         enabled = bool(enabled)
@@ -1230,6 +1825,7 @@ class MainWindow(QMainWindow):
             name_en=species.name_en,
             types=[t for t in [species.type1, species.type2] if t],
             weight_kg=species.weight_kg,
+            terastal_type="normal",
         )
 
         abilities = db.get_abilities_by_usage(pokemon.usage_name)
@@ -1253,13 +1849,6 @@ class MainWindow(QMainWindow):
 
         moves = db.get_moves_by_usage(pokemon.usage_name)
         move_candidates = [move for move in moves if move]
-        if species and species.species_id:
-            learnset_moves = db.get_moves_for_species(species.species_id)
-            learnset_names = {move.name_ja for move in learnset_moves}
-            if learnset_names:
-                filtered = [move_name for move_name in move_candidates if move_name in learnset_names]
-                if filtered:
-                    move_candidates = filtered
         non_status_candidates: list[str] = []
         for move_name in move_candidates:
             move_info = db.get_move_by_name_ja(move_name)
@@ -1321,7 +1910,12 @@ class MainWindow(QMainWindow):
     def _show_loading_overlay(self, message: str = "読み込み中...") -> None:
         try:
             if hasattr(self, "_loading_overlay") and self._loading_overlay:
+                labels = self._loading_overlay.findChildren(QLabel)
+                if labels:
+                    labels[0].setText(message)
                 self._loading_overlay.raise_()
+                self._loading_overlay.show()
+                QApplication.processEvents()
                 return
             overlay = QWidget(self)
             overlay.setObjectName("_loading_overlay")
@@ -1337,6 +1931,7 @@ class MainWindow(QMainWindow):
             overlay.show()
             overlay.raise_()
             self._loading_overlay = overlay
+            QApplication.processEvents()
         except Exception:
             pass
 
@@ -1446,7 +2041,7 @@ class MainWindow(QMainWindow):
             top2_ev = " ".join("{}:{}".format(lbl, v) for lbl, v in ev_pairs[:2]) if ev_pairs else "無振り"
             item_text = (p.item or "").strip() or "なし"
 
-            cell = QFrame()
+            cell = _DraggableCell(p.name_ja)
             cell.setFrameShape(QFrame.StyledPanel)
             cell.setFixedSize(_CELL_W, _CELL_H)
             cell.setProperty("pokemon_data", idx)
@@ -1494,6 +2089,7 @@ class MainWindow(QMainWindow):
             cell.mouseDoubleClickEvent = lambda e, poke=pokemon_ref: (
                 self.__setattr__("_reg_selected_pokemon", poke) or self._edit_selected_pokemon()
             )
+            cell.clicked_signal.connect(self._on_registry_cell_left_click)
             cell.setContextMenuPolicy(Qt.CustomContextMenu)
             cell.customContextMenuRequested.connect(_make_ctx_handler(pokemon_ref, cell))
 
@@ -1530,6 +2126,139 @@ class MainWindow(QMainWindow):
 
             self._sync_battle_state_to_panels()
 
+    def _open_register_input_dialog(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("新規登録")
+        dlg.setMinimumWidth(640)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        guide = QLabel("下記フォーマットを貼り付けて保存できます。")
+        guide.setStyleSheet("color:#a6adc8; font-size:12px;")
+        layout.addWidget(guide)
+
+        editor = QPlainTextEdit()
+        editor.setPlaceholderText(
+            "{name_ja} @ {item}\n"
+            "テラスタイプ: {terastal_type}\n"
+            "特性: {ability}\n"
+            "性格: {nature}\n"
+            "{hp}({ev_hp})-{attack}({ev_attack})-{defense}({ev_defense})-{sp_attack}({ev_sp_attack})-{sp_defense}({ev_sp_defense})-{speed}({ev_speed})\n"
+            "{move1} / {move2} / {move3} / {move4}"
+        )
+        editor.setMinimumHeight(220)
+        layout.addWidget(editor)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        save_btn = QPushButton("保存")
+        cancel_btn = QPushButton("キャンセル")
+        row.addWidget(save_btn)
+        row.addWidget(cancel_btn)
+        layout.addLayout(row)
+
+        gui_btn = QPushButton("GUIで設定")
+        layout.addWidget(gui_btn)
+
+        def on_save() -> None:
+            text = editor.toPlainText().strip()
+            pokemon, error = self._parse_pokemon_text_block(text)
+            if pokemon is None:
+                QMessageBox.warning(dlg, "入力エラー", error or "フォーマットを確認してください。")
+                return
+            new_id = db.save_pokemon(pokemon)
+            pokemon.db_id = new_id
+            self._refresh_registry_list()
+            self._status_bar.showMessage("ポケモンを登録しました", 3000)
+            dlg.accept()
+
+        def on_gui() -> None:
+            dlg.accept()
+            self._open_edit_dialog(None)
+
+        save_btn.clicked.connect(on_save)
+        cancel_btn.clicked.connect(dlg.reject)
+        gui_btn.clicked.connect(on_gui)
+        dlg.exec_()
+
+    def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, str | None]:
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        if len(lines) < 6:
+            return None, "行数が不足しています（最低6行）。"
+
+        head = lines[0]
+        m_head = re.match(r"^(.+?)\s*@\s*(.+)$", head)
+        if not m_head:
+            return None, "1行目は「名前 @ 持ち物」形式で入力してください。"
+        name_ja = (m_head.group(1) or "").strip()
+        item = (m_head.group(2) or "").strip()
+        if item == "もちものなし":
+            item = ""
+
+        def _extract(prefix: str, line: str) -> str:
+            if not line.startswith(prefix):
+                return ""
+            return line[len(prefix):].strip()
+
+        tera_ja = _extract("テラスタイプ:", lines[1]) or "ノーマル"
+        ability = _extract("特性:", lines[2])
+        nature = _extract("性格:", lines[3])
+        if not ability or not nature:
+            return None, "特性・性格の行を確認してください。"
+
+        stats_line = lines[4]
+        parts = [part.strip() for part in stats_line.split("-")]
+        if len(parts) != 6:
+            return None, "実数値行は「H-A-B-C-D-S」の6項目で入力してください。"
+
+        def _parse_stat_part(part: str) -> tuple[int, int]:
+            m = re.match(r"^(\d+)(?:\((\d+)\))?$", part)
+            if not m:
+                raise ValueError
+            stat_val = int(m.group(1))
+            ev_display = int(m.group(2)) if m.group(2) else 0
+            ev_internal = (ev_display + 4) if ev_display > 0 else 0
+            return stat_val, ev_internal
+
+        try:
+            parsed = [_parse_stat_part(part) for part in parts]
+        except ValueError:
+            return None, "実数値行の形式が不正です。"
+
+        move_line = lines[5]
+        moves = [m.strip() for m in move_line.split("/") if m.strip()]
+        if not moves:
+            return None, "技行が不正です。"
+
+        tera_ja_to_en = {**{v: k for k, v in TYPE_EN_TO_JA.items()}, "ステラ": "stellar"}
+        terastal_type = tera_ja_to_en.get(tera_ja, "normal")
+
+        pokemon = PokemonInstance(
+            name_ja=name_ja,
+            item=item,
+            ability=ability,
+            nature=nature,
+            terastal_type=terastal_type,
+            hp=parsed[0][0],
+            attack=parsed[1][0],
+            defense=parsed[2][0],
+            sp_attack=parsed[3][0],
+            sp_defense=parsed[4][0],
+            speed=parsed[5][0],
+            ev_hp=parsed[0][1],
+            ev_attack=parsed[1][1],
+            ev_defense=parsed[2][1],
+            ev_sp_attack=parsed[3][1],
+            ev_sp_defense=parsed[4][1],
+            ev_speed=parsed[5][1],
+            moves=(moves + ["", "", "", ""])[:4],
+            current_hp=parsed[0][0],
+            max_hp=parsed[0][0],
+        )
+        self._fill_species(pokemon)
+        return pokemon, None
+
     def _edit_selected_pokemon(self) -> None:
         p = getattr(self, "_reg_selected_pokemon", None)
         if not p:
@@ -1543,6 +2272,49 @@ class MainWindow(QMainWindow):
             self._reg_selected_pokemon = None
             self._refresh_registry_list()
 
+    def _copy_selected_pokemon_info(self) -> None:
+        p = getattr(self, "_reg_selected_pokemon", None)
+        if not p:
+            return
+        text = self._format_pokemon_export_text(p)
+        QApplication.clipboard().setText(text)
+        self._status_bar.showMessage("ポケモン情報をコピーしました", 3000)
+
+    def _format_pokemon_export_text(self, pokemon: PokemonInstance) -> str:
+        tera_ja_map: dict[str, str] = {**TYPE_EN_TO_JA, "stellar": "ステラ"}
+        terastal_type_ja = tera_ja_map.get((pokemon.terastal_type or "").strip(), "ノーマル")
+        item_text = (pokemon.item or "").strip() or "もちものなし"
+
+        def _stat_with_ev(stat_value: int, ev_value: int) -> str:
+            ev_raw = int(ev_value or 0)
+            ev_display = ev_raw - 4 if ev_raw > 0 else 0
+            if ev_display > 0:
+                return "{}({})".format(int(stat_value or 0), ev_display)
+            return str(int(stat_value or 0))
+
+        stats_text = "-".join(
+            [
+                _stat_with_ev(pokemon.hp, pokemon.ev_hp),
+                _stat_with_ev(pokemon.attack, pokemon.ev_attack),
+                _stat_with_ev(pokemon.defense, pokemon.ev_defense),
+                _stat_with_ev(pokemon.sp_attack, pokemon.ev_sp_attack),
+                _stat_with_ev(pokemon.sp_defense, pokemon.ev_sp_defense),
+                _stat_with_ev(pokemon.speed, pokemon.ev_speed),
+            ]
+        )
+        moves = (list(pokemon.moves) + ["", "", "", ""])[:4]
+        move_text = " / ".join(moves)
+        return "\n".join(
+            [
+                "{} @ {}".format((pokemon.name_ja or "").strip(), item_text),
+                "テラスタイプ: {}".format(terastal_type_ja),
+                "特性: {}".format((pokemon.ability or "").strip()),
+                "性格: {}".format((pokemon.nature or "").strip()),
+                stats_text,
+                move_text,
+            ]
+        )
+
     def _on_registry_context_menu(self, pos) -> None:
         pass  # スクロールエリア全体の右クリックは無視（セル右クリックで処理）
 
@@ -1550,13 +2322,22 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         act_edit = QAction("編集", menu)
         act_delete = QAction("削除", menu)
+        act_copy = QAction("情報をコピー", menu)
         act_edit.triggered.connect(self._edit_selected_pokemon)
         act_delete.triggered.connect(self._delete_selected_pokemon)
+        act_copy.triggered.connect(self._copy_selected_pokemon_info)
+        menu.addAction(act_copy)
         menu.addAction(act_edit)
         menu.addAction(act_delete)
         menu.exec_(global_pos)
 
     def _on_damage_panel_atk_changed(self, pokemon: PokemonInstance | None) -> None:
+        if self._syncing_battle_state_to_panels:
+            return
+        if hasattr(self._damage_panel, "get_my_party_snapshot"):
+            self._battle_state.my_party = self._damage_panel.get_my_party_snapshot()
+        if hasattr(self._damage_panel, "get_opp_party_snapshot"):
+            self._battle_state.opponent_party = self._damage_panel.get_opp_party_snapshot()
         side = self._damage_panel.attacker_side() if hasattr(self._damage_panel, "attacker_side") else "my"
         copied = copy.deepcopy(pokemon) if pokemon else None
         if side == "opp":
@@ -1567,6 +2348,12 @@ class MainWindow(QMainWindow):
         self._update_box_party_ui()
 
     def _on_damage_panel_def_changed(self, pokemon: PokemonInstance | None) -> None:
+        if self._syncing_battle_state_to_panels:
+            return
+        if hasattr(self._damage_panel, "get_my_party_snapshot"):
+            self._battle_state.my_party = self._damage_panel.get_my_party_snapshot()
+        if hasattr(self._damage_panel, "get_opp_party_snapshot"):
+            self._battle_state.opponent_party = self._damage_panel.get_opp_party_snapshot()
         side = self._damage_panel.defender_side() if hasattr(self._damage_panel, "defender_side") else "opp"
         copied = copy.deepcopy(pokemon) if pokemon else None
         if side == "my":
@@ -1606,6 +2393,7 @@ class MainWindow(QMainWindow):
         if not pokemon:
             return None
         return {
+            "db_id": int(pokemon.db_id) if pokemon.db_id is not None else None,
             "species_id": int(pokemon.species_id),
             "name_ja": pokemon.name_ja,
             "name_en": pokemon.name_en,
@@ -1648,58 +2436,72 @@ class MainWindow(QMainWindow):
         for key, value in payload.items():
             if hasattr(pokemon, key):
                 setattr(pokemon, key, value)
+        if not (pokemon.terastal_type or "").strip():
+            pokemon.terastal_type = "normal"
         return pokemon
 
     def _load_party_presets(self) -> None:
         settings = self._load_settings()
-        raw = settings.get("battle_party_presets", {})
-        if not isinstance(raw, dict):
-            self._party_presets = {}
+        raw_list = settings.get("battle_party_presets_v2", [])
+        if isinstance(raw_list, list):
+            self._party_presets = [item for item in raw_list if isinstance(item, dict)]
             return
-        self._party_presets = {
-            str(name): value
-            for name, value in raw.items()
-            if isinstance(name, str) and isinstance(value, dict)
-        }
+        if isinstance(raw_list, dict):
+            migrated_v2 = [value for _, value in sorted(raw_list.items(), key=lambda x: str(x[0])) if isinstance(value, dict)]
+            self._party_presets = migrated_v2
+            self._save_settings(battle_party_presets_v2=self._party_presets)
+            return
+        raw_legacy = settings.get("battle_party_presets", {})
+        if isinstance(raw_legacy, dict):
+            migrated: list[dict] = []
+            for _, value in sorted(raw_legacy.items(), key=lambda x: str(x[0])):
+                if isinstance(value, dict):
+                    migrated.append(value)
+            self._party_presets = migrated
+            self._save_settings(battle_party_presets_v2=self._party_presets)
+            return
+        self._party_presets = []
+
+    def _apply_top_saved_party_on_startup(self) -> None:
+        if not self._party_presets:
+            return
+        preset = self._party_presets[0]
+        my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
+        self._battle_state.my_party = (my_party + [None] * 6)[:6]
+        my_active_name = str(preset.get("my_active_name") or "")
+        self._battle_state.my_pokemon = copy.deepcopy(
+            next((p for p in self._battle_state.my_party if p and p.name_ja == my_active_name), None)
+            or next((p for p in self._battle_state.my_party if p), None)
+        )
+        self._sync_battle_state_to_panels()
 
     def _refresh_party_presets_ui(self, selected_name: str = "") -> None:
-        names = sorted(self._party_presets.keys())
-        self._set_box_preset_names(names, selected_name)
-
-    def _set_box_preset_names(self, names: list[str], selected_name: str = "") -> None:
-        if not hasattr(self, "_box_preset_combo"):
+        if self._saved_party_list_layout is None:
             return
-        current = selected_name.strip() or self._box_preset_combo.currentText()
-        self._box_preset_combo.blockSignals(True)
-        self._box_preset_combo.clear()
-        for name in names:
-            self._box_preset_combo.addItem(name)
-        self._box_preset_combo.blockSignals(False)
-        if current:
-            index = self._box_preset_combo.findText(current)
-            if index >= 0:
-                self._box_preset_combo.setCurrentIndex(index)
-            else:
-                self._box_preset_combo.setEditText(current)
-        elif self._box_preset_combo.count() > 0:
-            self._box_preset_combo.setCurrentIndex(0)
-        else:
-            self._box_preset_combo.setEditText("")
+        while self._saved_party_list_layout.count():
+            item = self._saved_party_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not self._party_presets:
+            empty_lbl = QLabel("保存済みパーティはありません")
+            empty_lbl.setStyleSheet("color:#a6adc8; font-size:11px;")
+            self._saved_party_list_layout.addWidget(empty_lbl)
+            self._saved_party_list_layout.addStretch()
+            return
+        for index, preset in enumerate(self._party_presets):
+            row = _SavedPartyPanel(index, list(preset.get("my_party", [])), self)
+            row.context_menu_signal.connect(self._on_saved_party_panel_context_menu)
+            row.reorder_signal.connect(self._reorder_party_preset)
+            row.move_to_top_signal.connect(self._move_saved_party_to_top)
+            self._saved_party_list_layout.addWidget(row)
+        self._saved_party_list_layout.addStretch()
 
     def _update_box_party_ui(self) -> None:
-        if not hasattr(self, "_box_my_slots"):
+        if not hasattr(self, "_box_my_panel"):
             return
-        for i, slot in enumerate(self._box_my_slots):
-            if i < len(self._battle_state.my_party) and self._battle_state.my_party[i]:
-                p = self._battle_state.my_party[i]
-                pct = (p.current_hp / p.max_hp * 100) if p.max_hp > 0 else p.current_hp_percent
-                slot.set_pokemon(p.name_ja, pct)
-            else:
-                slot.set_pokemon("", 100)
-            slot.set_active(False)
         my_active = self._active_index(self._battle_state.my_party, self._battle_state.my_pokemon)
-        if 0 <= my_active < len(self._box_my_slots):
-            self._box_my_slots[my_active].set_active(True)
+        self._box_my_panel.set_party(self._battle_state.my_party, active_idx=my_active)
 
     @staticmethod
     def _active_index(party: list[PokemonInstance | None], active: PokemonInstance | None) -> int:
@@ -1711,82 +2513,84 @@ class MainWindow(QMainWindow):
         return -1
 
     def _set_auto_detect_enabled(self, enabled: bool) -> None:
-        if not self._auto_detect_btn:
+        if not self._detect_opponent_btn:
             return
         enabled = bool(enabled)
-        self._auto_detect_btn.setEnabled(enabled)
-        self._auto_detect_btn.setText("相手PT検出" if enabled else "検出中...")
+        self._detect_opponent_btn.setEnabled(enabled)
+        self._detect_opponent_btn.setText("相手PT検出" if enabled else "検出中...")
 
     
 
-    def _save_party_preset(self, preset_name: str) -> None:
-        name = (preset_name or "").strip()
-        if not name:
-            name, ok = QInputDialog.getText(self, "PT保存", "プリセット名:")
-            if not ok:
-                return
-            name = (name or "").strip()
-        if not name:
-            return
-
+    def _save_party_preset(self, to_top: bool = False) -> None:
         self._ensure_party_slots()
-        self._party_presets[name] = {
+        entry = {
             "my_party": [self._serialize_pokemon(p) for p in self._battle_state.my_party],
             "opponent_party": [self._serialize_pokemon(p) for p in self._battle_state.opponent_party],
             "my_active_name": self._battle_state.my_pokemon.name_ja if self._battle_state.my_pokemon else "",
             "opp_active_name": self._battle_state.opponent_pokemon.name_ja if self._battle_state.opponent_pokemon else "",
         }
-        self._save_settings(battle_party_presets=self._party_presets)
-        self._refresh_party_presets_ui(selected_name=name)
-        self._status_bar.showMessage("PTプリセットを保存しました: {}".format(name), 4000)
-        self._log("PT保存: {}".format(name))
+        if to_top:
+            self._party_presets.insert(0, entry)
+        else:
+            self._party_presets.append(entry)
+        self._save_settings(battle_party_presets_v2=self._party_presets)
+        self._refresh_party_presets_ui()
+        self._status_bar.showMessage("パーティを保存しました（{}件）".format(len(self._party_presets)), 4000)
+        self._log("PT保存: {}件".format(len(self._party_presets)))
 
-    def _load_party_preset(self, preset_name: str) -> None:
-        name = (preset_name or "").strip()
-        if not name or name not in self._party_presets:
-            QMessageBox.information(self, "情報", "読込対象のプリセットを選択してください。")
+    def _on_saved_party_panel_context_menu(self, index: int, global_pos) -> None:
+        menu = QMenu(self)
+        act_delete = QAction("削除", menu)
+        act_delete.triggered.connect(lambda: self._delete_party_preset_at(index))
+        menu.addAction(act_delete)
+        menu.exec_(global_pos)
+
+    def _load_party_preset_at(self, index: int) -> None:
+        if index < 0 or index >= len(self._party_presets):
             return
-
-        preset = self._party_presets.get(name, {})
+        preset = self._party_presets[index]
         my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
-        opp_party = [self._deserialize_pokemon(item) for item in preset.get("opponent_party", [])][:6]
         self._battle_state.my_party = (my_party + [None] * 6)[:6]
-        self._battle_state.opponent_party = (opp_party + [None] * 6)[:6]
-
         my_active_name = str(preset.get("my_active_name") or "")
-        opp_active_name = str(preset.get("opp_active_name") or "")
-
         self._battle_state.my_pokemon = copy.deepcopy(
             next((p for p in self._battle_state.my_party if p and p.name_ja == my_active_name), None)
             or next((p for p in self._battle_state.my_party if p), None)
         )
-        self._battle_state.opponent_pokemon = copy.deepcopy(
-            next((p for p in self._battle_state.opponent_party if p and p.name_ja == opp_active_name), None)
-            or next((p for p in self._battle_state.opponent_party if p), None)
-        )
-
         self._sync_battle_state_to_panels()
-        self._refresh_party_presets_ui(selected_name=name)
-        self._status_bar.showMessage("PTプリセットを読み込みました: {}".format(name), 4000)
-        self._log("PT読込: {}".format(name))
+        self._status_bar.showMessage("保存済みパーティを反映しました", 4000)
+        self._log("PT読込")
 
-    def _delete_party_preset(self, preset_name: str) -> None:
-        name = (preset_name or "").strip()
-        if not name or name not in self._party_presets:
-            QMessageBox.information(self, "情報", "削除対象のプリセットを選択してください。")
+    def _delete_party_preset_at(self, index: int) -> None:
+        if index < 0 or index >= len(self._party_presets):
             return
-        if QMessageBox.question(
-            self,
-            "削除確認",
-            "PTプリセット「{}」を削除しますか？".format(name),
-            QMessageBox.Yes | QMessageBox.No,
-        ) != QMessageBox.Yes:
-            return
-        del self._party_presets[name]
-        self._save_settings(battle_party_presets=self._party_presets)
+        del self._party_presets[index]
+        self._save_settings(battle_party_presets_v2=self._party_presets)
         self._refresh_party_presets_ui()
-        self._status_bar.showMessage("PTプリセットを削除しました: {}".format(name), 4000)
-        self._log("PT削除: {}".format(name))
+        self._status_bar.showMessage("保存済みパーティを削除しました", 4000)
+        self._log("PT削除")
+
+    def _reorder_party_preset(self, from_index: int, to_index: int) -> None:
+        if from_index == to_index:
+            return
+        if from_index < 0 or to_index < 0:
+            return
+        if from_index >= len(self._party_presets) or to_index >= len(self._party_presets):
+            return
+        item = self._party_presets.pop(from_index)
+        self._party_presets.insert(to_index, item)
+        self._save_settings(battle_party_presets_v2=self._party_presets)
+        self._refresh_party_presets_ui()
+        if self._party_presets:
+            self._load_party_preset_at(0)
+
+    def _move_saved_party_to_top(self, index: int) -> None:
+        if index <= 0 or index >= len(self._party_presets):
+            return
+        item = self._party_presets.pop(index)
+        self._party_presets.insert(0, item)
+        self._save_settings(battle_party_presets_v2=self._party_presets)
+        self._refresh_party_presets_ui()
+        self._load_party_preset_at(0)
 
     def _reset_all_party(self) -> None:
         if QMessageBox.question(
@@ -1881,6 +2685,11 @@ class MainWindow(QMainWindow):
             self._option_damage_double_cb.blockSignals(True)
             self._option_damage_double_cb.setChecked(is_double)
             self._option_damage_double_cb.blockSignals(False)
+        self._detailed_log_enabled = bool(settings.get("detailed_log_enabled", False))
+        if self._option_detailed_log_cb:
+            self._option_detailed_log_cb.blockSignals(True)
+            self._option_detailed_log_cb.setChecked(self._detailed_log_enabled)
+            self._option_detailed_log_cb.blockSignals(False)
 
         self._refresh_data_status()
 
@@ -1898,6 +2707,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._stop_live_battle_tracking(show_message=False, write_log=False)
+        self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
         if self._video_thread:
             self._video_thread.stop()
         event.accept()

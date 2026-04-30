@@ -63,6 +63,28 @@ _SPRITE_PIXMAP_CACHE: dict[tuple[str, int, int | str], QPixmap | None] = {}
 _SPRITE_BY_NAME_JA: dict[str, str] | None = None
 _SPRITE_ENTRIES: list[dict] | None = None
 
+# Explicit Zukan dex_no fallback for forms that may not exist in local sprite assets.
+_ZUKAN_DEX_FALLBACK_BY_NAME: dict[str, str] = {
+    "ガラルヒヒダルマ(ダルマモード)": "0555-3",
+    "ガラルヒヒダルマ（ダルマモード）": "0555-3",
+    "ブラックキュレム": "0646-2",
+    "ホワイトキュレム": "0646-1",
+    "ウルトラネクロズマ": "0800-3",
+    "バドレックスはくば": "0898-1",
+    "バドレックスこくば": "0898-2",
+    "バドレックス（はくばじょうのすがた）": "0898-1",
+    "バドレックス（こくばじょうのすがた）": "0898-2",
+}
+
+_ZUKAN_DEX_FALLBACK_BY_NAME_EN: dict[str, str] = {
+    "darmanitan-galar-zen": "0555-3",
+    "kyurem-black": "0646-2",
+    "kyurem-white": "0646-1",
+    "necrozma-ultra": "0800-3",
+    "calyrex-ice-rider": "0898-1",
+    "calyrex-shadow-rider": "0898-2",
+}
+
 def type_pixmap(type_name: str, width: int, height: int) -> QPixmap | None:
     """Return a QPixmap for the given type from local PNG/GIF assets, or None."""
     key = (type_name, width, height)
@@ -174,8 +196,11 @@ def _resolve_by_manifest(
     for row in entries:
         row_name_ja = _norm_ja_name(str(row.get("name_ja") or ""))
         row_name_en = str(row.get("name_en") or "").strip().lower()
+        row_base_en, _ = _name_en_form_hints(row_name_en)
         match_ja = bool(base_ja) and row_name_ja == base_ja
-        match_en = bool(base_en) and row_name_en == base_en
+        # Manifest sometimes stores one canonical base in name_en (e.g. meowstic-male),
+        # while caller may provide another variant base (e.g. meowstic-female).
+        match_en = bool(base_en) and (row_name_en == base_en or row_base_en == base_en)
         if match_ja or match_en:
             candidates.append(row)
     if not candidates:
@@ -196,10 +221,17 @@ def _resolve_by_manifest(
             row_key = str(row.get("form_key") or "")
             if row_key == joined_key:
                 return str(row.get("local_path") or "")
-        # Substring match: row_key contains all want_keys
+        # Substring match: row_key contains all want_keys.
+        # Guard against false positives like "male" matching "female".
         for row in candidates:
             row_key = str(row.get("form_key") or "")
-            if row_key and all(k in row_key for k in want_keys):
+            if not row_key:
+                continue
+            if any(k in ("male", "female") for k in want_keys):
+                if all(row_key == k for k in want_keys):
+                    return str(row.get("local_path") or "")
+                continue
+            if all(k in row_key for k in want_keys):
                 return str(row.get("local_path") or "")
         # Male often maps to base art; allow base fallback only for male.
         if "male" in want_keys:
@@ -250,6 +282,11 @@ def _name_en_form_hints(name_en: str) -> tuple[str, list[str]]:
     # Smogon style for Basculegion male omits "-male".
     if base == "basculegion" and not forms:
         forms.append("Male")
+    if base == "gourgeist":
+        forms = [
+            "Jumbo" if _norm_key(form) == "super" else form
+            for form in forms
+        ]
 
     return base, forms
 
@@ -329,10 +366,41 @@ def _name_ja_form_hints(name_ja: str) -> tuple[str, list[str]]:
     m = re.search(r"[\(（](.+?)[\)）]", text)
     if m:
         sub = m.group(1).strip()
+        sub_norm = sub.replace(" ", "")
         for ja_kw, en_form in _JA_FORM_KEYWORD_MAP:
             if ja_kw in sub:
                 forms.append(en_form)
                 break
+        # Form-name mappings not covered by region keywords.
+        if "ニャオニクス" in text:
+            if "メス" in sub:
+                forms.append("Female")
+            elif "オス" in sub:
+                forms.append("Male")
+        if "パンプジン" in text:
+            if "こだましゅ" in sub:
+                forms.append("Small")
+            elif "おおだましゅ" in sub:
+                forms.append("Large")
+            elif "ギガだましゅ" in sub:
+                forms.append("Jumbo")
+        if "ルガルガン" in text:
+            if "まひる" in sub:
+                forms.append("Midday")
+            elif "まよなか" in sub:
+                forms.append("Midnight")
+            elif "たそがれ" in sub:
+                forms.append("Dusk")
+        if "モルペコ" in text:
+            if "まんぷく" in sub_norm:
+                forms.append("Full Belly")
+            elif "はらぺこ" in sub_norm:
+                forms.append("Hangry")
+        if "イルカマン" in text:
+            if "ナイーブ" in sub or "ゼロ" in sub:
+                forms.append("Zero")
+            elif "マイティ" in sub or "ヒーロー" in sub:
+                forms.append("Hero")
 
     return base, forms
 
@@ -348,13 +416,13 @@ def get_local_sprite_path(name_ja: str, name_en: str = "") -> str:
     if name_ja in mapping:
         return mapping[name_ja]
 
-    en_base, en_forms = _name_en_form_hints(name_en)
-    path = _resolve_by_manifest(base_name_en=en_base, desired_forms=en_forms)
+    ja_base, ja_forms = _name_ja_form_hints(name_ja)
+    path = _resolve_by_manifest(base_name_ja=ja_base, desired_forms=ja_forms)
     if path:
         return path
 
-    ja_base, ja_forms = _name_ja_form_hints(name_ja)
-    path = _resolve_by_manifest(base_name_ja=ja_base, desired_forms=ja_forms)
+    en_base, en_forms = _name_en_form_hints(name_en)
+    path = _resolve_by_manifest(base_name_en=en_base, desired_forms=en_forms)
     if path:
         return path
 
@@ -435,6 +503,34 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
             )
             if url:
                 break
+    if not url:
+        normalized_name = (name_ja or "").strip().replace("（", "(").replace("）", ")")
+        dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME.get(normalized_name, "")
+        if not dex_no:
+            normalized_name_en = (name_en or "").strip().lower()
+            dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME_EN.get(normalized_name_en, "")
+            # db上の正式名を優先して照合（省略名入力でも正式値に寄せる）
+            if not dex_no and normalized_name:
+                try:
+                    from src.data import database as db
+                    species = db.get_species_by_name_ja(normalized_name)
+                    if species and species.name_en:
+                        dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME_EN.get(species.name_en.strip().lower(), "")
+                except Exception:
+                    dex_no = ""
+        # バドレックス表記ゆれ対応（括弧あり/なし）
+        if not dex_no:
+            if "バドレックス" in normalized_name and "はくば" in normalized_name:
+                dex_no = "0898-1"
+            elif "バドレックス" in normalized_name and "こくば" in normalized_name:
+                dex_no = "0898-2"
+        if dex_no:
+            url = next((e.image_small_url for e in entries if (e.dex_no or "").strip() == dex_no), "")
+    if not url:
+        # バケッチャ系は図鑑に複数フォーム画像がないため、原種画像にフォールバックする。
+        normalized_name = (name_ja or "").strip().replace("（", "(").replace("）", ")")
+        if "バケッチャ" in normalized_name:
+            url = next((e.image_small_url for e in entries if (e.name_ja or "").strip() == "バケッチャ"), "")
     if not url:
         return None
     cache_key = (url, width, height)

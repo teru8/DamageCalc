@@ -25,14 +25,18 @@ src/
   constants.py               # タイプ色・自然・定数
   ui/
     main_window.py           # メインウィンドウ（登録・バトル管理）
-    damage_panel.py          # ダメージ計算パネル（攻撃側/防御側選択・結果表示）
-    pokemon_edit_dialog.py   # ポケモン編集ダイアログ（手動登録・スペック入力）
-    battle_panel.py          # バトル状態パネル
+    main_window_panels.py    # メイン画面のパネル構築ヘルパー
+    damage_panel.py          # ダメージ計算パネル（統合エントリ）
+    damage_panel_*.py        # ダメージ計算UI/計算ロジックの分割モジュール群
+    pokemon_edit_dialog.py   # ポケモン編集ダイアログ（統合エントリ）
+    pokemon_edit_dialog_*.py # 編集ダイアログの分割モジュール群
     ui_utils.py              # 共有UIユーティリティ（スプライト読み込み・ローディングオーバーレイ）
     styles.py                # QSS スタイル定義
   calc/
     damage_calc.py           # ダメージ計算ロジック
     smogon_bridge.py         # Node.js smogon/calc への橋渡し
+    bridge.js                # smogon_bridge から呼ぶ Node.js 実行スクリプト
+    package.json             # smogon/calc 用 npm 依存定義
   capture/
     ocr_engine.py            # Tesseract OCR ラッパー
     video_thread.py          # キャプチャスレッド
@@ -40,6 +44,7 @@ src/
     box_reader.py            # ボックス画面 OCR
     live_battle_reader.py    # バトル画面リアルタイム認識
     champions_sprite_matcher.py  # スプライトマッチング
+    opponent_party_auto_trigger.py # 相手パーティ認識トリガー
     opponent_party_reader.py # 相手パーティ認識
     text_matcher.py          # テキストマッチング
   data/
@@ -47,10 +52,14 @@ src/
     pokeapi_client.py        # PokeAPI クライアント
     zukan_client.py          # 日本語図鑑サイトクライアント
     usage_scraper.py         # 使用率スクレイパー
+    download_champions_sprites.py # Championsスプライト取得スクリプト
     item_catalog.py          # アイテムカタログ
+    item_fallback_map.py     # アイテム名フォールバック定義
 assets/
   templates/icons/           # タイプアイコン PNG/GIF
   champions_menu_sprites/    # チャンピオンズスプライト + manifest.json
+captures/                    # OCRキャプチャ保存先
+logs/                        # 実行ログ
 ```
 
 ## 主要な制約・注意点

@@ -1,5 +1,5 @@
 import math
-from src.models import PokemonInstance, MoveInfo, DamageResult, SpeciesInfo
+from src.models import PokemonInstance, MoveInfo, SpeciesInfo
 from src.constants import (
     TYPE_CHART, NATURES_JA, BEST_DEF_NATURE_FOR, GAME_LEVEL,
     PUNCHING_MOVES_JA, SLICING_MOVES_JA, PULSE_MOVES_JA,

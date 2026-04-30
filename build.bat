@@ -10,11 +10,11 @@ set "DIST_DIR=%~dp0dist"
 set "WORK_DIR=%~dp0.pyinstaller\work"
 
 echo ===================================
-echo  PokeDamageCalc EXE build start
+echo  DamageCalc EXE build start
 echo ===================================
 echo.
 echo [INFO] Python  : %PYTHON_EXE%
-echo [INFO] Output  : dist\PokeDamageCalc\
+echo [INFO] Output  : dist\^<app-folder^>\
 echo [INFO] Work dir: .pyinstaller\work
 echo.
 
@@ -52,12 +52,33 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "APP_DIST_DIR="
+for /f "delims=" %%D in ('dir /b /ad "%DIST_DIR%"') do (
+    if exist "%DIST_DIR%\%%D\*.exe" (
+        set "APP_DIST_DIR=%DIST_DIR%\%%D"
+        goto :dist_found
+    )
+)
+:dist_found
+if "%APP_DIST_DIR%"=="" set "APP_DIST_DIR=%DIST_DIR%"
+
+echo [INFO] Copying README/usage JSON next to EXE...
+if exist "%~dp0README.md" (
+    copy /Y "%~dp0README.md" "%APP_DIST_DIR%\README.md" >nul
+)
+for %%F in ("%~dp0usage_data_*.json") do (
+    if exist "%%~fF" copy /Y "%%~fF" "%APP_DIST_DIR%\" >nul
+)
+for %%F in ("%~dp0src\usage_data_*.json") do (
+    if exist "%%~fF" copy /Y "%%~fF" "%APP_DIST_DIR%\" >nul
+)
+
 echo.
 echo ===================================
 echo  Build completed successfully!
 echo ===================================
 echo.
-echo  Run: dist\PokeDamageCalc\PokeDamageCalc.exe
+echo  Run: %APP_DIST_DIR%\DamageCalc.exe
 echo.
 echo  NOTE: Keep the "_internal" folder next to the EXE.
 echo  NOTE: EasyOCR models (~170MB) are downloaded on first launch.

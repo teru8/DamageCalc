@@ -445,26 +445,6 @@ MULTI_HIT_MOVES_JA: dict[str, tuple[int, int, int]] = {
     "ポップラッシュ": (1, 10, 5),
 }
 
-# ── Variable-power moves: name → default_power (user can override) ─────
-VARIABLE_POWER_MOVES_JA: dict[str, int] = {
-    "ころがる":         30,
-    "アイスボール":     30,
-    "トリプルアクセル": 20,
-    "ふみつけ":         65,
-    "ウェザーボール":   50,
-    "おはかまいり":     65,
-    "ゆきなだれ":       60,
-    "しおみず":         65,
-    "メテオビーム":     100,
-    "ジャイロボール":   1,
-    "エレキボール":     1,
-    "アシストパワー":   20,
-    "つけあがる":       20,
-    "はたきおとす":     65,
-    "かわらわり":       75,
-    "マグニチュード":   70,
-    "ふいうち":         70,
-}
 
 # ── Stealth Rock multiplier by type chart (rock vs defender type) ──────
 # ステロ base damage = 1/8 max_hp × type_mult (rock effectiveness vs defender)
