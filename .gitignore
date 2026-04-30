@@ -98,3 +98,12 @@ src/data/usage_scraper.py
 src/data/*scraper*.py
 scraper/
 scrapers/
+
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+dist/
+node_modules/
+
+node_modules/
+src/calc/node_modules/
