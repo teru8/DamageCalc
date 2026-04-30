@@ -10,6 +10,7 @@ from src.data import database as db
 _species_cache: list[str] | None = None
 _move_cache: list[str] | None = None
 _ability_cache: list[str] | None = None
+_cache_generation: int = -1  # tracks db.get_write_generation() at last load
 
 _TEXT_REPLACEMENTS = str.maketrans({
     "　": "",
@@ -52,10 +53,20 @@ _DAKUTEN_RE = re.compile(r"[\u3099\u309A]")
 
 
 def clear_caches() -> None:
-    global _species_cache, _move_cache, _ability_cache
+    global _species_cache, _move_cache, _ability_cache, _cache_generation
     _species_cache = None
     _move_cache = None
     _ability_cache = None
+    _cache_generation = -1
+
+
+def _check_generation() -> None:
+    """Invalidate caches if the DB has been written since last load."""
+    global _cache_generation
+    current = db.get_write_generation()
+    if current != _cache_generation:
+        clear_caches()
+        _cache_generation = current
 
 
 def normalize_ocr_text(text: str) -> str:
@@ -67,6 +78,7 @@ def normalize_ocr_text(text: str) -> str:
 
 def _species_names() -> list[str]:
     global _species_cache
+    _check_generation()
     if _species_cache:
         return _species_cache
     names = db.get_all_species_names_ja()
@@ -77,6 +89,7 @@ def _species_names() -> list[str]:
 
 def _move_names() -> list[str]:
     global _move_cache
+    _check_generation()
     if _move_cache:
         return _move_cache
     names = db.get_all_move_names_ja()
@@ -87,6 +100,7 @@ def _move_names() -> list[str]:
 
 def _ability_names() -> list[str]:
     global _ability_cache
+    _check_generation()
     if _ability_cache:
         return _ability_cache
     names = _unique(_normalize_candidates(list(ABILITIES_JA) + db.get_all_usage_ability_names()))

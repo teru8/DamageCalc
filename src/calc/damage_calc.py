@@ -349,6 +349,231 @@ def _item_final_multiplier(
     return (mult, notes)
 
 
+def _apply_attacker_ability_power_boosts(
+    attacker: PokemonInstance,
+    move: MoveInfo,
+    effective_type: str,
+    effective_category: str,
+    power: int,
+    weather: str,
+    terrain: str,
+    type_eff: float,
+    rivalry_state: str,
+    allies_fainted: int,
+    stakeout_active: bool,
+    flash_fire_active: bool,
+    attacker_moves_after_target: bool | None,
+    defender_speed: int,
+    notes: list[str],
+) -> int:
+    """Apply all attacker-side ability power multipliers and return updated power."""
+    def _n(text: str) -> None:
+        if text and text not in notes:
+            notes.append(text)
+
+    # ×1.5 group
+    if attacker.ability == "テクニシャン" and 0 < power <= 60:
+        power = math.floor(power * 1.5)
+        _n("テクニシャン ×1.5")
+    if attacker.ability in ("どくぼうそう", "Toxic Boost") and _is_poisoned(attacker.status) and effective_category == "physical":
+        power = math.floor(power * 1.5)
+        _n("どくぼうそう ×1.5")
+    if attacker.ability in ("メガランチャー", "Mega Launcher") and move.name_ja in PULSE_MOVES_JA:
+        power = math.floor(power * 1.5)
+        _n("メガランチャー ×1.5")
+    if attacker.ability in ("がんじょうあご", "Strong Jaw") and move.name_ja in BITE_MOVES_JA:
+        power = math.floor(power * 1.5)
+        _n("がんじょうあご ×1.5")
+    if attacker.ability in ("りゅうのあぎと", "Dragon's Maw") and effective_type == "dragon":
+        power = math.floor(power * 1.5)
+        _n("りゅうのあぎと ×1.5")
+    if attacker.ability in ("いわはこび", "Rocky Payload") and effective_type == "rock":
+        power = math.floor(power * 1.5)
+        _n("いわはこび ×1.5")
+    if attacker.ability in ("はがねのせいしん", "Steely Spirit") and effective_type == "steel":
+        power = math.floor(power * 1.5)
+        _n("はがねのせいしん ×1.5")
+    if attacker.ability in ("はがねつかい", "Steelworker") and effective_type == "steel":
+        power = math.floor(power * 1.5)
+        _n("はがねつかい ×1.5")
+    if attacker.ability in ("きれあじ", "Sharpness") and move.name_ja in SLICING_MOVES_JA:
+        power = math.floor(power * 1.5)
+        _n("きれあじ ×1.5")
+
+    # ×1.3 group
+    if attacker.ability in ("ちからずく", "Sheer Force") and move.name_ja in SHEER_FORCE_MOVES_JA:
+        power = math.floor(power * 1.3)
+        _n("ちからずく ×1.3")
+    analytic_active = False
+    if attacker.ability in ("アナライズ", "Analytic"):
+        if attacker_moves_after_target is None:
+            analytic_active = attacker.speed > 0 and defender_speed > 0 and attacker.speed < defender_speed
+        else:
+            analytic_active = attacker_moves_after_target
+    if analytic_active:
+        power = math.floor(power * 1.3)
+        _n("アナライズ ×1.3")
+    if attacker.ability in ("かたいツメ", "かたいつめ", "Tough Claws") and (move.makes_contact or move.name_ja in CONTACT_MOVES_JA):
+        power = math.floor(power * 1.3)
+        _n("かたいツメ ×1.3")
+    if attacker.ability in ("トランジスタ", "Transistor") and effective_type == "electric":
+        power = math.floor(power * 1.3)
+        _n("トランジスタ ×1.3")
+    if attacker.ability in ("パンクロック", "Punk Rock") and move.name_ja in SOUND_MOVES_JA:
+        power = math.floor(power * 1.3)
+        _n("パンクロック ×1.3")
+
+    # ×1.2 group
+    skin_type = _skin_ability_type(attacker.ability)
+    if skin_type and move.type_name == "normal" and effective_type == skin_type:
+        power = math.floor(power * 1.2)
+        _n("{} ×1.2".format(attacker.ability))
+    if _is_normalize_ability(attacker.ability) and effective_type == "normal":
+        power = math.floor(power * 1.2)
+        _n("ノーマルスキン ×1.2")
+    if attacker.ability in ("すてみ", "Reckless") and move.name_ja in RECKLESS_MOVES_JA:
+        power = math.floor(power * 1.2)
+        _n("すてみ ×1.2")
+    if attacker.ability in ("てつのこぶし", "Iron Fist") and move.name_ja in PUNCHING_MOVES_JA:
+        power = math.floor(power * 1.2)
+        _n("てつのこぶし ×1.2")
+    if attacker.ability in ("すいほう", "Water Bubble") and effective_type == "water":
+        power = math.floor(power * 2.0)
+        _n("すいほう ×2.0")
+
+    if attacker.ability in ("とうそうしん", "Rivalry"):
+        if rivalry_state == "same":
+            power = math.floor(power * 1.25)
+            _n("とうそうしん（同性） ×1.25")
+        elif rivalry_state == "opposite":
+            power = math.floor(power * 0.75)
+            _n("とうそうしん（異性） ×0.75")
+
+    if attacker.ability in ("そうだいしょう", "Supreme Overlord"):
+        fainted = max(0, min(5, int(allies_fainted or 0)))
+        if fainted > 0:
+            so_mult = 1.0 + 0.1 * fainted
+            power = math.floor(power * so_mult)
+            _n("そうだいしょう {}体 ×{:.1f}".format(fainted, so_mult))
+    if attacker.ability in ("はりこみ", "Stakeout") and stakeout_active:
+        power = math.floor(power * 2.0)
+        _n("はりこみ ×2.0")
+    if attacker.ability in ("もらいび", "Flash Fire") and flash_fire_active and effective_type == "fire":
+        power = math.floor(power * 1.5)
+        _n("もらいび発動 ×1.5")
+
+    # Grassy terrain halves Earthquake/Bulldoze/Dig
+    if terrain == "grassy" and move.name_ja in ("じしん", "じならし", "あなをほる"):
+        power = math.floor(power * 0.5)
+        _n("グラスフィールドで威力半減 ×0.5")
+
+    return power
+
+
+def _calc_atk_stat_mult(
+    attacker: PokemonInstance,
+    effective_category: str,
+    effective_type: str,
+    attack_source: str,
+    weather: str,
+    terrain: str,
+    atk: int,
+    protosynthesis_active: bool,
+    quark_drive_active: bool,
+    notes: list[str],
+) -> tuple[float, float, int]:
+    """Apply attacker-side stat multipliers. Return (atk_stat_mult, burn_mult, updated_atk)."""
+    def _n(text: str) -> None:
+        if text and text not in notes:
+            notes.append(text)
+
+    uses_phys = effective_category == "physical" and attack_source == "attacker_attack"
+    uses_spec = effective_category == "special" and attack_source == "attacker_sp_attack"
+
+    atk_stat_mult = 1.0
+    burn_mult = 1.0
+
+    if uses_phys and attacker.ability in ("ちからもち", "ヨガパワー", "Huge Power", "Pure Power"):
+        atk_stat_mult *= 2.0
+
+    if uses_phys and attacker.status == "burn":
+        burn_mult = 0.5
+
+    if uses_phys and attacker.ability in ("こんじょう", "Guts") and attacker.status != "":
+        atk_stat_mult *= 1.5
+        burn_mult = 1.0
+
+    if uses_phys and attacker.ability in ("ごりむちゅう", "Gorilla Tactics"):
+        atk_stat_mult *= 1.5
+        _n("ごりむちゅう ×1.5")
+
+    attacker_cur_hp = _current_hp(attacker.current_hp, attacker.max_hp or attacker.hp)
+    attacker_max_hp = max(1, attacker.max_hp or attacker.hp or attacker_cur_hp)
+    if attacker_cur_hp * 3 <= attacker_max_hp:
+        if attacker.ability in ("しんりょく", "Overgrow") and effective_type == "grass":
+            atk_stat_mult *= 1.5
+            _n("しんりょく ×1.5")
+        elif attacker.ability in ("もうか", "Blaze") and effective_type == "fire":
+            atk_stat_mult *= 1.5
+            _n("もうか ×1.5")
+        elif attacker.ability in ("げきりゅう", "Torrent") and effective_type == "water":
+            atk_stat_mult *= 1.5
+            _n("げきりゅう ×1.5")
+        elif attacker.ability in ("むしのしらせ", "Swarm") and effective_type == "bug":
+            atk_stat_mult *= 1.5
+            _n("むしのしらせ ×1.5")
+
+    if uses_phys and attacker.ability in ("フラワーギフト", "Flower Gift") and weather == "sun":
+        atk_stat_mult *= 1.5
+        _n("フラワーギフト ×1.5")
+
+    if uses_phys and attacker.ability in ("ひひいろのこどう", "Orichalcum Pulse") and weather == "sun":
+        if attacker.item not in ("ばんのうがさ", "Utility Umbrella"):
+            atk_stat_mult *= (5461 / 4096)
+            _n("ひひいろのこどう ×1.33")
+
+    if uses_spec and attacker.ability in ("ハドロンエンジン", "Hadron Engine") and terrain == "electric":
+        atk_stat_mult *= (5461 / 4096)
+        _n("ハドロンエンジン ×1.33")
+
+    paradox_active = False
+    if attacker.ability in ("こだいかっせい", "Protosynthesis"):
+        paradox_active = (
+            protosynthesis_active or
+            weather == "sun" or
+            attacker.item in ("ブーストエナジー", "Booster Energy")
+        )
+    elif attacker.ability in ("クォークチャージ", "Quark Drive"):
+        paradox_active = (
+            quark_drive_active or
+            terrain == "electric" or
+            attacker.item in ("ブーストエナジー", "Booster Energy")
+        )
+    if paradox_active:
+        boosted = _paradox_boosted_stat_key(attacker)
+        if boosted == "attack" and attack_source == "attacker_attack":
+            atk_stat_mult *= 1.3
+            _n("{} ×1.3".format(attacker.ability))
+        elif boosted == "sp_attack" and attack_source == "attacker_sp_attack":
+            atk_stat_mult *= 1.3
+            _n("{} ×1.3".format(attacker.ability))
+        elif boosted == "defense" and attack_source == "attacker_defense":
+            atk_stat_mult *= 1.3
+            _n("{} ×1.3".format(attacker.ability))
+
+    if uses_spec and attacker.ability == "ねつぼうそう" and attacker.status == "burn":
+        atk_stat_mult *= 1.5
+
+    if uses_phys and attacker.ability == "はりきり":
+        atk_stat_mult *= 1.5
+
+    atk = max(1, math.floor(atk * atk_stat_mult))
+    if burn_mult < 1.0:
+        _n("やけど ×0.5")
+
+    return atk_stat_mult, burn_mult, atk
+
+
 def _base_damage(power: int, attack: int, defense: int, level: int = GAME_LEVEL) -> int:
     defense = defense or 1
     return math.floor(math.floor((2 * level // 5 + 2) * power * attack / defense) / 50) + 2
@@ -576,194 +801,39 @@ def calc_damage_range(
         effective_power = max(1, math.floor(effective_power * 0.5))
         _note("{} 天候半減 ×0.5".format(move.name_ja))
 
-    # Ability-based power boosts (Gen9 @smogon/calc ordering)
-    # ×1.5 group
-    if attacker.ability == "テクニシャン" and 0 < effective_power <= 60:
-        effective_power = math.floor(effective_power * 1.5)
-        _note("テクニシャン ×1.5")
-    if attacker.ability in ("どくぼうそう", "Toxic Boost") and _is_poisoned(attacker.status) and effective_category == "physical":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("どくぼうそう ×1.5")
-    if attacker.ability in ("メガランチャー", "Mega Launcher") and move.name_ja in PULSE_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.5)
-        _note("メガランチャー ×1.5")
-    if attacker.ability in ("がんじょうあご", "Strong Jaw") and move.name_ja in BITE_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.5)
-        _note("がんじょうあご ×1.5")
-    if attacker.ability in ("りゅうのあぎと", "Dragon's Maw") and effective_type == "dragon":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("りゅうのあぎと ×1.5")
-    if attacker.ability in ("いわはこび", "Rocky Payload") and effective_type == "rock":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("いわはこび ×1.5")
-    if attacker.ability in ("はがねのせいしん", "Steely Spirit") and effective_type == "steel":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("はがねのせいしん ×1.5")
-    if attacker.ability in ("はがねつかい", "Steelworker") and effective_type == "steel":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("はがねつかい ×1.5")
-    if attacker.ability in ("きれあじ", "Sharpness") and move.name_ja in SLICING_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.5)
-        _note("きれあじ ×1.5")
-
-    # ×1.3 group
-    if attacker.ability in ("ちからずく", "Sheer Force") and move.name_ja in SHEER_FORCE_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.3)
-        _note("ちからずく ×1.3")
-    analytic_active = False
-    if attacker.ability in ("アナライズ", "Analytic"):
-        if attacker_moves_after_target is None:
-            analytic_active = attacker.speed > 0 and defender_speed > 0 and attacker.speed < defender_speed
-        else:
-            analytic_active = attacker_moves_after_target
-    if analytic_active:
-        effective_power = math.floor(effective_power * 1.3)
-        _note("アナライズ ×1.3")
-    if attacker.ability in ("かたいツメ", "かたいつめ", "Tough Claws") and (move.makes_contact or move.name_ja in CONTACT_MOVES_JA):
-        effective_power = math.floor(effective_power * 1.3)
-        _note("かたいツメ ×1.3")
-    if attacker.ability in ("トランジスタ", "Transistor") and effective_type == "electric":
-        effective_power = math.floor(effective_power * 1.3)
-        _note("トランジスタ ×1.3")
-    if attacker.ability in ("パンクロック", "Punk Rock") and move.name_ja in SOUND_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.3)
-        _note("パンクロック ×1.3")
-
-    # ×1.2 group
-    skin_type = _skin_ability_type(attacker.ability)
-    if skin_type and move.type_name == "normal" and effective_type == skin_type:
-        effective_power = math.floor(effective_power * 1.2)
-        _note("{} ×1.2".format(attacker.ability))
-    if _is_normalize_ability(attacker.ability) and effective_type == "normal":
-        effective_power = math.floor(effective_power * 1.2)
-        _note("ノーマルスキン ×1.2")
-    if attacker.ability in ("すてみ", "Reckless") and move.name_ja in RECKLESS_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.2)
-        _note("すてみ ×1.2")
-    if attacker.ability in ("てつのこぶし", "Iron Fist") and move.name_ja in PUNCHING_MOVES_JA:
-        effective_power = math.floor(effective_power * 1.2)
-        _note("てつのこぶし ×1.2")
-    if attacker.ability in ("すいほう", "Water Bubble") and effective_type == "water":
-        effective_power = math.floor(effective_power * 2.0)
-        _note("すいほう ×2.0")
-
-    if attacker.ability in ("とうそうしん", "Rivalry"):
-        if rivalry_state == "same":
-            effective_power = math.floor(effective_power * 1.25)
-            _note("とうそうしん（同性） ×1.25")
-        elif rivalry_state == "opposite":
-            effective_power = math.floor(effective_power * 0.75)
-            _note("とうそうしん（異性） ×0.75")
-
-    if attacker.ability in ("そうだいしょう", "Supreme Overlord"):
-        fainted = max(0, min(5, int(allies_fainted or 0)))
-        if fainted > 0:
-            so_mult = 1.0 + 0.1 * fainted
-            effective_power = math.floor(effective_power * so_mult)
-            _note("そうだいしょう {}体 ×{:.1f}".format(fainted, so_mult))
-    if attacker.ability in ("はりこみ", "Stakeout") and stakeout_active:
-        effective_power = math.floor(effective_power * 2.0)
-        _note("はりこみ ×2.0")
-    if attacker.ability in ("もらいび", "Flash Fire") and flash_fire_active and effective_type == "fire":
-        effective_power = math.floor(effective_power * 1.5)
-        _note("もらいび発動 ×1.5")
-
-    # Grassy terrain halves Earthquake/Bulldoze/Dig
-    if terrain == "grassy" and move.name_ja in ("じしん", "じならし", "あなをほる"):
-        effective_power = math.floor(effective_power * 0.5)
-        _note("グラスフィールドで威力半減 ×0.5")
+    # Ability-based power boosts
+    _notes_list = modifier_notes if modifier_notes is not None else []
+    effective_power = _apply_attacker_ability_power_boosts(
+        attacker=attacker,
+        move=move,
+        effective_type=effective_type,
+        effective_category=effective_category,
+        power=effective_power,
+        weather=weather,
+        terrain=terrain,
+        type_eff=type_eff,
+        rivalry_state=rivalry_state,
+        allies_fainted=allies_fainted,
+        stakeout_active=stakeout_active,
+        flash_fire_active=flash_fire_active,
+        attacker_moves_after_target=attacker_moves_after_target,
+        defender_speed=defender_speed,
+        notes=_notes_list,
+    )
 
     # ── Attacker stat modifier (ability/status) ────────────────────────
-    atk_stat_mult = 1.0
-    uses_attacker_physical_attack = (
-        effective_category == "physical" and attack_source == "attacker_attack"
+    _, burn_mult, atk = _calc_atk_stat_mult(
+        attacker=attacker,
+        effective_category=effective_category,
+        effective_type=effective_type,
+        attack_source=attack_source,
+        weather=weather,
+        terrain=terrain,
+        atk=atk,
+        protosynthesis_active=protosynthesis_active,
+        quark_drive_active=quark_drive_active,
+        notes=_notes_list,
     )
-    uses_attacker_special_attack = (
-        effective_category == "special" and attack_source == "attacker_sp_attack"
-    )
-
-    # ちからもち / ヨガパワー (attack × 2 for physical attack stat)
-    if uses_attacker_physical_attack and attacker.ability in ("ちからもち", "ヨガパワー", "Huge Power", "Pure Power"):
-        atk_stat_mult *= 2.0
-
-    burn_mult = 1.0
-    if uses_attacker_physical_attack and attacker.status == "burn":
-        burn_mult = 0.5
-
-    # こんじょう: ×1.5 physical when status; also negates burn halving
-    if uses_attacker_physical_attack and attacker.ability in ("こんじょう", "Guts") and attacker.status != "":
-        atk_stat_mult *= 1.5
-        burn_mult = 1.0
-
-    if uses_attacker_physical_attack and attacker.ability in ("ごりむちゅう", "Gorilla Tactics"):
-        atk_stat_mult *= 1.5
-        _note("ごりむちゅう ×1.5")
-
-    attacker_cur_hp = _current_hp(attacker.current_hp, attacker.max_hp or attacker.hp)
-    attacker_max_hp = max(1, attacker.max_hp or attacker.hp or attacker_cur_hp)
-    if attacker_cur_hp * 3 <= attacker_max_hp:
-        if attacker.ability in ("しんりょく", "Overgrow") and effective_type == "grass":
-            atk_stat_mult *= 1.5
-            _note("しんりょく ×1.5")
-        elif attacker.ability in ("もうか", "Blaze") and effective_type == "fire":
-            atk_stat_mult *= 1.5
-            _note("もうか ×1.5")
-        elif attacker.ability in ("げきりゅう", "Torrent") and effective_type == "water":
-            atk_stat_mult *= 1.5
-            _note("げきりゅう ×1.5")
-        elif attacker.ability in ("むしのしらせ", "Swarm") and effective_type == "bug":
-            atk_stat_mult *= 1.5
-            _note("むしのしらせ ×1.5")
-
-    if uses_attacker_physical_attack and attacker.ability in ("フラワーギフト", "Flower Gift") and weather == "sun":
-        atk_stat_mult *= 1.5
-        _note("フラワーギフト ×1.5")
-
-    if uses_attacker_physical_attack and attacker.ability in ("ひひいろのこどう", "Orichalcum Pulse") and weather == "sun":
-        if attacker.item not in ("ばんのうがさ", "Utility Umbrella"):
-            atk_stat_mult *= (5461 / 4096)
-            _note("ひひいろのこどう ×1.33")
-
-    if uses_attacker_special_attack and attacker.ability in ("ハドロンエンジン", "Hadron Engine") and terrain == "electric":
-        atk_stat_mult *= (5461 / 4096)
-        _note("ハドロンエンジン ×1.33")
-
-    paradox_active = False
-    if attacker.ability in ("こだいかっせい", "Protosynthesis"):
-        paradox_active = (
-            protosynthesis_active or
-            weather == "sun" or
-            attacker.item in ("ブーストエナジー", "Booster Energy")
-        )
-    elif attacker.ability in ("クォークチャージ", "Quark Drive"):
-        paradox_active = (
-            quark_drive_active or
-            terrain == "electric" or
-            attacker.item in ("ブーストエナジー", "Booster Energy")
-        )
-    if paradox_active:
-        boosted = _paradox_boosted_stat_key(attacker)
-        if boosted == "attack" and attack_source == "attacker_attack":
-            atk_stat_mult *= 1.3
-            _note("{} ×1.3".format(attacker.ability))
-        elif boosted == "sp_attack" and attack_source == "attacker_sp_attack":
-            atk_stat_mult *= 1.3
-            _note("{} ×1.3".format(attacker.ability))
-        elif boosted == "defense" and attack_source == "attacker_defense":
-            atk_stat_mult *= 1.3
-            _note("{} ×1.3".format(attacker.ability))
-
-    # ねつぼうそう (Flare Boost): SpAtk ×1.5 when burned
-    if uses_attacker_special_attack and attacker.ability == "ねつぼうそう" and attacker.status == "burn":
-        atk_stat_mult *= 1.5
-
-    # はりきり: ×1.5 physical, but accuracy −20% (ignore accuracy here)
-    if uses_attacker_physical_attack and attacker.ability == "はりきり":
-        atk_stat_mult *= 1.5
-
-    atk = max(1, math.floor(atk * atk_stat_mult))
-    if burn_mult < 1.0:
-        _note("やけど ×0.5")
 
     # すなのちから: ×1.3 rock/ground/steel in sand
     sand_force_mult = 1.0
@@ -859,6 +929,9 @@ def calc_damage_range(
     elif has_light_screen and effective_category == "special" and not is_critical:
         screen_mult = screen_reduction
         _note("ひかりのかべ ×{:.2f}".format(screen_reduction))
+
+    uses_attacker_physical_attack = effective_category == "physical" and attack_source == "attacker_attack"
+    uses_attacker_special_attack = effective_category == "special" and attack_source == "attacker_sp_attack"
 
     item_atk_note = ""
     attacker_item = (attacker.item or "").strip()

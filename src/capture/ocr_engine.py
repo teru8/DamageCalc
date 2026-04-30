@@ -5,10 +5,36 @@ No GPU, no torch — uses what Windows 10/11 already provides.
 Result dict structure from winocr.recognize_pil_sync:
   {'text': str, 'lines': [{'text': str, 'words': [{'text': str, 'bounding_rect': {...}}]}]}
 """
+import hashlib
+import logging
 import unicodedata
+from collections import OrderedDict
+from typing import Any
 
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
+
+
+class _LRUDict(OrderedDict):
+    """OrderedDict with a maximum size; evicts the least-recently-used entry."""
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        if len(self) > self._maxsize:
+            self.popitem(last=False)
+
+    def __getitem__(self, key: Any) -> Any:
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+
+_OCR_RESULT_CACHE: _LRUDict = _LRUDict(64)
 
 
 def is_ready() -> bool:
@@ -82,13 +108,20 @@ def read_text(image: np.ndarray, allowlist: str | None = None) -> list[str]:
     OCR on a BGR numpy image. Returns list of detected text strings (one per line).
     Returns [] on failure.
     """
+    cache_key = (hashlib.md5(image.tobytes()).hexdigest(), allowlist)
+    if cache_key in _OCR_RESULT_CACHE:
+        return _OCR_RESULT_CACHE[cache_key]
     try:
+        result: list[str] = []
         for variant in _prepare_variants(image):
             texts = _normalize_lines(_run_winocr(variant), allowlist)
             if texts:
-                return texts
-        return []
-    except Exception:
+                result = texts
+                break
+        _OCR_RESULT_CACHE[cache_key] = result
+        return result
+    except Exception as e:
+        logging.warning("read_text failed: %s", e)
         return []
 
 
