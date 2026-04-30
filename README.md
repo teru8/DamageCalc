@@ -49,14 +49,13 @@ cd src/calc
 npm install
 cd ../..
 
+# スプライトのDL
+python -m src.data.download_champions_sprites
+
 # 起動
 python main.py
 ```
 
-### GitHubから取得した場合の注意
-
-`node_modules/` はリポジトリに含めない運用を想定しています。  
-`src/calc/` で `npm install` を実行すると、必要な Node.js 依存パッケージが復元されます。
 
 ---
 
@@ -108,8 +107,7 @@ python main.py
 |------|------|
 | 相手PTスロットをクリック | 相手ポケモンを選択する |
 | 自分PTスロットをクリック | 自分のポケモンを選択する |
-| 右クリックメニュー | 登録情報を編集する |
-| ドラッグ＆ドロップ | 自分PTスロットへポケモンをセットする |
+
 
 ---
 
