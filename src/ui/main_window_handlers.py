@@ -226,7 +226,7 @@ def eventFilter(self, obj, event):
         if me.button() == Qt.RightButton:
             self._show_usage_password_dialog()
             return True
-    return super().eventFilter(obj, event)
+    return QMainWindow.eventFilter(self, obj, event)
 
 # ── Logging ───────────────────────────────────────────────────────
 
@@ -296,7 +296,7 @@ def _export_log_to_txt(self) -> None:
     logs_dir = Path.cwd() / "logs"
     try:
         logs_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except OSError:
         pass
     default_path = logs_dir / default_name
     selected_path, _ = QFileDialog.getSaveFileName(
@@ -309,7 +309,7 @@ def _export_log_to_txt(self) -> None:
         return
     try:
         Path(selected_path).write_text(text + "\n", encoding="utf-8")
-    except Exception as exc:
+    except OSError as exc:
         self._log("[ERROR] ログ出力失敗: {}".format(exc))
         return
     self._log("ログを出力しました: {}".format(selected_path))
@@ -861,7 +861,9 @@ def _dump_auto_detect_debug_frame(self, frame) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         out_path = out_dir / "opp_auto_detect_{}.png".format(ts)
         cv2.imwrite(str(out_path), dbg)
-    except Exception:
+    except (ImportError, OSError, ValueError, TypeError) as exc:
+        if self._detailed_log_enabled:
+            self._log("[WARN] 自動検出デバッグ画像の保存失敗: {}".format(exc))
         return
 
 
@@ -917,7 +919,7 @@ def _poll_live_battle(self) -> None:
             current_my_name=current_my,
             current_opp_name=current_opp,
         )
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         self._log("[ERROR] 試合中監視エラー: {}".format(e))
         return
 
@@ -1127,7 +1129,7 @@ class _BoxReadWorker(QObject):
 
             data = box_reader.read_box_screen(self.frame)
             self.finished.emit(data)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             self.error.emit(str(e))
 
 
@@ -1841,7 +1843,7 @@ def nativeEvent(self, event_type: bytes, message: object) -> tuple[bool, int]:
             self.activateWindow()
             ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
             return True, 0
-    return super().nativeEvent(event_type, message)
+    return QMainWindow.nativeEvent(self, event_type, message)
 
 
 
@@ -1857,7 +1859,7 @@ def _load_settings(self) -> dict:
         p = self._settings_path()
         if p.exists():
             return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         pass
     return {}
 
@@ -1872,12 +1874,44 @@ def _save_settings(self, **kwargs) -> None:
         if p.exists():
             try:
                 current = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 pass
         current.update(kwargs)
         p.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except OSError as exc:
+        self._log("[WARN] 設定保存失敗: {}".format(exc))
+
+
+def _run_data_integrity_check(self) -> None:
+    _bootstrap()
+    season = self._current_usage_season()
+    db.set_active_usage_season(season)
+    result = db.check_usage_data_integrity(season)
+    summary = result.get("summary", {})
+    issues = result.get("issues", [])
+    details = result.get("details", {})
+    lines = [
+        "シーズン: {}".format(result.get("season", season)),
+        "species={}, usage={}, option={}, effort={}".format(
+            summary.get("species_count", 0),
+            summary.get("usage_count", 0),
+            summary.get("option_count", 0),
+            summary.get("effort_count", 0),
+        ),
+    ]
+    if details.get("json_exists"):
+        lines.append("JSON: {}".format(details.get("json_path", "")))
+    else:
+        lines.append("JSON: 未検出 ({})".format(details.get("json_path", "")))
+    if issues:
+        lines.append("")
+        lines.append("不整合:")
+        lines.extend("- {}".format(msg) for msg in issues)
+        self._log("[WARN] データ整合性チェック: NG [{}]".format(season))
+        QMessageBox.warning(self, "データ整合性チェック", "\n".join(lines))
+        return
+    self._log("データ整合性チェック: OK [{}]".format(season))
+    QMessageBox.information(self, "データ整合性チェック", "\n".join(lines + ["", "不整合は見つかりませんでした。"]))
 
 
 

@@ -236,6 +236,21 @@ def _build_side_panel(self) -> None:
     )
     self._supreme_combo.currentIndexChanged.connect(self._refresh_supreme_combo)
     self._supreme_combo.setVisible(False)
+    self._atk_multiscale_btn = _ToggleBtn("マルチスケイル", cond_style=True)
+    self._atk_shadow_shield_btn = _ToggleBtn("ファントムガード", cond_style=True)
+    self._atk_tera_shell_btn = _ToggleBtn("テラスシェル", cond_style=True)
+    self._attacker_full_hp_guard_btns: dict[str, _ToggleBtn] = {
+        "マルチスケイル": self._atk_multiscale_btn,
+        "ファントムガード": self._atk_shadow_shield_btn,
+        "テラスシェル": self._atk_tera_shell_btn,
+    }
+    for btn in self._attacker_full_hp_guard_btns.values():
+        btn.setFixedHeight(28)
+        btn.setMinimumWidth(90)
+        btn.toggled.connect(lambda _: self.recalculate())
+        btn.setChecked(True)
+        btn.setVisible(False)
+        atk_cond4.addWidget(btn)
 
     self._rivalry_combo = QComboBox()
     self._rivalry_combo.setFixedHeight(24)
@@ -387,6 +402,21 @@ def _build_side_panel(self) -> None:
     )
     self._opp_supreme_combo.currentIndexChanged.connect(self._refresh_opp_supreme_combo)
     self._opp_supreme_combo.setVisible(False)
+    self._opp_multiscale_btn = _ToggleBtn("マルチスケイル", cond_style=True)
+    self._opp_shadow_shield_btn = _ToggleBtn("ファントムガード", cond_style=True)
+    self._opp_tera_shell_btn = _ToggleBtn("テラスシェル", cond_style=True)
+    self._defender_full_hp_guard_btns: dict[str, _ToggleBtn] = {
+        "マルチスケイル": self._opp_multiscale_btn,
+        "ファントムガード": self._opp_shadow_shield_btn,
+        "テラスシェル": self._opp_tera_shell_btn,
+    }
+    for btn in self._defender_full_hp_guard_btns.values():
+        btn.setFixedHeight(28)
+        btn.setMinimumWidth(90)
+        btn.toggled.connect(lambda _: self.recalculate())
+        btn.setChecked(True)
+        btn.setVisible(False)
+        opp_atk_cond4.addWidget(btn)
 
     self._opp_rivalry_combo = QComboBox()
     self._opp_rivalry_combo.setFixedHeight(24)

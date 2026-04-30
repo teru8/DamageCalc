@@ -623,7 +623,7 @@ class PokemonEditDialog(QDialog):
         def rank(detail: dict, key: str) -> int:
             try:
                 return int(detail.get(key) or 0)
-            except Exception:
+            except (TypeError, ValueError):
                 return 0
 
         def scaled(base_value: int, base_rank: int, form_rank: int) -> int:

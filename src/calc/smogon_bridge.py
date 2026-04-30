@@ -1033,9 +1033,17 @@ class SmogonBridge:
                "move": move_d, "field": field_d}
         try:
             res = self._send(req)
-        except Exception as e:
+        except (
+            AttributeError,
+            BrokenPipeError,
+            ConnectionError,
+            json.JSONDecodeError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as e:
             import logging
-            logging.warning("SmogonBridge calc error: %s", e)
+            logging.warning("SmogonBridge calc error: %s", e, exc_info=True)
             return (0, 0, True)
         is_error = bool(res.get("error"))
         return (max(0, res.get("min", 0)), max(0, res.get("max", 0)), is_error)

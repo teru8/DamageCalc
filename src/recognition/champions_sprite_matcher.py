@@ -266,7 +266,7 @@ def load_manifest() -> dict:
         return _MANIFEST_CACHE
     try:
         _MANIFEST_CACHE = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         _MANIFEST_CACHE = {"entries": []}
     return _MANIFEST_CACHE
 
@@ -314,7 +314,7 @@ def download_catalog(
             continue
         try:
             species_id = int(row.get("species_id"))
-        except Exception:
+        except (TypeError, ValueError):
             continue
         form = str(row.get("form") or "").strip()
         is_shiny = bool(row.get("is_shiny"))

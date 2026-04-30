@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import requests
+import logging
 
 from src.constants import POKEAPI_BASE
 from src.models import SpeciesInfo
@@ -23,7 +24,8 @@ def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -
         if not isinstance(payload, dict):
             _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
             return None
-    except Exception:
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        logging.warning("species lookup failed: %s", exc, exc_info=True)
         _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
         return None
 
@@ -42,7 +44,7 @@ def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -
             continue
         try:
             stats_map[stat_name] = int(row.get("base_stat") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             stats_map[stat_name] = 0
 
     resolved = SpeciesInfo(

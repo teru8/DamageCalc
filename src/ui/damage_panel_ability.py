@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import requests
+import logging
 
 from src.constants import POKEAPI_BASE
 
@@ -25,7 +26,8 @@ def _ability_name_ja_from_name_en(ability_name_en: str) -> str:
         response = _POKEAPI_SESSION.get("{}/ability/{}".format(POKEAPI_BASE, key), timeout=15)
         response.raise_for_status()
         payload = response.json()
-    except Exception:
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        logging.warning("ability lookup failed: %s", exc, exc_info=True)
         _POKEAPI_ABILITY_JA_BY_EN[key] = ""
         return ""
 
@@ -51,7 +53,8 @@ def _pokeapi_ability_names_for_pokemon(name_en: str) -> list[str]:
         response = _POKEAPI_SESSION.get("{}/pokemon/{}".format(POKEAPI_BASE, key), timeout=15)
         response.raise_for_status()
         payload = response.json()
-    except Exception:
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        logging.warning("pokemon ability list lookup failed: %s", exc, exc_info=True)
         _POKEAPI_ABILITY_NAMES_BY_POKEMON_EN[key] = []
         return []
 
