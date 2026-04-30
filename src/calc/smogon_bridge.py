@@ -5,6 +5,7 @@ Manages a persistent Node.js subprocess; communicates via line-delimited JSON.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -1003,6 +1004,16 @@ class SmogonBridge:
             creationflags=creationflags,
             startupinfo=startupinfo,
         )
+        t = threading.Thread(target=self._drain_stderr, daemon=True)
+        t.start()
+
+    def _drain_stderr(self) -> None:
+        if self._proc is None or self._proc.stderr is None:
+            return
+        for line in self._proc.stderr:
+            line = line.rstrip()
+            if line:
+                logging.warning("smogon-bridge stderr: %s", line)
 
     def _send(self, req: dict) -> dict:
         if self._proc is None or self._proc.poll() is not None:
