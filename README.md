@@ -25,7 +25,7 @@ DamageCalc は、キャプチャ映像から相手パーティを検出し、登
 | キャプチャ環境 | キャプチャボード + OBS（仮想カメラ）またはパススルー機能付きキャプチャボード |
 | モニター環境 | デュアルディスプレイ以上 |
 
-### ビルド版（EXE配布版）の場合
+### [ビルド版（EXE配布版）](https://github.com/teru8/DamageCalc/releases)の場合
 
 | 項目 | 内容 |
 |------|------|
@@ -153,13 +153,22 @@ OBS の仮想カメラが起動しているか確認してください。
 4. 保存したログを添付して報告する
 
 ---
+  ## サードパーティデータ・ライセンス・権利表記
 
-## ライセンス・権利表記
+  本ツールは、PokéAPI が提供するポケモンデータを利用しています。
 
-本ツールは個人利用を目的とした Alpha 版です。
+  - 提供元: https://pokeapi.co
+  - リポジトリ: https://github.com/PokeAPI/pokeapi
+  - ライセンス: BSD 3-Clause License
+    https://github.com/PokeAPI/pokeapi/blob/master/LICENSE.md
 
-本ツールは、ダメージ計算エンジンとして [Smogon `@smogon/calc`](https://github.com/smogon/damage-calc) を使用しています。  
-`@smogon/calc` は MIT License のもとで提供されています。再配布する場合は、同ライブラリの著作権表示およびライセンス文を削除しないでください。
+  ポケモン名・種族関連メタデータ等の一部データは PokéAPI を参照し、本アプリ向けに利用しています。
+  再配布する場合は、PokéAPI のライセンス条件を確認し、必要な表示・ライセンス情報を保持してください。
 
-Pokémon および関連する名称・画像・データは、各権利者に帰属します。  
-本ツールは非公式ツールであり、株式会社ポケモン、任天堂、Creatures、GAME FREAK、Smogon とは関係ありません。
+  本ツールは、ダメージ計算エンジンとして [Smogon `@smogon/calc`](https://github.com/smogon/damage-calc) を使用していま
+  す。
+  `@smogon/calc` は MIT License のもとで提供されています。
+  再配布する場合は、同ライブラリの著作権表示およびライセンス文を削除しないでください。
+
+  Pokémon および関連する名称・画像・データは、各権利者に帰属します。
+  本ツールは非公式ツールであり、株式会社ポケモン、任天堂、Creatures、GAME FREAK、Smogon とは関係ありません。
