@@ -5,7 +5,7 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 
 
 def _bootstrap() -> None:
-    from src.ui import main_window as _mw
+    from src.ui import main_window_deps as _mw
     globals().update(_mw.__dict__)
 
 def _current_usage_season(self) -> str:

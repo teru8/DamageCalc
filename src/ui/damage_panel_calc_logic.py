@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 def _bootstrap() -> None:
-    from src.ui import damage_panel as _dp
+    from src.ui import damage_panel_deps as _dp
     globals().update(_dp.__dict__)
 
 def recalculate(self) -> None:

@@ -16,6 +16,10 @@ from PyQt5.QtWidgets import (
     QSlider,
 )
 
+# NOTE:
+# Extracted modules under src/ui/damage_panel_*.py import this module and
+# execute globals().update(_dp.__dict__). Imports that appear unused here may
+# still be required at runtime by those extracted modules.
 from src.models import PokemonInstance, MoveInfo, SpeciesInfo
 from src.data import zukan_client
 from src.ui.damage_panel_cards import AttackerCard as _AttackerCard
