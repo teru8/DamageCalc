@@ -1129,10 +1129,8 @@ def _get_usage_json_path(season: str | None = None) -> Path:
     import sys
     season_token = _season_or_active(season)
     if getattr(sys, "frozen", False):
-        # ビルド版: 実行ファイルと同じ場所
         json_dir = Path(sys.executable).parent
     else:
-        # 開発環境: プロジェクトルート
         import os
         json_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return json_dir / f"usage_data_{season_token}.json"

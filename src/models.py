@@ -35,12 +35,12 @@ class SpeciesInfo:
 class PokemonInstance:
     species_id: int = 0
     name_ja: str = ""
-    usage_name: str = ""  # 使用率DB検索用の名前（原種名）。メガ/FCでは原種名、リージョンフォームでは固有名
+    usage_name: str = ""  # DB()。/FC,
     name_en: str = ""
     types: list[str] = field(default_factory=list)
     weight_kg: float = 0.0
     level: int = 50
-    nature: str = "まじめ"
+    nature: str = "がんばりや"
     ability: str = ""
     item: str = ""
     # Actual stat values (0 = not yet known)
