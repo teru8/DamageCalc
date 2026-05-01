@@ -33,7 +33,7 @@ def hp_percent_options(
     label_prefix: str,
     percent_to_power: Callable[[int], int],
 ) -> list[tuple[str, object]]:
-    # 1% と 10%刻みだけ表示する要件。
+    # 1% 10%。
     hp_steps = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 1]
     options: list[tuple[str, object]] = []
     for pct in hp_steps:
@@ -43,7 +43,7 @@ def hp_percent_options(
 
 
 def reversal_flail_power_from_hp_percent(hp_percent: int) -> int:
-    # きしかいせい/じたばた: 現HP/最大HPの閾値で威力が決まる (Gen3+)
+    # /: HP/HP (Gen3+)
     scaled = int(hp_percent) * 48
     if scaled <= 100:
         return 200

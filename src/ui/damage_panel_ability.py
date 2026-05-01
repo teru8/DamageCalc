@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import requests
 import logging
 
+from main import APP_USER_AGENT
 from src.constants import POKEAPI_BASE
 
 if TYPE_CHECKING:
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 _POKEAPI_ABILITY_NAMES_BY_POKEMON_EN: dict[str, list[str]] = {}
 _POKEAPI_ABILITY_JA_BY_EN: dict[str, str] = {}
 _POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
+_POKEAPI_SESSION.headers["User-Agent"] = APP_USER_AGENT
 
 
 def _ability_name_ja_from_name_en(ability_name_en: str) -> str:

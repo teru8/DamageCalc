@@ -1075,7 +1075,7 @@ def _build_usage_template_pokemon(self, name_ja: str) -> PokemonInstance | None:
             non_status_candidates.append(move_name)
     pokemon.moves = (non_status_candidates + ["", "", "", ""])[:4]
 
-    from src.calc.damage_calc import fill_stats_from_species
+    from src.calc.calc_utils import fill_stats_from_species
 
     fill_stats_from_species(pokemon, species)
     pokemon.max_hp = pokemon.hp
@@ -1105,7 +1105,6 @@ def _apply_box_ocr(self, data: dict) -> None:
     if not pokemon or not pokemon.name_ja:
         return
     self._fill_species(pokemon)
-    # 常に新規登録する（同一名の複数登録を許可）
     new_id = db.save_pokemon(pokemon)
     pokemon.db_id = new_id
     self._registered_pokemon.append(pokemon)
@@ -1204,11 +1203,9 @@ def _refresh_registry_list(self) -> None:
         if not type_filter or type_filter.issubset(set(p.types or []))
     ]
 
-    # グリッドウィジェットが存在しない場合は従来のリストにフォールバック
     if not hasattr(self, "_reg_grid_layout"):
         return
 
-    # 既存セルをクリア
     while self._reg_grid_layout.count():
         item = self._reg_grid_layout.takeAt(0)
         if item.widget():
@@ -1289,7 +1286,6 @@ def _refresh_registry_list(self) -> None:
 
         self._reg_grid_layout.addWidget(cell, idx // _COLS, idx % _COLS)
 
-    # 残り列をストレッチで埋める
     remainder = len(filtered) % _COLS
     if remainder:
         for col in range(remainder, _COLS):
@@ -1297,7 +1293,6 @@ def _refresh_registry_list(self) -> None:
             spacer.setFixedSize(_CELL_W, _CELL_H)
             self._reg_grid_layout.addWidget(spacer, len(filtered) // _COLS, col)
 
-    # 縦方向のストレッチで左上揃えを維持
     next_row = (len(filtered) + _COLS - 1) // _COLS
     self._reg_grid_layout.setRowStretch(next_row, 1)
 
@@ -1534,7 +1529,7 @@ def _format_pokemon_export_text(self, pokemon: PokemonInstance) -> str:
 
 def _on_registry_context_menu(self, pos) -> None:
     _bootstrap()
-    pass  # スクロールエリア全体の右クリックは無視（セル右クリックで処理）
+    pass
 
 
 
@@ -1619,7 +1614,7 @@ def _fill_species(self, pokemon: PokemonInstance) -> None:
         pokemon.types = [t for t in [species.type1, species.type2] if t]
         pokemon.weight_kg = species.weight_kg
         if pokemon.hp == 0:
-            from src.calc.damage_calc import fill_stats_from_species
+            from src.calc.calc_utils import fill_stats_from_species
             fill_stats_from_species(pokemon, species)
 
 

@@ -24,23 +24,25 @@ def recalculate(self) -> None:
 
 def _calc_moves(self) -> None:
     _bootstrap()
-    from src.calc.damage_calc import (
+    from src.calc.calc_utils import (
         calc_stat, get_nature_mult,
         get_damage_modifier_notes, move_type_effectiveness,
         resolve_effective_move_category, resolve_effective_move_type,
+        is_grounded,
     )
     from src.calc.smogon_bridge import (
         SmogonBridge, pokemon_to_attacker_dict, defender_scenario_dict, attacker_scenario_dict,
         pokemon_to_defender_dict,
         move_to_dict as smogon_move_to_dict,
         field_to_dict as smogon_field_to_dict,
-        ABILITY_JA_TO_EN, ITEM_JA_TO_EN, NATURE_JA_TO_EN, TYPE_TO_SMOGON,
+        ABILITY_JA_TO_EN, TYPE_TO_SMOGON,
         smogon_mega_species,
         _ability_name_to_en,
     )
     from src.data.item_catalog import get_item_name_en
+    from src.data.item_dictionary import ITEM_FALLBACK_JA_TO_EN
     from src.data.database import get_move_by_name_ja
-    from src.constants import BEST_DEF_NATURE_FOR
+    from src.constants import BEST_DEF_NATURE_FOR, nature_ja_to_en
 
     atk = copy.copy(self._atk)
 
@@ -99,7 +101,6 @@ def _calc_moves(self) -> None:
             else:
                 atk.current_hp = pinch_hp
 
-    # テラスタルタイプ設定
     atk.terastal_type = tera
 
     # Defender scenarios
@@ -195,6 +196,8 @@ def _calc_moves(self) -> None:
         quark_drive_active=quark_drive_active,
         attacker_moves_after_target=True if analytic_active else None,
         friend_guard=friend_guard,
+        gravity=gravity,
+        is_grounded=is_grounded(atk),
     )
 
     # ── smogon bridge: build attacker dict and field dict once ────────
@@ -210,7 +213,7 @@ def _calc_moves(self) -> None:
         ability_on=ability_on,
         apply_both=True,
     )
-    _atk_d["nature"] = NATURE_JA_TO_EN.get(atk_nature, "Hardy")
+    _atk_d["nature"] = nature_ja_to_en(atk_nature)
     _atk_boosts = _atk_d.setdefault("boosts", {})
     if atk_bd_rank != 0:
         _atk_boosts["def"] = atk_bd_rank
@@ -283,21 +286,10 @@ def _calc_moves(self) -> None:
             # Apply type override to the move
             effective_move = move
             pre_resolve_type = effective_move.type_name
-            resolved_type = resolve_effective_move_type(atk, effective_move, tera)
+            resolved_type = resolve_effective_move_type(atk, effective_move, tera, weather)
             resolved_power = effective_move.power
-            weather_ball_active_type = ""
-            if effective_move.name_ja == "ウェザーボール":
-                weather_ball_active_type = {
-                    "sun": "fire",
-                    "rain": "water",
-                    "sand": "rock",
-                    "hail": "ice",
-                }.get(weather, "")
-                if weather_ball_active_type:
-                    resolved_type = weather_ball_active_type
-                    resolved_power = 100
-            if effective_move.name_ja == "オーラぐるま" and "はらぺこもよう" in atk.name_ja:
-                resolved_type = "dark"
+            if effective_move.name_ja == "ウェザーボール" and resolved_type != "normal":
+                resolved_power = 100
             resolved_category = resolve_effective_move_category(
                 atk, effective_move, atk_rank=rank, terastal_type=tera,
             )
@@ -373,9 +365,12 @@ def _calc_moves(self) -> None:
         ):
             bridge_forced_type = "dragon"
             bridge_bp_multiplier = 1.2
+        weather_ball_active_type = (
+            resolved_type if effective_move is not None and effective_move.name_ja == "ウェザーボール" and resolved_type != "normal" else ""
+        )
         if weather_ball_active_type:
-            # Smogon が Weather Ball をノーマルタイプ固定で計算するため、
-            # 天気あり時は type/basePower を直接 override した汎用技として渡す。
+            # Smogon Weather Ball ,
+            # type/basePower override 。
             _smogon_type = TYPE_TO_SMOGON.get(weather_ball_active_type, "Normal")
             _wb_overrides: dict = {
                 "basePower": 100,
@@ -395,8 +390,8 @@ def _calc_moves(self) -> None:
             )
         _atk_d_for_move = _atk_d
         if effective_move.name_ja == "からげんき" and pow_override > 0:
-            # 「状態異常時 140」を手動指定した場合は、からげんき固有の状態異常依存計算を重ねない。
-            # ここでは威力を固定し、やけどのA半減差分も出ないように status を無効化する。
+            # 「 140」, 。
+            # , A status 。
             _atk_d_for_move = dict(_atk_d)
             _atk_d_for_move["status"] = ""
 
@@ -408,12 +403,12 @@ def _calc_moves(self) -> None:
         def_ability_ja = self._def_custom.ability if self._def_custom else ""
         def_terastal_active = bool(def_tera)
         def_ability_en = _ability_name_to_en(def_ability_ja, _def_name_ja, def_terastal_active)
-        def_item_en = ITEM_JA_TO_EN.get(
+        def_item_en = ITEM_FALLBACK_JA_TO_EN.get(
             self._def_custom.item if self._def_custom else "", ""
         )
         if not def_item_en:
             def_item_en = get_item_name_en(self._def_custom.item if self._def_custom else "")
-        best_nat_en = NATURE_JA_TO_EN.get(best_nat, "Hardy")
+        best_nat_en = nature_ja_to_en(best_nat)
 
         _def0_d = defender_scenario_dict(
             species_en, ev_hp=0, ev_def=0, ev_spd=0,
@@ -527,47 +522,11 @@ def _calc_moves(self) -> None:
                 self._def_panel.disguise_intact() and
                 cur_hp >= d.hp
             )
-            notes = get_damage_modifier_notes(
-                atk, effective_move,
-                d.hp, d.attack, d.defense, d.sp_attack, d.sp_defense,
-                d.types,
-                defender_ability=d.ability,
-                defender_current_hp=cur_hp,
-                defender_disguise_intact=disguise,
-                defender_speed=d.speed,
-                defender_weight_kg=d.weight_kg,
+            return get_damage_modifier_notes(
+                atk, effective_move, d,
                 **move_shared,
+                defender_is_grounded=is_grounded(d),
             )
-            skin_type = {
-                "エレキスキン": "electric",
-                "Galvanize": "electric",
-                "フェアリースキン": "fairy",
-                "Pixilate": "fairy",
-                "フリーズスキン": "ice",
-                "Refrigerate": "ice",
-                "スカイスキン": "flying",
-                "Aerilate": "flying",
-                "ドラゴンスキン": "dragon",
-                "Dragonize": "dragon",
-            }.get(atk.ability, "")
-            if atk.ability in ("ノーマルスキン", "Normalize") and effective_move.type_name == "normal":
-                note = "ノーマルスキン ×1.2"
-                if note not in notes:
-                    notes.append(note)
-            elif (
-                skin_type
-                and move.type_name == "normal"
-                and effective_move.type_name == skin_type
-            ):
-                note = "{} ×1.2".format(atk.ability)
-                if note not in notes:
-                    notes.append(note)
-            berry_type = _RESIST_BERRIES.get(d.item or "")
-            if berry_type and berry_type == effective_move.type_name and type_eff >= 2.0:
-                note = "{} ×0.5".format(d.item)
-                if note not in notes:
-                    notes.append(note)
-            return notes
 
         # ── custom defender ───────────────────────────────────────────
         custom_result: Optional[tuple[int, int, int, bool]] = None
@@ -605,7 +564,7 @@ def _calc_moves(self) -> None:
             self._def_panel.update_stat_display(cd)
 
             # Build smogon dict for custom defender with panel EV/nature override
-            _custom_nat = NATURE_JA_TO_EN.get(def_nature, "Hardy")
+            _custom_nat = nature_ja_to_en(def_nature)
             _custom_d = pokemon_to_defender_dict(cd, def_bd_rank, is_phys, gender=defender_gender, apply_both=True)
             _custom_d["nature"] = _custom_nat
             _custom_d["evs"]["hp"] = def_ev_pts_h * 8
@@ -630,7 +589,6 @@ def _calc_moves(self) -> None:
             show_bulk_rows=self._show_bulk_rows,
         )
 
-    # ── 相手→自分 計算（右側わざは左側わざと独立）────────────────────────────────────────────
     opp_moves = self._def_custom.moves if self._def_custom else []
     for slot, opp_sec in enumerate(self._opp_move_sections):
         opp_custom_result: Optional[tuple[int, int, int, bool]] = None
@@ -647,7 +605,7 @@ def _calc_moves(self) -> None:
         if self._def_custom and atk.hp > 0 and opp_move_info and opp_move_info.category != "status":
             _opp_species = self._resolve_species_info(self._def_custom, self._def_species_name)
             _opp_atk_en = ABILITY_JA_TO_EN.get(self._def_custom.ability or "", "") or "No Ability"
-            _opp_item_en = ITEM_JA_TO_EN.get(self._def_custom.item or "", "")
+            _opp_item_en = ITEM_FALLBACK_JA_TO_EN.get(self._def_custom.item or "", "")
             if not _opp_item_en:
                 _opp_item_en = get_item_name_en(self._def_custom.item or "")
             _opp_species_en = ""
@@ -671,7 +629,6 @@ def _calc_moves(self) -> None:
             _opp_pow_override = opp_sec.power_override()
             _opp_hits = opp_sec.hit_count()
 
-            # スキン系特性によるタイプ変換（相手側）
             _opp_skin_map = {
                 "エレキスキン": "electric", "Galvanize": "electric",
                 "フェアリースキン": "fairy",  "Pixilate": "fairy",
@@ -740,7 +697,6 @@ def _calc_moves(self) -> None:
                 mn, mx, is_error = _bridge.calc(opp_atk_d, def_payload, _mv_d_opp, _field_d_rev)
                 return (mn, mx, self_hp, is_error)
 
-            # 調整: 相手の現在設定
             _opp_def_ac_rank = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
             _opp_ability_on = any(
                 btn.isVisible() and btn.isChecked()
@@ -758,7 +714,7 @@ def _calc_moves(self) -> None:
             _opp_analytic_active = hasattr(self, "_opp_analytic_btn") and self._opp_analytic_btn.isVisible() and self._opp_analytic_btn.isChecked()
             _opp_guts_active = hasattr(self, "_opp_guts_btn") and self._opp_guts_btn.isVisible() and self._opp_guts_btn.isChecked()
 
-            # 相手側pinch特性（げきりゅう等）のHP調整
+            # pinch()HP
             _opp_atk_instance = copy.copy(self._def_custom)
             _opp_pinch_trigger = any(
                 btn.isVisible() and btn.isChecked()
@@ -800,7 +756,7 @@ def _calc_moves(self) -> None:
                 _opp_custom_atk_d["volatileStatus"] = "charge"
             opp_custom_result = _call_bridge_rev(_opp_custom_atk_d)
 
-            # AC 0: 攻撃/特攻 EV=0, 無補正性格
+            # AC 0: / EV=0,
             _opp_ac0_atk_d = attacker_scenario_dict(
                 _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
                 ev_hp=int(_opp_atk_instance.ev_hp or 0),
@@ -822,7 +778,7 @@ def _calc_moves(self) -> None:
                 _opp_ac0_atk_d["curHP"] = int(_opp_atk_instance.current_hp)
             opp_ac0_result = _call_bridge_rev(_opp_ac0_atk_d)
 
-            # AC 32: 攻撃/特攻 EV=252, 有利性格
+            # AC 32: / EV=252,
             _opp_ac32_atk_d = attacker_scenario_dict(
                 _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
                 ev_hp=int(_opp_atk_instance.ev_hp or 0),
@@ -886,21 +842,14 @@ def _calc_moves(self) -> None:
                     quark_drive_active=_opp_quark_drive_active,
                     attacker_moves_after_target=True if _opp_analytic_active else None,
                     friend_guard=self_friend_guard,
+                    gravity=gravity,
+                    is_grounded=is_grounded(_opp_atk_instance),
                 )
                 _opp_notes = get_damage_modifier_notes(
-                    _opp_atk_instance, opp_move_info,
-                    atk.hp, atk.attack, atk.defense,
-                    atk.sp_attack, atk.sp_defense,
-                    atk.types,
-                    defender_ability=atk.ability,
-                    defender_current_hp=max(1, math.floor(atk.hp * hp_percent / 100.0)),
+                    _opp_atk_instance, opp_move_info, atk,
                     **_opp_move_shared,
+                    defender_is_grounded=is_grounded(atk),
                 )
-                _opp_berry_type = _RESIST_BERRIES.get(atk.item or "")
-                if _opp_berry_type and _opp_berry_type == _opp_disp_eff_type and _opp_eff >= 2.0:
-                    _note_str = "{} ×0.5".format(atk.item)
-                    if _note_str not in _opp_notes:
-                        _opp_notes.append(_note_str)
                 opp_sec.set_modifier_notes(_opp_notes)
             else:
                 opp_sec.set_modifier_notes([])

@@ -75,7 +75,7 @@ class VideoThread(QThread):
         import os
         import sys
         cameras = []
-        # OpenCVのDSHOW警告をstderrリダイレクトで抑制
+        # OpenCVDSHOWstderr
         devnull = open(os.devnull, "w")
         old_stderr_fd = os.dup(2)
         os.dup2(devnull.fileno(), 2)

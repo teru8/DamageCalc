@@ -406,7 +406,7 @@ def _infer_nature_and_fix_evs(
         return "まじめ", raw_ev_points
 
     # Recompute predicted stats from species base stats and the estimated EVs
-    from src.calc.damage_calc import calc_stat
+    from src.calc.calc_utils import calc_stat
     species = db.get_species_by_name_ja(species_name)
     if not species:
         # fallback: report estimated EVs but can't compute predicted stats
@@ -455,7 +455,7 @@ def _estimate_species_fit(
     stats: dict[str, int],
     raw_ev_points: dict[str, int],
 ) -> tuple[float, str, dict[str, int], dict[str, int]]:
-    from src.calc.damage_calc import calc_stat
+    from src.calc.calc_utils import calc_stat
 
     species = db.get_species_by_name_ja(species_name)
     if not species:
@@ -594,7 +594,7 @@ def read_box_screen(frame: np.ndarray) -> dict:
     logging.debug("[BOX_OCR] 性格: %s", nature)
 
     # Recompute final stats from species base + inferred EVs/nature
-    from src.calc.damage_calc import calc_stat
+    from src.calc.calc_utils import calc_stat
     species = db.get_species_by_name_ja(name)
     final_stats = dict(stats)
     if species:

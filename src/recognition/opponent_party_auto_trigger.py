@@ -60,7 +60,7 @@ def _load_template(template_path: str) -> np.ndarray | None:
             _TEMPLATE_PATH_CACHE[template_path] = abs_path
             break
     if tmpl is None or tmpl.size == 0:
-        # Fallback: executable 配下を名前検索して、配置揺れに耐える。
+        # Fallback: executable , 。
         search_roots: list[Path] = []
         if getattr(sys, "frozen", False):
             exe_dir = Path(sys.executable).parent
@@ -106,7 +106,7 @@ def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, f
     scores: list[tuple[str, float, str]] = []
     matched = False
     for (x1, y1, x2, y2), template_path in _TEMPLATE_SPECS:
-        # テンプレ座標は 1280x720 基準。実フレームへスケールして切り出す。
+        # 1280x720 。。
         rx1 = int(round(x1 * sx))
         ry1 = int(round(y1 * sy))
         rx2 = int(round(x2 * sx))

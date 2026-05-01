@@ -387,7 +387,6 @@ def _name_ja_form_hints(name_ja: str) -> tuple[str, list[str]]:
         base = "ケンタロス"
         forms = ["Paldea", "Aqua"]
 
-    # 括弧内のリージョンフォームキーワードをマッピング
     m = re.search(r"[\(（](.+?)[\)）]", text)
     if m:
         sub = m.group(1).strip()
@@ -488,7 +487,7 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
         return pm
     from src.data import zukan_client
     entries = zukan_client.get_pokemon_index()
-    # 完全一致を優先し、なければ "base_name (sub_name)" 形式でフォルム画像を検索
+    # , "base_name (sub_name)"
     url = next((e.image_small_url for e in entries if e.name_ja == name_ja), "")
     if not url:
         import re as _re
@@ -534,7 +533,7 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
         if not dex_no:
             normalized_name_en = (name_en or "").strip().lower()
             dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME_EN.get(normalized_name_en, "")
-            # db上の正式名を優先して照合（省略名入力でも正式値に寄せる）
+            # db()
             if not dex_no and normalized_name:
                 try:
                     from src.data import database as db
@@ -543,7 +542,6 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
                         dex_no = _ZUKAN_DEX_FALLBACK_BY_NAME_EN.get(species.name_en.strip().lower(), "")
                 except (ImportError, AttributeError, OSError, ValueError):
                     dex_no = ""
-        # バドレックス表記ゆれ対応（括弧あり/なし）
         if not dex_no:
             if "バドレックス" in normalized_name and "はくば" in normalized_name:
                 dex_no = "0898-1"
@@ -552,7 +550,6 @@ def sprite_pixmap_or_zukan(name_ja: str, width: int, height: int, name_en: str =
         if dex_no:
             url = next((e.image_small_url for e in entries if (e.dex_no or "").strip() == dex_no), "")
     if not url:
-        # バケッチャ系は図鑑に複数フォーム画像がないため、原種画像にフォールバックする。
         normalized_name = (name_ja or "").strip().replace("（", "(").replace("）", ")")
         if "バケッチャ" in normalized_name:
             url = next((e.image_small_url for e in entries if (e.name_ja or "").strip() == "バケッチャ"), "")

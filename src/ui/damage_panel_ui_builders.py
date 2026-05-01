@@ -134,32 +134,30 @@ def _build_side_panel(self) -> None:
 
     dl.addWidget(_sep())
 
-    # 自分側・相手側補助を左右2カラムで並べる
+    # 2
     both_sides_row = QHBoxLayout()
     both_sides_row.setContentsMargins(0, 0, 0, 0)
     both_sides_row.setSpacing(8)
 
-    # ── 自分側補助 (左カラム) ────────────────────────────────
     self_side_col = QVBoxLayout()
     self_side_col.setContentsMargins(0, 0, 0, 0)
     self_side_col.setSpacing(4)
     self_side_col.addWidget(_row_label("自分側補助"))
 
-    # 自分側 攻撃補助
     self_side_col.addWidget(_row_label("  攻撃側:"))
-    atk_cond_ability = QHBoxLayout()  # 条件付きボタン行
+    atk_cond_ability = QHBoxLayout()
     atk_cond_ability.setContentsMargins(0, 0, 0, 0)
     atk_cond_ability.setSpacing(4)
-    atk_cond4 = QHBoxLayout()         # そうだいしょう/とうそうしんコンボ行
+    atk_cond4 = QHBoxLayout()
     atk_cond4.setContentsMargins(0, 0, 0, 0)
     atk_cond4.setSpacing(6)
-    atk_cond1a = QHBoxLayout()        # 常時ボタン1行目: やけど・急所・じゅうでん
+    atk_cond1a = QHBoxLayout()        # 1:
     atk_cond1a.setContentsMargins(0, 0, 0, 0)
     atk_cond1a.setSpacing(4)
-    atk_cond1b = QHBoxLayout()        # 常時ボタン2行目: フェアリーオーラ・ダークオーラ
+    atk_cond1b = QHBoxLayout()        # 2:
     atk_cond1b.setContentsMargins(0, 0, 0, 0)
     atk_cond1b.setSpacing(4)
-    atk_cond1c = QHBoxLayout()        # 常時ボタン3行目: てだすけ・はがねのせいしん
+    atk_cond1c = QHBoxLayout()        # 3:
     atk_cond1c.setContentsMargins(0, 0, 0, 0)
     atk_cond1c.setSpacing(4)
     self._burn_btn = _ToggleBtn("やけど")
@@ -279,7 +277,6 @@ def _build_side_panel(self) -> None:
     self_side_col.addLayout(atk_cond1b)
     self_side_col.addLayout(atk_cond1c)
 
-    # 自分側 防御補助 (相手→自分 計算に使用)
     self_side_col.addSpacing(8)
     self_side_col.addWidget(_row_label("  防御側:"))
     self_def_cond = QHBoxLayout()
@@ -305,27 +302,25 @@ def _build_side_panel(self) -> None:
     self_side_col.addLayout(self_def_cond2)
     self_side_col.addStretch()
 
-    # ── 相手側補助 (右カラム) ────────────────────────────────
     opp_side_col = QVBoxLayout()
     opp_side_col.setContentsMargins(0, 0, 0, 0)
     opp_side_col.setSpacing(4)
     opp_side_col.addWidget(_row_label("相手側補助"))
 
-    # 相手側 攻撃補助 (相手→自分 計算に使用)
     opp_side_col.addWidget(_row_label("  攻撃側:"))
-    opp_atk_cond_ability = QHBoxLayout()  # 条件付きボタン行
+    opp_atk_cond_ability = QHBoxLayout()
     opp_atk_cond_ability.setContentsMargins(0, 0, 0, 0)
     opp_atk_cond_ability.setSpacing(4)
-    opp_atk_cond4 = QHBoxLayout()           # そうだいしょうコンボ行
+    opp_atk_cond4 = QHBoxLayout()
     opp_atk_cond4.setContentsMargins(0, 0, 0, 0)
     opp_atk_cond4.setSpacing(6)
-    opp_atk_cond1a = QHBoxLayout()          # 常時ボタン1行目: やけど・急所・じゅうでん
+    opp_atk_cond1a = QHBoxLayout()          # 1:
     opp_atk_cond1a.setContentsMargins(0, 0, 0, 0)
     opp_atk_cond1a.setSpacing(4)
-    opp_atk_cond1b = QHBoxLayout()          # 常時ボタン2行目: フェアリーオーラ・ダークオーラ
+    opp_atk_cond1b = QHBoxLayout()          # 2:
     opp_atk_cond1b.setContentsMargins(0, 0, 0, 0)
     opp_atk_cond1b.setSpacing(4)
-    opp_atk_cond1c = QHBoxLayout()          # 常時ボタン3行目: てだすけ・はがねのせいしん
+    opp_atk_cond1c = QHBoxLayout()          # 3:
     opp_atk_cond1c.setContentsMargins(0, 0, 0, 0)
     opp_atk_cond1c.setSpacing(4)
     self._opp_burn_btn = _ToggleBtn("やけど")
@@ -445,7 +440,6 @@ def _build_side_panel(self) -> None:
     opp_side_col.addLayout(opp_atk_cond1b)
     opp_side_col.addLayout(opp_atk_cond1c)
 
-    # 相手側 防御補助 (自分→相手 計算に使用)
     opp_side_col.addSpacing(8)
     opp_side_col.addWidget(_row_label("  防御側:"))
     def_cond = QHBoxLayout()
@@ -475,7 +469,6 @@ def _build_side_panel(self) -> None:
     both_sides_row.addLayout(opp_side_col, 1)
     dl.addLayout(both_sides_row)
 
-    # てだすけは初期状態(シングル)では非表示
     self._helping_btn.setVisible(False)
     self._opp_helping_btn.setVisible(False)
     self._steel_spirit_btn.setVisible(False)
@@ -569,7 +562,7 @@ def _build_content(self) -> None:
 
     cl.addWidget(_sep())
 
-    # Move sections: left (自分→相手) + right (相手→自分) pairs
+    # Move sections: left (→) + right (→) pairs
     self._move_sections: list[_MoveSection] = []
     self._opp_move_sections: list[_MoveSection] = []
     for i in range(4):
