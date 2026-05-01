@@ -96,13 +96,12 @@ src/pokemon_index_cache.json
 # Private scraper / data collection code
 src/data/usage_scraper.py
 src/data/*scraper*.py
-scraper/
-scrapers/
 
-assets/champions_menu_sprites
+# Other
 .windsurfrules
 flow_guide.md
 AGENTS.md
 CLAUDE.md
 node_modules/
 src/calc/node_modules/
+assets/champions_menu_sprites
