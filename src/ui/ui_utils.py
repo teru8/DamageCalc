@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from src.ui.pokemon_edit_dialog import PokemonEditDialog
@@ -40,6 +40,16 @@ class _LRUDict(OrderedDict):
         if key in self:
             return self[key]
         return default
+
+
+def make_dialog(parent: QWidget | None, **kwargs: Any) -> QDialog:
+    """親の WindowStaysOnTopHint を引き継いで QDialog を生成する。"""
+    dlg = QDialog(parent, **kwargs)
+    if parent is not None:
+        top = parent.window()
+        if top.windowFlags() & Qt.WindowStaysOnTopHint:
+            dlg.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+    return dlg
 
 
 def open_pokemon_edit_dialog(
@@ -74,6 +84,8 @@ def open_pokemon_edit_dialog(
     from src.ui.pokemon_edit_dialog import PokemonEditDialog
 
     dlg = PokemonEditDialog(pokemon, parent, save_to_db=save_to_db)
+    if parent is not None and parent.window().windowFlags() & Qt.WindowStaysOnTopHint:
+        dlg.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
     if overlay:
         overlay.hide()

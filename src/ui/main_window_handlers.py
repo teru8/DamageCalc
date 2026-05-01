@@ -481,7 +481,8 @@ def _select_registered_pokemon(self, title: str, current_name: str = "") -> tupl
         return False, None
     available: list[PokemonInstance] = list(self._registered_pokemon)
 
-    dlg = QDialog(self)
+    from src.ui.ui_utils import make_dialog
+    dlg = make_dialog(self)
     dlg.setWindowTitle("{} を選択".format(title))
     dlg.setFixedWidth(720)
     dlg.setMinimumHeight(660)
@@ -1322,7 +1323,8 @@ def _open_edit_dialog(self, pokemon) -> None:
 
 def _open_register_input_dialog(self) -> None:
     _bootstrap()
-    dlg = QDialog(self)
+    from src.ui.ui_utils import make_dialog
+    dlg = make_dialog(self)
     dlg.setWindowTitle("新規登録")
     dlg.setMinimumWidth(640)
     layout = QVBoxLayout(dlg)
