@@ -42,7 +42,9 @@ class PokemonEditDialog(QDialog):
             if name and name not in _REGION_PREFIX_TO_SUB.values() and name not in ("オスのすがた", "メスのすがた", "ロトムのすがた")
         ]
         self._all_abilities = sorted(_unique(list(ABILITIES_JA)))
-        self._all_items = sorted(_unique(list(ITEMS_JA) + get_item_names()))
+        self._all_items = sorted(_unique(list(ITEMS_JA)))
+        fallback_only_items = [name for name in get_item_names() if name not in set(self._all_items)]
+        self._item_suggest_items = sorted(_unique(list(self._all_items) + fallback_only_items))
         self._show_terastal_picker = self._should_show_terastal_picker()
 
         self._build_ui()
@@ -68,14 +70,12 @@ class PokemonEditDialog(QDialog):
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # ── 左ペイン ──────────────────────────────────────────────────────
         left_pane = QWidget()
         left_pane.setFixedWidth(380)
         left_layout = QVBoxLayout(left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        # 基本
         basic_box = QGroupBox("基本")
         basic_form = QFormLayout(basic_box)
         self.name_combo = SuggestComboBox([""] + self._all_species_names)
@@ -87,6 +87,7 @@ class PokemonEditDialog(QDialog):
         basic_form.addRow("特性:", self.ability_combo)
 
         self.item_combo = SuggestComboBox([""] + self._all_items)
+        self.item_combo.set_items([""] + self._all_items, completer_items=[""] + self._item_suggest_items)
         self.item_combo.setPlaceholderText("持ち物を入力または選択")
         basic_form.addRow("持ち物:", self.item_combo)
 
@@ -98,7 +99,6 @@ class PokemonEditDialog(QDialog):
             basic_form.addRow("テラスタイプ:", self.terastal_combo)
         left_layout.addWidget(basic_box)
 
-        # 努力値/性格（スライダー形式）— 順番: 努力値→性格
         stat_box = QGroupBox("努力値/性格")
         stat_layout = QVBoxLayout(stat_box)
         stat_layout.setSpacing(4)
@@ -189,7 +189,6 @@ class PokemonEditDialog(QDialog):
 
         left_layout.addWidget(stat_box)
 
-        # わざ
         move_box = QGroupBox("わざ")
         move_layout = QVBoxLayout(move_box)
         move_layout.setContentsMargins(8, 10, 8, 10)
@@ -279,7 +278,6 @@ class PokemonEditDialog(QDialog):
 
         main_layout.addWidget(left_pane)
 
-        # ── 右ペイン ──────────────────────────────────────────────────────
         right_pane = self._build_right_pane()
         main_layout.addWidget(right_pane, 1)
 
@@ -293,7 +291,6 @@ class PokemonEditDialog(QDialog):
     def _apply_species_selector_lock(self) -> None:
         self.name_combo.setEnabled(not self._lock_species_selector)
 
-    # ── 右ペイン構築・操作 ──────────────────────────────────────────────
 
     def _build_right_pane(self) -> QWidget:
         pane = QWidget()
@@ -444,7 +441,7 @@ class PokemonEditDialog(QDialog):
         if selected_item:
             self._pane_list.setCurrentItem(selected_item)
             self._pane_list.scrollToItem(selected_item)
-        # デフォルトでは無選択状態にするため、elseブロック（setCurrentRow(0)）を削除
+        # , else(setCurrentRow(0))
 
         QTimer.singleShot(0, lambda job_id=current_job_id: self._pane_load_icons_step(job_id, 0))
 
@@ -473,7 +470,6 @@ class PokemonEditDialog(QDialog):
         if not item:
             return
         display_name = item.data(Qt.UserRole) or ""
-        # フィールドをクリアしてから反映（前の情報が残らないように）
         self._loading = True
         self.ability_combo.set_text("")
         self.item_combo.set_text("")
@@ -485,7 +481,7 @@ class PokemonEditDialog(QDialog):
         self._selected_moves = ["", "", "", ""]
         self._refresh_move_buttons()
         self._loading = False
-        # テンプレートが再ロードされるよう is_new_entry フラグをリセット
+        # is_new_entry
         self._auto_template_key = ""
         self._is_new_entry = True
         self.name_combo.set_text(display_name)
@@ -504,7 +500,6 @@ class PokemonEditDialog(QDialog):
             self._pane_type_filters.clear()
             self._pane_apply_button_state()
 
-    # ── 種族・フォーム解決 ──────────────────────────────────────────────
 
     def _resolve_species_lookup_name(self, display_name: str) -> str:
         name = (display_name or "").strip()
@@ -516,7 +511,7 @@ class PokemonEditDialog(QDialog):
         entry = self._picker_entry_map.get(name)
         if entry:
             return entry.species_lookup_name
-        # Try normalized display name (e.g. ♀ → (メス) display) to find picker entry
+        # Try normalized display name (e.g. ♀ → () display) to find picker entry
         normalized_display = _normalize_picker_display_name(name)
         if normalized_display != name:
             entry2 = self._picker_entry_map.get(normalized_display)
@@ -534,8 +529,8 @@ class PokemonEditDialog(QDialog):
             for option in options:
                 if option.display_name == name:
                     return base_name, option.display_name
-        # Also try the normalized display name (e.g. DB stores "イダイトウ♀",
-        # but picker uses "イダイトウ(メス)" as display_name).
+        # Also try the normalized display name (e.g. DB stores "♀",
+        # but picker uses "()" as display_name).
         normalized = _normalize_picker_display_name(name)
         if normalized != name:
             if normalized in self._form_options_by_base:
@@ -567,7 +562,7 @@ class PokemonEditDialog(QDialog):
 
         self._current_form_options = options
 
-        # フォームインデックスを preferred_display_name または name_combo テキストから決定
+        # preferred_display_name name_combo
         index = 0
         effective_display = preferred_display_name or self.name_combo.current_text_stripped()
         if effective_display and options:
@@ -739,12 +734,16 @@ class PokemonEditDialog(QDialog):
             self._all_abilities,
         )
         item_items, item_separator = _build_ranked_options(
-            db.get_items_by_usage(usage_name) if usage_name else [],
+            (db.get_items_by_usage(usage_name) if usage_name else [])[:10],
             self._all_items,
         )
 
         self.ability_combo.set_items(ability_items, separator_after=ability_separator)
-        self.item_combo.set_items(item_items, separator_after=item_separator)
+        self.item_combo.set_items(
+            item_items,
+            separator_after=item_separator,
+            completer_items=[""] + self._item_suggest_items,
+        )
 
     def _apply_usage_template_defaults(self, pokemon_name: str) -> None:
         usage_name = self._usage_lookup_name(pokemon_name)
@@ -925,7 +924,7 @@ class PokemonEditDialog(QDialog):
                 self._stat_val_labels[key].setText("{}(---)".format(lbl_text))
             return
 
-        from src.calc.damage_calc import fill_stats_from_species
+        from src.calc.calc_utils import fill_stats_from_species
 
         temp = PokemonInstance(
             species_id=species.species_id,
@@ -1101,7 +1100,7 @@ class PokemonEditDialog(QDialog):
 
         for key in self._ev_sliders:
             lbl_text = self._stat_val_labels[key].text()
-            # ラベルは "HP(207)" 形式 — 括弧内の数値を取得
+            # "HP(207)" —
             try:
                 stat_val = int(lbl_text.split("(")[-1].rstrip(")"))
             except (ValueError, IndexError):

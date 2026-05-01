@@ -52,7 +52,6 @@ class MoveSection(QWidget):
         hdr.setContentsMargins(4, 2, 4, 2)
         hdr.setSpacing(4)
 
-        # タイプとカテゴリをグループ化
         type_cat_wrap = QWidget()
         type_cat_row = QHBoxLayout(type_cat_wrap)
         type_cat_row.setContentsMargins(0, 0, 0, 0)
@@ -97,7 +96,6 @@ class MoveSection(QWidget):
         hdr.addWidget(chg_btn, 0, Qt.AlignVCenter)
         layout.addWidget(self._header_wrap)
 
-        # 詳細情報
         if True:
             self._stats_wrap = QWidget()
             stat_row = QHBoxLayout(self._stats_wrap)
@@ -191,7 +189,6 @@ class MoveSection(QWidget):
             self._mod_lbl.setVisible(False)
             layout.addWidget(self._mod_lbl)
 
-        # ダメージ行
         self._row_custom = DmgRow(labels[0], color=self._ROW_COLOR_ADJ)
         self._row_hbd0 = DmgRow(labels[1], color=self._ROW_COLOR_BULK0)
         self._row_hbd252 = DmgRow(labels[2], color=self._ROW_COLOR_BULK32)
@@ -345,7 +342,7 @@ class MoveSection(QWidget):
         if data is None:
             return False
         mn, mx, hp, is_error = data
-        # hp=1 は呼び出し側が「対象未設定/不正」のときに使うダミー値として扱う。
+        # hp=1 「/」。
         return (not is_error) and hp > 1 and mn == 0 and mx == 0
 
     def update_results(
@@ -357,7 +354,7 @@ class MoveSection(QWidget):
     ) -> None:
         """Each tuple is (min_dmg, max_dmg, defender_hp, is_error)."""
         self._show_bulk_rows = bool(show_bulk_rows)
-        # 毎回いったん閉じて、全ダメージ0のときのみ再展開する
+        # , 0
         self._details_visible = False
         self._apply_detail_visibility()
         if self._move is None:
@@ -386,8 +383,8 @@ class MoveSection(QWidget):
         _apply(self._row_hbd0, bulk0, self._show_bulk_rows)
         _apply(self._row_hbd252, bulk32, self._show_bulk_rows)
 
-        # タイプ無効や特性等で実ダメージが0になるケースでは、
-        # バー3本を隠して理由表示（相性/補正メモ）を見える状態にする。
+        # 0,
+        # 3(/)。
         visible_results: list[tuple[int, int, int, bool]] = []
         if custom is not None:
             visible_results.append(custom)

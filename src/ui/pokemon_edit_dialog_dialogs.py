@@ -135,7 +135,7 @@ class PokemonSelectDialog(QDialog):
         self._search_edit.textChanged.connect(self._refresh_list)
         layout.addWidget(self._search_edit)
 
-        # タイプ絞り込み（3列×6行グリッド）
+        # (3×6)
         self._type_box = QGroupBox("タイプ絞り込み")
         type_layout = QVBoxLayout(self._type_box)
         type_layout.setContentsMargins(6, 6, 6, 6)
@@ -613,7 +613,7 @@ class MoveSelectDialog(QDialog):
             for move in species_moves:
                 move_map[move.name_ja] = move
 
-            # Learnset に無くても使用率に載っている技は候補として表示する。
+            # Learnset 。
             usage_moves = db.get_moves_by_usage(self._usage_name)
             for move_name in usage_moves:
                 if move_name in move_map:
@@ -665,7 +665,7 @@ class MoveSelectDialog(QDialog):
             hint.setStyleSheet("color: #f9e2af; font-size: 13px;")
             layout.addWidget(hint)
 
-        # タイプ絞り込み（4列グリッド）
+        # (4)
         self._type_box = QGroupBox("タイプ絞り込み")
         type_layout = QVBoxLayout(self._type_box)
         type_layout.setContentsMargins(6, 6, 6, 6)
@@ -861,7 +861,7 @@ class MoveSelectDialog(QDialog):
         if selected_item:
             self._list.setCurrentItem(selected_item)
             self._list.scrollToItem(selected_item)
-        # デフォルトでは無選択状態にするため、elseブロック（setCurrentRow(0)）を削除
+        # , else(setCurrentRow(0))
 
     def _add_to_slot(self) -> None:
         item = self._list.currentItem()

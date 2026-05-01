@@ -6,18 +6,9 @@ import ctypes
 from datetime import datetime
 from pathlib import Path
 
-# Ensure the app directory is on sys.path for PyInstaller
-if getattr(sys, "frozen", False):
-    os.chdir(os.path.dirname(sys.executable))
-else:
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QFont, QIcon
-from src.ui.main_window import MainWindow
-from src.ui.styles import DARK_STYLE
+APP_NAME = "DamageCalc"
+APP_VERSION = "0.1.1-alpha"
+APP_USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 
 
 def _resolve_app_icon_path() -> Path | None:
@@ -37,6 +28,15 @@ def _resolve_app_icon_path() -> Path | None:
         if path.exists():
             return path
     return None
+
+
+def _configure_runtime_paths() -> None:
+    """Configure CWD and sys.path for both dev and frozen environments."""
+    if getattr(sys, "frozen", False):
+        os.chdir(os.path.dirname(sys.executable))
+    else:
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def _error_log_path() -> Path:
@@ -99,17 +99,23 @@ def _acquire_single_instance() -> bool:
 
 
 def main() -> None:
+    _configure_runtime_paths()
     _install_global_exception_hooks()
     if not _acquire_single_instance():
         sys.exit(0)
+    from PyQt5.QtGui import QFont, QIcon
+    from PyQt5.QtWidgets import QApplication
+    from src.ui.main_window import MainWindow
+    from src.ui.styles import DARK_STYLE
+
     if os.name == "nt":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DamageCalc.App")
         except Exception:
             pass
     app = QApplication(sys.argv)
-    app.setApplicationName("DamageCalc")
-    app.setApplicationVersion("0.1.1-alpha")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     icon_path = _resolve_app_icon_path()
     icon = QIcon(str(icon_path)) if icon_path else QIcon()
     if not icon.isNull():

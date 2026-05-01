@@ -7,7 +7,8 @@ from pathlib import Path
 
 import requests
 
-from src.data.item_fallback_map import ITEM_FALLBACK_JA_TO_EN
+from main import APP_USER_AGENT
+from src.data.item_dictionary import ITEM_FALLBACK_JA_TO_EN
 
 _POKEAPI_BASE = "https://pokeapi.co/api/v2"
 _HOLDABLE_ITEM_CATEGORIES = (
@@ -29,35 +30,9 @@ _HOLDABLE_ITEM_CATEGORIES = (
 _CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 _TIMEOUT_SECONDS = 20
 _SESSION = requests.Session()
-_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
+_SESSION.headers["User-Agent"] = APP_USER_AGENT
 
 _ITEM_MAP_CACHE: dict[str, str] | None = None
-_ITEM_NAME_ALIASES_JA_TO_EN: dict[str, str] = {
-    "ほのおのたま": "Flame Orb",
-    "オボンのみ": "Sitrus Berry",
-    "ラムのみ": "Lum Berry",
-    "カゴのみ": "Chesto Berry",
-    "モモンのみ": "Pecha Berry",
-    "ナナシのみ": "Rawst Berry",
-    "クラボのみ": "Aspear Berry",
-    "キーのみ": "Leppa Berry",
-    "オレンのみ": "Oran Berry",
-    "きのみジュース": "Berry Juice",
-    "ジャポのみ": "Jaboca Berry",
-    "ナゾのみ": "Enigma Berry",
-    "ビアンのみ": "Kebia Berry",
-    "ぼうごパッド": "Protective Pads",
-    "ズームレンズ": "Zoom Lens",
-    "みずのプレート": "Splash Plate",
-    "かみなりのプレート": "Zap Plate",
-    "もうどくのプレート": "Toxic Plate",
-    "ひこうのプレート": "Sky Plate",
-    "たまむしのプレート": "Insect Plate",
-    "がんせきのプレート": "Stone Plate",
-    "もののけのプレート": "Spooky Plate",
-    "こわもてのプレート": "Dread Plate",
-    "こうてつのプレート": "Iron Plate",
-}
 
 
 def _cache_path() -> Path:
@@ -129,11 +104,6 @@ def _normalize_item_name_en(name: str) -> str:
 def _fallback_map() -> dict[str, str]:
     result: dict[str, str] = {}
     for ja_name, en_name in ITEM_FALLBACK_JA_TO_EN.items():
-        ja = str(ja_name or "").strip()
-        en = _normalize_item_name_en(str(en_name or ""))
-        if ja and en:
-            result[ja] = en
-    for ja_name, en_name in _ITEM_NAME_ALIASES_JA_TO_EN.items():
         ja = str(ja_name or "").strip()
         en = _normalize_item_name_en(str(en_name or ""))
         if ja and en:

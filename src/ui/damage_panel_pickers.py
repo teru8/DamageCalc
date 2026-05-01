@@ -47,7 +47,7 @@ def pick_ability(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
 
 
 def pick_item(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
-    from src.constants import ITEMS_JA
+    from src.data.item_dictionary import ITEMS_JA
     from src.data import database as db
     from src.data.item_catalog import get_item_names
     from src.ui.pokemon_edit_dialog import _build_ranked_options, _unique
