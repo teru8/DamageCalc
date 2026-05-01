@@ -8,12 +8,13 @@ import requests
 import time
 from typing import Any
 from PyQt5.QtCore import QThread, pyqtSignal
+from main import APP_USER_AGENT
 from src.models import SpeciesInfo, MoveInfo
 from src.data import database as db
 from src.constants import POKEAPI_BASE
 
 _SESSION = requests.Session()
-_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
+_SESSION.headers["User-Agent"] = APP_USER_AGENT
 
 
 def _get(url: str, retries: int = 3) -> dict[str, Any]:
@@ -37,13 +38,11 @@ def _ja_name(names: list[dict[str, Any]]) -> str:
     return ""
 
 _SPECIAL_FORM_NAME_MAP: dict[str, str] = {
-    # ロトムのフォルム
     "rotom-heat": "ヒートロトム",
     "rotom-wash": "ウォッシュロトム",
     "rotom-frost": "フロストロトム",
     "rotom-fan": "スピンロトム",
     "rotom-mow": "カットロトム",
-    # 原種で特殊な表示名を持つもの
     "deoxys-normal": "デオキシス（ノーマルフォルム）",
     "wormadam-plant": "ミノマダム（くさきのミノ）",
     "shaymin-land": "シェイミ（ランドフォルム）",
@@ -65,77 +64,53 @@ _SPECIAL_FORM_NAME_MAP: dict[str, str] = {
     "enamorus-incarnate": "ラブトロス（けしんフォルム）",
     "oinkologne-male": "パフュートン（オスのすがた）",
     "ogerpon": "オーガポン（みどりのめん）",
-    # 特殊フォーム
     "floette-eternal": "フラエッテ (えいえんのはな)",
-    # サイズ違いのフォーム
     "pumpkaboo-small": "バケッチャ（こだましゅ）",
     "pumpkaboo-large": "バケッチャ（おおだましゅ）",
     "pumpkaboo-super": "バケッチャ（ギガだましゅ）",
     "gourgeist-small": "パンプジン（こだましゅ）",
     "gourgeist-large": "パンプジン（おおだましゅ）",
     "gourgeist-super": "パンプジン（ギガだましゅ）",
-    # デオキシスのフォルム
     "deoxys-attack": "デオキシス（アタックフォルム）",
     "deoxys-defense": "デオキシス（ディフェンスフォルム）",
     "deoxys-speed": "デオキシス（スピードフォルム）",
-    # ミノマダムのフォルム
     "wormadam-sandy": "ミノマダム（すなちのミノ）",
     "wormadam-trash": "ミノマダム（ゴミのミノ）",
-    # シェイミのフォルム
     "shaymin-sky": "シェイミ（スカイフォルム）",
-    # ギラティナのフォルム
     "giratina-origin": "ギラティナ（オリジンフォルム）",
-    # バスラオのフォルム
     "basculin-blue-striped": "バスラオ（あおすじ）",
     "basculin-white-striped": "バスラオ（しろすじ）",
-    # れいじゅうフォルム
     "tornadus-therian": "トルネロス（れいじゅうフォルム）",
     "thundurus-therian": "ボルトロス（れいじゅうフォルム）",
     "landorus-therian": "ランドロス（れいじゅうフォルム）",
     "enamorus-therian": "ラブトロス（れいじゅうフォルム）",
-    # キュレムのフォルム
     "kyurem-black": "ブラックキュレム",
     "kyurem-white": "ホワイトキュレム",
-    # ケルディオのフォルム
     "keldeo-resolute": "ケルディオ（かくごのすがた）",
-    # オドリドリのフォルム
     "oricorio-pom-pom": "オドリドリ（ぱちぱちスタイル）",
     "oricorio-pau": "オドリドリ（ふらふらスタイル）",
     "oricorio-sensu": "オドリドリ（まいまいスタイル）",
-    # ルガルガンのフォルム
     "lycanroc-midnight": "ルガルガン（まよなかのすがた）",
     "lycanroc-dusk": "ルガルガン（たそがれのすがた）",
-    # ネクロズマのフォルム
     "necrozma-dusk": "ネクロズマ（たそがれのたてがみ）",
     "necrozma-dawn": "ネクロズマ（あかつきのつばさ）",
     "necrozma-dusk-mane": "ネクロズマ（たそがれのたてがみ）",
     "necrozma-dawn-wings": "ネクロズマ（あかつきのつばさ）",
     "necrozma-ultra": "ウルトラネクロズマ",
-    # ザシアン/ザマゼンタのフォルム
     "zacian-crowned": "ザシアン（けんのおう）",
     "zamazenta-crowned": "ザマゼンタ（たてのおう）",
-    # ウーラオスのフォルム
     "urshifu-rapid-strike": "ウーラオス（れんげきのかた）",
-    # ストリンダーのフォルム
     "toxtricity-low-key": "ストリンダー（ローなすがた）",
-    # オーガポンのフォルム
     "ogerpon-wellspring-mask": "オーガポン（いどのめん）",
     "ogerpon-hearthflame-mask": "オーガポン（かまどのめん）",
     "ogerpon-cornerstone-mask": "オーガポン（いしずえのめん）",
-    # イダイトウのフォルム
     "basculegion-female": "イダイトウ（メスのすがた）",
-    # パフュートンのフォルム
     "oinkologne-female": "パフュートン（メスのすがた）",
-    # ニャオニクスのフォルム
     "meowstic-female": "ニャオニクス（メスのすがた）",
-    # フーパのフォルム
     "hoopa-unbound": "フーパ（ときはなたれしフーパ）",
-    # イエッサンのフォルム
     "indeedee-female": "イエッサン（メスのすがた）",
-    # ディアルガ/パルキアのフォルム
     "dialga-origin": "ディアルガ（オリジンフォルム）",
     "palkia-origin": "パルキア（オリジンフォルム）",
-    # リージョンフォーム（アローラ）
     "rattata-alola": "アローラコラッタ",
     "raticate-alola": "アローララッタ",
     "raichu-alola": "アローラライチュウ",
@@ -154,7 +129,6 @@ _SPECIAL_FORM_NAME_MAP: dict[str, str] = {
     "muk-alola": "アローラベトベトン",
     "exeggutor-alola": "アローラナッシー",
     "marowak-alola": "アローラガラガラ",
-    # リージョンフォーム（ガラル）
     "meowth-galar": "ガラルニャース",
     "ponyta-galar": "ガラルポニータ",
     "rapidash-galar": "ガラルギャロップ",
@@ -174,7 +148,6 @@ _SPECIAL_FORM_NAME_MAP: dict[str, str] = {
     "darmanitan-galar-standard": "ガラルヒヒダルマ",
     "yamask-galar": "ガラルデスマス",
     "stunfisk-galar": "ガラルマッギョ",
-    # リージョンフォーム（ヒスイ）
     "growlithe-hisui": "ヒスイガーディ",
     "arcanine-hisui": "ヒスイウインディ",
     "voltorb-hisui": "ヒスイビリリダマ",
@@ -191,7 +164,6 @@ _SPECIAL_FORM_NAME_MAP: dict[str, str] = {
     "goodra-hisui": "ヒスイヌメルゴン",
     "avalugg-hisui": "ヒスイクレベース",
     "decidueye-hisui": "ヒスイジュナイパー",
-    # リージョンフォーム（パルデア）
     "tauros-paldea-combat-breed": "パルデアケンタロス(格闘)",
     "tauros-paldea-blaze-breed": "パルデアケンタロス(炎)",
     "tauros-paldea-aqua-breed": "パルデアケンタロス(水)",
@@ -237,7 +209,7 @@ def fetch_species(species_id: int) -> SpeciesInfo | None:
     type2 = types_raw[1]["type"]["name"] if len(types_raw) > 1 else ""
 
     # Apply special-form display names for both base species IDs and form IDs.
-    # Example: deoxys-normal (species_id=386) should be "デオキシス（ノーマルフォルム）".
+    # Example: deoxys-normal (species_id=386) should be "()".
     base_name_ja = _ja_name(spec.get("names", []))
     name_en = poke.get("name", "")
     name_ja = _build_regional_name_ja(name_en, base_name_ja) or base_name_ja
@@ -338,210 +310,210 @@ _HIDDEN_FORM_NAMES: set[str] = set()
 
 # Pokemon where only base form should be shown (hide all alternate forms)
 _BASE_ONLY_SPECIES: set[int] = {
-    845,  # Cramorant (ウッウ)
-    1008,  # Miraidon (ミライドン)
-    1007,  # Koraidon (コライドン)
-    778,  # Mimikyu (ミミッキュ)
-    890,  # Eternatus (ムゲンダイナ)
-    893,  # Zarude (ザルード)
-    868,  # Alcremie (マホイップ)
-    25,  # Pikachu (ピカチュウ)
-    133,  # Eevee (イーブイ)
-    585,  # Deerling (シキジカ)
-    586,  # Sawsbuck (メブキジカ)
-    676,  # Furfrou (トリミアン)
+    845,  # Cramorant ()
+    1008,  # Miraidon ()
+    1007,  # Koraidon ()
+    778,  # Mimikyu ()
+    890,  # Eternatus ()
+    893,  # Zarude ()
+    868,  # Alcremie ()
+    25,  # Pikachu ()
+    133,  # Eevee ()
+    585,  # Deerling ()
+    586,  # Sawsbuck ()
+    676,  # Furfrou ()
 }
 
 # Specific forms to hide by PokeAPI name
 _SPECIFIC_HIDDEN_FORMS: set[str] = {
-    "greninja-ash",  # サトシゲッコウガ
+    "greninja-ash",
     # Gimmighoul
-    "gimmighoul-roaming",  # コレクレー（とほフォルム）
+    "gimmighoul-roaming",
     # Mega evolutions
-    "venusaur-mega",  # メガフシギバナ
-    "charizard-mega-x",  # メガリザードンX
-    "charizard-mega-y",  # メガリザードンY
-    "blastoise-mega",  # メガカメックス
-    "alakazam-mega",  # メガフーディン
-    "gengar-mega",  # メガゲンガー
-    "kangaskhan-mega",  # メガガルーラ
-    "pinsir-mega",  # メガカイロス
-    "gyarados-mega",  # メガギャラドス
-    "aerodactyl-mega",  # メガプテラ
-    "mewtwo-mega-x",  # メガミュウツーX
-    "mewtwo-mega-y",  # メガミュウツーY
-    "ampharos-mega",  # メガデンリュウ
-    "scizor-mega",  # メガハッサム
-    "heracross-mega",  # メガヘラクロス
-    "houndoom-mega",  # メガヘルガー
-    "tyranitar-mega",  # メガバンギラス
-    "blaziken-mega",  # メガバシャーモ
-    "gardevoir-mega",  # メガサーナイト
-    "mawile-mega",  # メガクチート
-    "aggron-mega",  # メガボスゴドラ
-    "medicham-mega",  # メガチャーレム
-    "manectric-mega",  # メガライボルト
-    "banette-mega",  # メガジュペッタ
-    "absol-mega",  # メガアブソル
-    "garchomp-mega",  # メガガブリアス
-    "lucario-mega",  # メガルカリオ
-    "abomasnow-mega",  # メガユキノオー
-    "latias-mega",  # メガラティアス
-    "latios-mega",  # メガラティオス
-    "swampert-mega",  # メガラグラージ
-    "sceptile-mega",  # メガジュカイン
-    "sableye-mega",  # メガヤミラミ
-    "altaria-mega",  # メガチルタリス
-    "gallade-mega",  # メガエルレイド
-    "audino-mega",  # メガタブンネ
-    "sharpedo-mega",  # メガサメハダー
-    "slowbro-mega",  # メガヤドラン
-    "steelix-mega",  # メガハガネール
-    "pidgeot-mega",  # メガピジョット
-    "glalie-mega",  # メガオニゴーリ
-    "diancie-mega",  # メガディアンシー
-    "metagross-mega",  # メガメタグロス
-    "camerupt-mega",  # メガバクーダ
-    "lopunny-mega",  # メガミミロップ
-    "salamence-mega",  # メガボーマンダ
-    "beedrill-mega",  # メガスピアー
+    "venusaur-mega",
+    "charizard-mega-x",  # X
+    "charizard-mega-y",  # Y
+    "blastoise-mega",
+    "alakazam-mega",
+    "gengar-mega",
+    "kangaskhan-mega",
+    "pinsir-mega",
+    "gyarados-mega",
+    "aerodactyl-mega",
+    "mewtwo-mega-x",  # X
+    "mewtwo-mega-y",  # Y
+    "ampharos-mega",
+    "scizor-mega",
+    "heracross-mega",
+    "houndoom-mega",
+    "tyranitar-mega",
+    "blaziken-mega",
+    "gardevoir-mega",
+    "mawile-mega",
+    "aggron-mega",
+    "medicham-mega",
+    "manectric-mega",
+    "banette-mega",
+    "absol-mega",
+    "garchomp-mega",
+    "lucario-mega",
+    "abomasnow-mega",
+    "latias-mega",
+    "latios-mega",
+    "swampert-mega",
+    "sceptile-mega",
+    "sableye-mega",
+    "altaria-mega",
+    "gallade-mega",
+    "audino-mega",
+    "sharpedo-mega",
+    "slowbro-mega",
+    "steelix-mega",
+    "pidgeot-mega",
+    "glalie-mega",
+    "diancie-mega",
+    "metagross-mega",
+    "camerupt-mega",
+    "lopunny-mega",
+    "salamence-mega",
+    "beedrill-mega",
     # Primal forms
-    "kyogre-primal",  # カイオーガ（ゲンシカイキ）
-    "groudon-primal",  # グラードン（ゲンシカイキ）
-    "rayquaza-mega",  # レックウザ（ゲンシカイキ）
+    "kyogre-primal",
+    "groudon-primal",
+    "rayquaza-mega",
     # Pikachu caps
-    "pikachu-rock-star",  # ピカチュウ
-    "pikachu-belle",  # ピカチュウ
-    "pikachu-pop-star",  # ピカチュウ
-    "pikachu-phd",  # ピカチュウ
-    "pikachu-libre",  # ピカチュウ
-    "pikachu-cosplay",  # ピカチュウ
-    "pikachu-original-cap",  # オリジナルキャップ
-    "pikachu-hoenn-cap",  # ホウエンキャップ
-    "pikachu-sinnoh-cap",  # シンオウキャップ
-    "pikachu-unova-cap",  # イッシュキャップ
-    "pikachu-kalos-cap",  # カロスキャップ
-    "pikachu-alola-cap",  # アローラピカチュウ
-    "pikachu-starter",  # ピカチュウ
-    "pikachu-world-cap",  # ワールドキャップ
-    "pikachu-partner-cap",  # ピカチュウ
+    "pikachu-rock-star",
+    "pikachu-belle",
+    "pikachu-pop-star",
+    "pikachu-phd",
+    "pikachu-libre",
+    "pikachu-cosplay",
+    "pikachu-original-cap",
+    "pikachu-hoenn-cap",
+    "pikachu-sinnoh-cap",
+    "pikachu-unova-cap",
+    "pikachu-kalos-cap",
+    "pikachu-alola-cap",
+    "pikachu-starter",
+    "pikachu-world-cap",
+    "pikachu-partner-cap",
     # Eevee
-    "eevee-starter",  # イーブイ
+    "eevee-starter",
     # Greninja
-    "greninja-battle-bond",  # ゲッコウガ（きずなへんげ）
+    "greninja-battle-bond",
     # Totem forms
-    "raticate-totem-alola",  # アローララッタ（ぬし）
-    "gumshoos-totem",  # デカグース（ぬし）
-    "vikavolt-totem",  # クワガノン（ぬし）
-    "lurantis-totem",  # ラランテス（ぬし）
-    "salazzle-totem",  # エンニュート（ぬし）
-    "mimikyu-totem-disguised",  # ミミッキュ（ぬし）
-    "mimikyu-totem-busted",  # ミミッキュ（ぬし２）
-    "kommo-o-totem",  # ジャラランガ（ぬし）
-    "marowak-totem",  # ガラガラ（ぬし）
-    "ribombee-totem",  # アブリボン（ぬし）
-    "araquanid-totem",  # オニシズクモ（ぬし）
-    "togedemaru-totem",  # トゲデマル（ぬし）
+    "raticate-totem-alola",
+    "gumshoos-totem",
+    "vikavolt-totem",
+    "lurantis-totem",
+    "salazzle-totem",
+    "mimikyu-totem-disguised",
+    "mimikyu-totem-busted",
+    "kommo-o-totem",
+    "marowak-totem",
+    "ribombee-totem",
+    "araquanid-totem",
+    "togedemaru-totem",
     # Minior forms
-    "minior-orange-meteor",  # りゅうせいのすがた（だいだいいろのコア）
-    "minior-yellow-meteor",  # りゅうせいのすがた（きいろのコア）
-    "minior-green-meteor",  # りゅうせいのすがた（みどりいろのコア）
-    "minior-blue-meteor",  # りゅうせいのすがた（みずいろのコア）
-    "minior-indigo-meteor",  # りゅうせいのすがた（あおいろのコア）
-    "minior-violet-meteor",  # りゅうせいのすがた（むらさきのコア）
-    "minior-orange",  # コアのすがた（だいだいいろのコア）
-    "minior-yellow",  # コアのすがた（きいろのコア）
-    "minior-green",  # コアのすがた（みどりいろのコア）
-    "minior-blue",  # コアのすがた（みずいろのコア）
-    "minior-indigo",  # コアのすがた（あおいろのコア）
-    "minior-violet",  # コアのすがた（むらさきのコア）
+    "minior-orange-meteor",
+    "minior-yellow-meteor",
+    "minior-green-meteor",
+    "minior-blue-meteor",
+    "minior-indigo-meteor",
+    "minior-violet-meteor",
+    "minior-orange",
+    "minior-yellow",
+    "minior-green",
+    "minior-blue",
+    "minior-indigo",
+    "minior-violet",
     # Mimikyu
-    "mimikyu-busted",  # ミミッキュ（ばれたすがた）
+    "mimikyu-busted",
     # Magearna
-    "magearna-original",  # マギアナ
+    "magearna-original",
     # Rockruff
-    "rockruff-own-tempo",  # イワンコ（マイペース）
+    "rockruff-own-tempo",
     # Zygarde
-    "zygarde-10",  # ジガルデ（10%フォルム）
+    "zygarde-10",  # (10%)
     # Cramorant
-    "cramorant-gulping",  # ウッウ（うのみのすがた）
-    "cramorant-gorging",  # ウッウ（まるのみのすがた）
+    "cramorant-gulping",
+    "cramorant-gorging",
     # Zarude
-    "zarude-dada",  # ザルード（とうちゃん）
+    "zarude-dada",
     # Gigantamax forms
-    "venusaur-gmax",  # キョダイマックスのすがた
-    "charizard-gmax",  # キョダイマックスのすがた
-    "blastoise-gmax",  # キョダイマックスのすがた
-    "butterfree-gmax",  # キョダイマックスのすがた
-    "pikachu-gmax",  # キョダイマックスのすがた
-    "meowth-gmax",  # キョダイマックスのすがた
-    "machamp-gmax",  # キョダイマックスのすがた
-    "gengar-gmax",  # キョダイマックスのすがた
-    "kingler-gmax",  # キョダイマックスのすがた
-    "lapras-gmax",  # キョダイマックスのすがた
-    "eevee-gmax",  # キョダイマックスのすがた
-    "snorlax-gmax",  # キョダイマックスのすがた
-    "garbodor-gmax",  # キョダイマックスのすがた
-    "melmetal-gmax",  # キョダイマックスのすがた
-    "rillaboom-gmax",  # キョダイマックスのすがた
-    "cinderace-gmax",  # キョダイマックスのすがた
-    "inteleon-gmax",  # キョダイマックスのすがた
-    "corviknight-gmax",  # キョダイマックスのすがた
-    "orbeetle-gmax",  # キョダイマックスのすがた
-    "drednaw-gmax",  # キョダイマックスのすがた
-    "coalossal-gmax",  # キョダイマックスのすがた
-    "flapple-gmax",  # キョダイマックスのすがた
-    "appletun-gmax",  # キョダイマックスのすがた
-    "sandaconda-gmax",  # キョダイマックスのすがた
-    "toxtricity-amped-gmax",  # ハイなすがた・キョダイマックスのすがた
-    "centiskorch-gmax",  # キョダイマックスのすがた
-    "hatterene-gmax",  # キョダイマックスのすがた
-    "grimmsnarl-gmax",  # キョダイマックスのすがた
-    "alcremie-gmax",  # キョダイマックスのすがた
-    "copperajah-gmax",  # キョダイマックスのすがた
-    "duraludon-gmax",  # キョダイマックスのすがた
-    "urshifu-single-strike-gmax",  # いちげきのかた・キョダイマックスのすがた
-    "urshifu-rapid-strike-gmax",  # れんげきのかた・キョダイマックスのすがた
-    "toxtricity-low-key-gmax",  # ローなすがた・キョダイマックスのすがた
-    "eternatus-eternamax",  # ムゲンダイナ（ムゲンダイマックス）
+    "venusaur-gmax",
+    "charizard-gmax",
+    "blastoise-gmax",
+    "butterfree-gmax",
+    "pikachu-gmax",
+    "meowth-gmax",
+    "machamp-gmax",
+    "gengar-gmax",
+    "kingler-gmax",
+    "lapras-gmax",
+    "eevee-gmax",
+    "snorlax-gmax",
+    "garbodor-gmax",
+    "melmetal-gmax",
+    "rillaboom-gmax",
+    "cinderace-gmax",
+    "inteleon-gmax",
+    "corviknight-gmax",
+    "orbeetle-gmax",
+    "drednaw-gmax",
+    "coalossal-gmax",
+    "flapple-gmax",
+    "appletun-gmax",
+    "sandaconda-gmax",
+    "toxtricity-amped-gmax",
+    "centiskorch-gmax",
+    "hatterene-gmax",
+    "grimmsnarl-gmax",
+    "alcremie-gmax",
+    "copperajah-gmax",
+    "duraludon-gmax",
+    "urshifu-single-strike-gmax",
+    "urshifu-rapid-strike-gmax",
+    "toxtricity-low-key-gmax",
+    "eternatus-eternamax",
     # Dudunsparce
-    "dudunsparce-three-segment",  # ノココッチ（みつふしフォルム）
+    "dudunsparce-three-segment",
     # Maushold
-    "maushold-family-of-three",  # イッカネズミ（３びきかぞく）
+    "maushold-family-of-three",
     # Tatsugiri
-    "tatsugiri-droopy",  # シャリタツ（たれたすがた）
-    "tatsugiri-stretchy",  # シャリタツ（のびたすがた）
+    "tatsugiri-droopy",
+    "tatsugiri-stretchy",
     # Squawkabilly
-    "squawkabilly-blue-plumage",  # イキリンコ（ブルーフェザー）
-    "squawkabilly-yellow-plumage",  # イキリンコ（イエローフェザー）
-    "squawkabilly-white-plumage",  # イキリンコ（ホワイトフェザー）
+    "squawkabilly-blue-plumage",
+    "squawkabilly-yellow-plumage",
+    "squawkabilly-white-plumage",
     # Koraidon/Miraidon forms
-    "koraidon-limited-build",  # せいげんけいたい
-    "koraidon-sprinting-build",  # しっそうけいたい
-    "koraidon-swimming-build",  # ゆうえいけいたい
-    "koraidon-gliding-build",  # かっくうけいたい
-    "miraidon-low-power-mode",  # リミテッドモード
-    "miraidon-drive-mode",  # ドライブモード
-    "miraidon-aquatic-mode",  # フロートモード
-    "miraidon-glide-mode",  # グライドモード
+    "koraidon-limited-build",
+    "koraidon-sprinting-build",
+    "koraidon-swimming-build",
+    "koraidon-gliding-build",
+    "miraidon-low-power-mode",
+    "miraidon-drive-mode",
+    "miraidon-aquatic-mode",
+    "miraidon-glide-mode",
     # Battle-only forms (show only base form in picker/filter)
-    "castform-sunny",  # ポワルン（たいようのすがた）
-    "castform-rainy",  # ポワルン（あまみずのすがた）
-    "castform-snowy",  # ポワルン（ゆきぐものすがた）
-    "darmanitan-zen",  # ヒヒダルマ（ダルマモード）
-    "meloetta-pirouette",  # メロエッタ（ステップフォルム）
-    "aegislash-blade",  # ギルガルド（ブレードフォルム）
-    "zygarde-10-power-construct",  # ジガルデ（10%フォルム）
-    "zygarde-50-power-construct",  # ジガルデ（50%フォルム）
-    "zygarde-complete",  # ジガルデ（パーフェクトフォルム）
-    "wishiwashi-school",  # ヨワシ（むれたすがた）
-    "minior-red",  # メテノ（コアのすがた）
-    "darmanitan-galar-zen",  # ガラルヒヒダルマ（ダルマモード）
-    "eiscue-noice",  # コオリッポ（ナイスフェイス）
-    "morpeko-hangry",  # モルペコ（はらぺこもよう）
-    "palafin-hero",  # イルカマン（マイティフォルム）
-    "terapagos-terastal",  # テラパゴス（テラスタルフォルム）
-    "terapagos-stellar",  # テラパゴス（ステラフォルム）
+    "castform-sunny",
+    "castform-rainy",
+    "castform-snowy",
+    "darmanitan-zen",
+    "meloetta-pirouette",
+    "aegislash-blade",
+    "zygarde-10-power-construct",  # (10%)
+    "zygarde-50-power-construct",  # (50%)
+    "zygarde-complete",
+    "wishiwashi-school",
+    "minior-red",
+    "darmanitan-galar-zen",
+    "eiscue-noice",
+    "morpeko-hangry",
+    "palafin-hero",
+    "terapagos-terastal",
+    "terapagos-stellar",
 }
 
 # Minior: only show red core and its meteor form, hide other colors

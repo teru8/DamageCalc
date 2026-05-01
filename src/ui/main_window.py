@@ -107,14 +107,14 @@ def _parse_sample_party() -> list[PokemonInstance]:
         head = block_lines[0].split("@")
         name_ja = head[0].strip()
         item = head[1].strip() if len(head) > 1 else ""
-        # Line 1: テラスタイプ
+        # Line 1:
         tera_ja = block_lines[1].split(":")[-1].strip() if ":" in block_lines[1] else ""
         tera_en = TYPE_JA_TO_EN.get(tera_ja, "")
-        # Line 2: 特性
+        # Line 2:
         ability = block_lines[2].split(":")[-1].strip() if ":" in block_lines[2] else ""
-        # Line 3: 性格
+        # Line 3:
         nature = block_lines[3].split(":")[-1].strip() if ":" in block_lines[3] else "まじめ"
-        # Line 4: 実数値(EV)-...
+        # Line 4: (EV)-...
         parts = block_lines[4].split("-")
         stats: list[int] = []
         evs: list[int] = []
@@ -129,9 +129,9 @@ def _parse_sample_party() -> list[PokemonInstance]:
         while len(stats) < 6:
             stats.append(0)
             evs.append(0)
-        # Line 5: わざ
+        # Line 5:
         moves = [m.strip() for m in block_lines[5].split("/")][:4]
-        # DBから種族情報を補完
+        # DB
         species = db.get_species_by_name_ja(name_ja)
         p = PokemonInstance(
             species_id=species.species_id if species else 0,

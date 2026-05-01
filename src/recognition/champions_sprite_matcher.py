@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
+from main import APP_USER_AGENT
 
 from src.data import database as db
 
@@ -47,7 +48,7 @@ _MANIFEST_PATH = _CACHE_ROOT / "manifest.json"
 _TIMEOUT_SECONDS = 25
 
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "DamageCalc/0.1.1-alpha"})
+_SESSION.headers.update({"User-Agent": APP_USER_AGENT})
 
 _MANIFEST_CACHE: dict | None = None
 _REFS_BY_NAME_CACHE: dict[str, list[dict]] | None = None
@@ -91,16 +92,15 @@ _COLOR_DELTA_NORM = 66.0
 
 # Battle-only transformations that never appear on the party screen.
 _EXCLUDED_FORMS: frozenset[str] = frozenset({
-    # 恒久的バトル専用変身
     "mega", "mega x", "mega y", "mega z",
     "gigantamax",
     "primal",
     "eternamax",
-    # バトル中フォルムチェンジ（PT画面は base のみ）
-    "rainy", "snowy", "sunny",   # ポワルン
-    "blade",                     # ギルガルド
-    "hangry",                    # モルペコ
-    "hero",                      # イルカマン
+    # (PT base )
+    "rainy", "snowy", "sunny",
+    "blade",
+    "hangry",
+    "hero",
 })
 
 # Primary (first-priority) color template match on red-filled backgrounds.

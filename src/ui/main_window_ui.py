@@ -57,7 +57,6 @@ def _build_ui(self) -> None:
     cam_layout.setContentsMargins(4, 4, 4, 4)
     cam_layout.setSpacing(0)
 
-    # オプション＆プレビュー＆ログの統合レイアウト
     combined_row = QHBoxLayout()
     combined_row.setContentsMargins(0, 0, 0, 0)
     combined_row.setSpacing(4)
@@ -107,7 +106,6 @@ def _build_ui(self) -> None:
 
     combined_row.addLayout(switcher_col)
 
-    # 左側：オプションボタン + プレビュー
     left_column = QVBoxLayout()
     left_column.setContentsMargins(0, 0, 0, 0)
     left_column.setSpacing(4)
@@ -142,12 +140,11 @@ def _build_ui(self) -> None:
 
     combined_row.addLayout(left_column)
 
-    # 右側：ログ表示（ボタンなし）
     self._main_log_edit = QTextEdit()
     self._main_log_edit.setReadOnly(True)
     self._main_log_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-    self._main_log_edit.setLineWrapMode(QTextEdit.NoWrap)  # 折り返しを抑えて同じ高さで表示行数を確保
-    self._main_log_edit.setMaximumWidth(250)  # 最大幅を制限してカメラパネルが広がりすぎないように
+    self._main_log_edit.setLineWrapMode(QTextEdit.NoWrap)
+    self._main_log_edit.setMaximumWidth(250)
     self._main_log_edit.setStyleSheet(
         "QTextEdit{background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;"
         "border-radius:4px;font-size:11px;}"
@@ -156,7 +153,6 @@ def _build_ui(self) -> None:
 
     cam_layout.addLayout(combined_row, 0)
 
-    # ダメージ計算タブのサイドパネル（攻守詳細＋天気等）
     self._damage_side = self._damage_panel.side_panel
     cam_layout.addWidget(self._damage_side, 1)
     self._damage_side.setVisible(False)
@@ -164,7 +160,6 @@ def _build_ui(self) -> None:
     self._detect_opponent_btn.clicked.connect(self._auto_detect_opponent_party)
     self._damage_panel.set_opp_party_action_widget(self._detect_opponent_btn)
 
-    # ボックスタブのサイドパネル（自分のパーティ）
     self._box_side = self._build_box_side_panel()
     self._box_side_scroll = QScrollArea()
     self._box_side_scroll.setWidgetResizable(True)
@@ -173,7 +168,6 @@ def _build_ui(self) -> None:
     cam_layout.addWidget(self._box_side_scroll, 1)
     self._box_side_scroll.setVisible(False)
 
-    # 余白を下に寄せる
     cam_layout.addStretch()
 
     self._cam_panel.setFixedWidth(_CAM_PANEL_WIDTH)
@@ -183,7 +177,6 @@ def _build_ui(self) -> None:
     self._splitter.addWidget(self._cam_panel)
     self._root_layout.addWidget(self._splitter)
 
-    # タブ切り替えでサイドパネルの表示を制御
     self._tabs.currentChanged.connect(self._on_damage_tab_visibility)
     self._on_damage_tab_visibility(self._tabs.currentIndex())  # Initialize
     self._sync_tab_switcher_buttons(self._tabs.currentIndex())
@@ -225,11 +218,10 @@ def _build_registry_tab(self) -> QWidget:
     hint_col.addWidget(_box_hint)
     btn_row.addLayout(hint_col)
 
-    # 編集・削除・自分設定ボタンは右クリックメニューへ移行
     btn_row.addStretch()
     layout.addLayout(btn_row)
 
-    # タイプ絞り込み（3列×6行グリッド）
+    # (3×6)
     type_box = QGroupBox("タイプ絞り込み")
     type_layout = QVBoxLayout(type_box)
     type_layout.setContentsMargins(6, 4, 6, 4)
@@ -267,7 +259,6 @@ def _build_registry_tab(self) -> QWidget:
     for key, btn in self._box_type_buttons.items():
         btn.toggled.connect(lambda checked, value=key: _on_box_type_toggled(value, checked))
 
-    # ── ポケモングリッド表示エリア ──
     box_group = QGroupBox("ボックス")
     box_group_layout = QVBoxLayout(box_group)
     box_group_layout.setContentsMargins(6, 4, 6, 6)
@@ -367,7 +358,6 @@ def _build_options_dialog(self) -> None:
     content_row.addLayout(left_col, 1)
     content_row.addLayout(right_col, 1)
 
-    # ── データ更新 ──
     data_box = QGroupBox("データ更新")
     data_layout = QVBoxLayout(data_box)
     fetch_row = QHBoxLayout()
@@ -390,7 +380,6 @@ def _build_options_dialog(self) -> None:
     data_box.setFixedHeight(140)
     left_col.addWidget(data_box)
 
-    # ── ダメージ計算 ──
     damage_box = QGroupBox("ダメージ計算")
     damage_layout = QVBoxLayout(damage_box)
     self._option_damage_tera_cb = QCheckBox("テラスタル設定を表示")
@@ -414,7 +403,6 @@ def _build_options_dialog(self) -> None:
 
     left_col.addWidget(damage_box)
 
-    # ── カメラ ──
     cam_box = QGroupBox("カメラ")
     cam_box_layout = QVBoxLayout(cam_box)
     cam_ctrl = QHBoxLayout()
@@ -434,7 +422,6 @@ def _build_options_dialog(self) -> None:
     cam_box.setFixedHeight(90)
     left_col.addWidget(cam_box)
 
-    # ── その他 ──
     other_box = QGroupBox("その他")
     other_layout = QVBoxLayout(other_box)
     self._topmost_cb = QCheckBox("最前面")
@@ -447,7 +434,6 @@ def _build_options_dialog(self) -> None:
     other_box.setFixedHeight(90)
     left_col.addWidget(other_box)
 
-    # ── ログ ──
     log_box = QGroupBox("ログ")
     log_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     log_layout = QVBoxLayout(log_box)
@@ -506,7 +492,6 @@ def _set_fetch_buttons_enabled(self, enabled: bool) -> None:
     if self._fetch_api_btn:
         self._fetch_api_btn.setEnabled(enabled)
     if self._fetch_usage_btn:
-        # ビルド版では使用率取得を無効化（開発環境のみ有効）
         self._fetch_usage_btn.setEnabled(enabled and not getattr(sys, "frozen", False))
 
 
@@ -612,7 +597,6 @@ def _show_usage_fetch_dialog(self) -> None:
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(8)
     
-    # シーズン選択
     season_row = QHBoxLayout()
     season_row.addWidget(QLabel("シーズン:"))
     season_combo = QComboBox()
@@ -630,7 +614,6 @@ def _show_usage_fetch_dialog(self) -> None:
     season_row.addStretch()
     layout.addLayout(season_row)
     
-    # データ源選択
     source_row = QHBoxLayout()
     source_row.addWidget(QLabel("データ源:"))
     source_combo = QComboBox()
@@ -638,7 +621,7 @@ def _show_usage_fetch_dialog(self) -> None:
     _, usage_sources, _, _ = self._get_usage_scraper_symbols()
     for source_key, source_label in usage_sources.items():
         source_combo.addItem(source_label, source_key)
-    # デフォルトをpokedb_tokyoに設定
+    # pokedb_tokyo
     for i in range(source_combo.count()):
         if source_combo.itemData(i) == "pokedb_tokyo":
             source_combo.setCurrentIndex(i)
@@ -647,7 +630,6 @@ def _show_usage_fetch_dialog(self) -> None:
     source_row.addStretch()
     layout.addLayout(source_row)
     
-    # ボタン
     btn_row = QHBoxLayout()
     start_btn = QPushButton("開始")
     cancel_btn = QPushButton("キャンセル")

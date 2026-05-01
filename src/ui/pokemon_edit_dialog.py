@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import requests
 import re
 
+from main import APP_USER_AGENT
 from PyQt5.QtCore import QEvent, QSize, QSortFilterProxyModel, QStringListModel, Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import (
@@ -33,7 +34,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from src.constants import ABILITIES_JA, ITEMS_JA, NATURES_JA, POKEAPI_BASE, TYPE_COLORS, TYPE_EN_TO_JA
+from src.constants import ABILITIES_JA, NATURES_JA, POKEAPI_BASE, TYPE_COLORS, TYPE_EN_TO_JA
+from src.data.item_dictionary import ITEMS_JA
 from src.data import database as db
 from src.data.item_catalog import get_item_names
 from src.data import zukan_client
@@ -164,7 +166,7 @@ class _PokeApiVarietyStats:
 
 
 _POKEAPI_SESSION = requests.Session()
-_POKEAPI_SESSION.headers["User-Agent"] = "DamageCalc/0.1.1-alpha"
+_POKEAPI_SESSION.headers["User-Agent"] = APP_USER_AGENT
 _POKEAPI_VARIETY_CACHE: dict[int, list[_PokeApiVarietyStats]] = {}
 _FORM_SPECIES_CACHE: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_ABILITY_JA_CACHE: dict[str, str] = {}
@@ -329,7 +331,7 @@ def _pokemon_pixmap(url: str, width: int, height: int, label: str) -> QPixmap:
 
 
 def _estimate_ev_points(species: SpeciesInfo, stat_key: str, target_stat: int, nature: str) -> int:
-    from src.calc.damage_calc import calc_stat, get_nature_mult
+    from src.calc.calc_utils import calc_stat, get_nature_mult
 
     if stat_key == "hp":
         base_value = species.base_hp
@@ -447,7 +449,7 @@ def _normalize_picker_display_name(name: str) -> str:
     if text in _TAUROS_DISPLAY_ALIAS:
         return _TAUROS_DISPLAY_ALIAS[text]
 
-    # Convert ♂/♀ suffix to (オス)/(メス) for UI display
+    # Convert ♂/♀ suffix to ()/() for UI display
     gender_m = re.match(r"^(.+?)([♀♂])$", text)
     if gender_m:
         return "{}{}".format(gender_m.group(1).strip(), _GENDER_SYMBOL_TO_LABEL[gender_m.group(2)])
@@ -459,7 +461,7 @@ def _normalize_picker_display_name(name: str) -> str:
 
 
 # Pokémon that should default to a non-base form when first selected.
-# Key: base name_ja, Value: form combo index (1-based, 0 = base/通常).
+# Key: base name_ja, Value: form combo index (1-based, 0 = base/).
 _DEFAULT_FORM_INDEX: dict[str, int] = {
 }
 
@@ -503,7 +505,7 @@ def _is_picker_excluded_battle_form(name_ja: str) -> bool:
 
 
 # Base species names for which Mega evolution is NOT a same-species form option.
-# The Mega is instead tied to an alternate out-of-battle form (e.g. えいえんのはな).
+# The Mega is instead tied to an alternate out-of-battle form (e.g. ).
 _MEGA_EXCLUDED_FROM_BASE: set[str] = {
     "フラエッテ",
 }
@@ -520,7 +522,7 @@ def _is_same_species_form_option(base_name: str, entry: zukan_client.ZukanPokemo
     return base_name in _IN_BATTLE_FORM_BASE_NAMES
 
 
-# Pokémon whose names naturally contain 「メガ」 but are NOT Mega evolutions.
+# Pokémon whose names naturally contain 「」 but are NOT Mega evolutions.
 _MEGA_IN_NAME_NOT_MEGA_FORM: frozenset[str] = frozenset({
     "メガニウム", "メガヤンマ",
 })
@@ -667,7 +669,7 @@ def _resolve_picker_zukan_entry(
         if partial:
             return sorted(partial, key=lambda row: _dex_sort_key(row.dex_no))[0]
 
-    # Name styles like "イダイトウ♀" / "ニャオニクス♂"
+    # Name styles like "♀" / "♂"
     gender_match = re.match(r"^(.+?)([♀♂])$", name)
     if gender_match:
         base_name = gender_match.group(1).strip()
@@ -684,7 +686,7 @@ def _resolve_picker_zukan_entry(
                 return sorted(gendered, key=lambda row: _dex_sort_key(row.dex_no))[0]
             return sorted(candidates, key=lambda row: _dex_sort_key(row.dex_no))[0]
 
-    # Prefix-style Rotom names like "ウォッシュロトム"
+    # Prefix-style Rotom names like ""
     if "ロトム" in name and name != "ロトム":
         rotom_forms = {
             "ヒート": "ヒート",
@@ -701,7 +703,7 @@ def _resolve_picker_zukan_entry(
             if matched:
                 return sorted(matched, key=lambda row: _dex_sort_key(row.dex_no))[0]
 
-    # Paldea breed Tauros: "パルデアケンタロス(格闘)" / "(炎)" / "(水)"
+    # Paldea breed Tauros: "()" / "()" / "()"
     canonical_display = _TAUROS_DISPLAY_ALIAS.get(name, name)
     tauros_sub = _TAUROS_DISPLAY_TO_ZUKAN_SUB.get(canonical_display, "")
     if tauros_sub:
@@ -710,7 +712,7 @@ def _resolve_picker_zukan_entry(
         if matched:
             return sorted(matched, key=lambda row: _dex_sort_key(row.dex_no))[0]
 
-    # Gender-display-label style: "イダイトウ(メス)" / "イダイトウ(オス)"
+    # Gender-display-label style: "()" / "()"
     gender_label_m = re.match(r"^(.+?)(\(オス\)|\(メス\))$", name)
     if gender_label_m:
         base_name = gender_label_m.group(1).strip()
@@ -1196,7 +1198,7 @@ def _build_pokemon_picker_entries() -> list[PokemonPickerEntry]:
         added_names.add(display_name)
 
     # Add entries for usage-ranked Pokemon that are not in species_cache.
-    # This covers regional forms (e.g. アローラキュウコン) whose PokeAPI data
+    # This covers regional forms (e.g. ) whose PokeAPI data
     # hasn't been fetched yet, but whose name appears in the usage ranking.
     for usage_name in usage_ranks:
         if not usage_name:
@@ -1223,8 +1225,8 @@ def _build_pokemon_picker_entries() -> list[PokemonPickerEntry]:
                     candidate_names.append("{}{}".format(prefix, zukan_entry.name_ja))
                     break
             for candidate in _unique(candidate_names):
-                # Do not collapse a form-specific usage name (e.g. ヒートロトム) onto
-                # the plain base species (e.g. ロトム). Only accept a DB hit when the
+                # Do not collapse a form-specific usage name (e.g. ) onto
+                # the plain base species (e.g. ). Only accept a DB hit when the
                 # candidate is the usage_name itself or a known form alias — not
                 # when it is merely the zukan base-name for a different form.
                 if candidate == zukan_entry.name_ja and candidate != usage_name:
@@ -1316,6 +1318,7 @@ class SuggestComboBox(ArrowComboBox):
         items: list[str],
         preserve_text: bool = True,
         separator_after: int | None = None,
+        completer_items: list[str] | None = None,
     ) -> None:
         current = self.current_text_stripped()
         self.blockSignals(True)
@@ -1323,7 +1326,7 @@ class SuggestComboBox(ArrowComboBox):
         self.addItems(items)
         if separator_after is not None and 0 < separator_after < self.count():
             self.insertSeparator(separator_after)
-        self._apply_completer(items)
+        self._apply_completer(completer_items if completer_items is not None else items)
         self.blockSignals(False)
         if preserve_text:
             self.set_text(current)
@@ -1367,7 +1370,7 @@ class ChipButton(QPushButton):
 
 
 class TypeIconButton(QToolButton):
-    # PNG: 119×26 → アイコン 110×24、ボタン 114×30
+    # PNG: 119×26 → 110×24, 114×30
     _PNG_ICON_W = 110
     _PNG_ICON_H = 24
     _BTN_W = 114

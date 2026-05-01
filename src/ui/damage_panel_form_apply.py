@@ -18,7 +18,7 @@ def apply_form(
     form_ability_ja: dict[str, str],
 ) -> PokemonInstance:
     """Return a new PokemonInstance with form stats/types/ability applied."""
-    from src.calc.damage_calc import calc_stat
+    from src.calc.calc_utils import calc_stat
     from src.calc.smogon_bridge import smogon_mega_species
     from src.data.database import get_species_by_name_ja
 

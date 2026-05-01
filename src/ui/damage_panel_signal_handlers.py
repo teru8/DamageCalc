@@ -48,7 +48,7 @@ def _edit_party_slot(self, side: str, idx: int) -> None:
 
     party[idx] = copy.deepcopy(updated)
 
-    # 編集したスロットを選択状態にし、atk/def も更新する（_persist_party_member_edits の上書きを防ぐため先に設定）
+    # , atk/def (_persist_party_member_edits )
     if self._party_source == side:
         self._atk_party_side = side
         self._atk_party_idx = idx
@@ -279,7 +279,6 @@ def _box_select_into_slot(self, side: str, idx: int) -> None:
         party.append(None)
     party[idx] = copy.deepcopy(p)
 
-    # スロットをクリックしたのと同じ選択状態にする
     if side == "my":
         self._on_my_party_slot_clicked(idx)
     else:
@@ -515,16 +514,13 @@ def _on_form_change_atk(self) -> None:
     cur_idx = group.index(key) if key in group else 0
     next_name = group[(cur_idx + 1) % len(group)]
     if next_name == canon:
-        # ベースフォームに戻す際、キャッシュに保存しておいた元の特性を復元
         cached = self._atk_form_cache.pop(canon, None)
         original_ability = cached[1] if isinstance(cached, tuple) else ""
         if not original_ability:
-            # PTから直接メガフォームで選んだ場合などキャッシュが空の場合
-            # 原種の候補特性から安全に選ぶ
+            # PT
             original_ability = _fallback_original_ability(self._atk.ability, canon)
         new_p = _apply_form(self._atk, next_name, original_ability=original_ability)
     else:
-        # メガ/別フォームへ移行する際、元の特性を保存
         existing = self._atk_form_cache.get(canon)
         original_ability = existing[1] if isinstance(existing, tuple) else self._atk.ability
         self._atk_form_cache[canon] = (next_name, original_ability)
