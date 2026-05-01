@@ -1,4 +1,6 @@
 import math
+import re
+import unicodedata
 from src.models import PokemonInstance, MoveInfo, SpeciesInfo
 from src.constants import (
     TYPE_CHART, NATURES_JA, GAME_LEVEL,
@@ -48,6 +50,12 @@ _ABILITY_IMMUNITIES: dict[str, tuple[str, ...]] = {
 }
 
 
+def normalize_move_name(name: str) -> str:
+    """Normalize move names to handle whitespace/fullwidth variants consistently."""
+    normalized = unicodedata.normalize("NFKC", name or "")
+    return re.sub(r"\s+", "", normalized).strip()
+
+
 _RANK_TABLE: dict[int, float] = {
     -6: 2/8, -5: 2/7, -4: 2/6, -3: 2/5, -2: 2/4, -1: 2/3,
     0: 1.0, 1: 3/2, 2: 4/2, 3: 5/2, 4: 6/2, 5: 7/2, 6: 8/2,
@@ -64,10 +72,10 @@ def resolve_effective_move_type(
     terastal_type: str = "",
     weather: str = "",
 ) -> str:
-    name = move.name_ja
+    name = normalize_move_name(move.name_ja)
 
     # Tera Burst: uses tera type when terastallized
-    if name == "テラバースト" and terastal_type and move.type_name == "normal":
+    if name == normalize_move_name("テラバースト") and terastal_type and move.type_name == "normal":
         return terastal_type
 
     # Normalize: all moves become Normal
@@ -79,19 +87,19 @@ def resolve_effective_move_type(
         return "water"
 
     # Judgment (Arceus/Multitype): type = held plate
-    if name == "さばきのつぶて" and attacker.ability in ("マルチタイプ", "Multitype"):
+    if name == normalize_move_name("さばきのつぶて") and attacker.ability in ("マルチタイプ", "Multitype"):
         return _PLATE_TYPE.get(attacker.item, "normal")
 
     # Multi-Attack (Silvally/RKS System): type = held memory
-    if name == "マルチアタック" and attacker.ability in ("ARシステム", "RKS System"):
+    if name == normalize_move_name("マルチアタック") and attacker.ability in ("ARシステム", "RKS System"):
         return _MEMORY_TYPE.get(attacker.item, "normal")
 
     # Aura Wheel (Morpeko): Hangry form → Dark, otherwise Electric
-    if name == "オーラぐるま":
+    if name == normalize_move_name("オーラぐるま"):
         return "dark" if "はらぺこもよう" in attacker.name_ja else "electric"
 
     # Raging Bull (Paldean Tauros): form determines type
-    if name == "レイジングブル":
+    if name == normalize_move_name("レイジングブル"):
         if "(炎)" in attacker.name_ja:
             return "fire"
         if "(水)" in attacker.name_ja:
@@ -99,7 +107,7 @@ def resolve_effective_move_type(
         return "fighting"
 
     # Revelation Dance (Oricorio): form determines type
-    if name == "めざめるダンス":
+    if name == normalize_move_name("めざめるダンス"):
         if "めらめら" in attacker.name_ja:
             return "fire"
         if "ぱちぱち" in attacker.name_ja:
@@ -111,7 +119,7 @@ def resolve_effective_move_type(
         return "normal"
 
     # Weather Ball: type changes with weather
-    if name == "ウェザーボール":
+    if name == normalize_move_name("ウェザーボール"):
         return _WEATHER_BALL_TYPE.get(weather, "normal")
 
     # Skin abilities: Normal-type moves become the ability's type

@@ -28,7 +28,7 @@ def _calc_moves(self) -> None:
         calc_stat, get_nature_mult,
         get_damage_modifier_notes, move_type_effectiveness,
         resolve_effective_move_category, resolve_effective_move_type,
-        is_grounded,
+        is_grounded, normalize_move_name,
     )
     from src.calc.smogon_bridge import (
         SmogonBridge, pokemon_to_attacker_dict, defender_scenario_dict, attacker_scenario_dict,
@@ -109,10 +109,23 @@ def _calc_moves(self) -> None:
     if def_tera:
         def_types_override = [def_tera]
 
-    weather = self._weather_key()
+    base_weather = self._weather_key()
     terrain = self._terrain_key()
-    if weather == "none" and atk.ability in ("ひひいろのこどう", "Orichalcum Pulse"):
-        weather = "sun"
+    def _weather_for_attacker(weather_key: str, ability_name: str) -> str:
+        ability = (ability_name or "").strip()
+        # Mega Sol: always treat this attacker's move as under sun.
+        if ability in ("メガソーラー", "Mega Sol"):
+            return "sun"
+        # Orichalcum Pulse: creates sun only when no weather is active.
+        if weather_key == "none" and ability in ("ひひいろのこどう", "Orichalcum Pulse"):
+            return "sun"
+        return weather_key
+
+    atk_weather = _weather_for_attacker(base_weather, atk.ability)
+    opp_weather = _weather_for_attacker(
+        base_weather,
+        self._def_custom.ability if self._def_custom else "",
+    )
     if terrain == "none" and atk.ability in ("ハドロンエンジン", "Hadron Engine"):
         terrain = "electric"
     is_crit = self._crit_btn.isChecked()
@@ -178,7 +191,7 @@ def _calc_moves(self) -> None:
         defender_gender = "N"
 
     shared = dict(
-        weather=weather, terrain=terrain, is_critical=is_crit,
+        weather=atk_weather, terrain=terrain, is_critical=is_crit,
         has_reflect=reflect, has_light_screen=lightscreen,
         helping_hand=helping, steel_spirit=steel_spirit, charged=charged,
         fairy_aura=fairy_aura, dark_aura=dark_aura,
@@ -218,7 +231,7 @@ def _calc_moves(self) -> None:
     if atk_bd_rank != 0:
         _atk_boosts["def"] = atk_bd_rank
         _atk_boosts["spd"] = atk_bd_rank
-    if (atk.ability in ("こだいかっせい", "Protosynthesis") and protosynthesis_active and weather != "sun") or (
+    if (atk.ability in ("こだいかっせい", "Protosynthesis") and protosynthesis_active and atk_weather != "sun") or (
         atk.ability in ("クォークチャージ", "Quark Drive") and quark_drive_active and terrain != "electric"
     ):
         # Force QP active without replacing held item: explicit boostedStat triggers isQPActive().
@@ -239,7 +252,7 @@ def _calc_moves(self) -> None:
     if parental_bond and ABILITY_JA_TO_EN.get(atk.ability, "") != "Parental Bond":
         _atk_d["ability"] = "Parental Bond"
     _field_d = smogon_field_to_dict(
-        weather,
+        atk_weather,
         terrain,
         reflect,
         lightscreen,
@@ -251,7 +264,7 @@ def _calc_moves(self) -> None:
         gravity=gravity,
     )
     _field_d_rev = smogon_field_to_dict(
-        weather,
+        opp_weather,
         terrain,
         self_reflect,
         self_lightscreen,
@@ -286,9 +299,9 @@ def _calc_moves(self) -> None:
             # Apply type override to the move
             effective_move = move
             pre_resolve_type = effective_move.type_name
-            resolved_type = resolve_effective_move_type(atk, effective_move, tera, weather)
+            resolved_type = resolve_effective_move_type(atk, effective_move, tera, atk_weather)
             resolved_power = effective_move.power
-            if effective_move.name_ja == "ウェザーボール" and resolved_type != "normal":
+            if normalize_move_name(effective_move.name_ja) == normalize_move_name("ウェザーボール") and resolved_type != "normal":
                 resolved_power = 100
             resolved_category = resolve_effective_move_category(
                 atk, effective_move, atk_rank=rank, terastal_type=tera,
@@ -366,7 +379,11 @@ def _calc_moves(self) -> None:
             bridge_forced_type = "dragon"
             bridge_bp_multiplier = 1.2
         weather_ball_active_type = (
-            resolved_type if effective_move is not None and effective_move.name_ja == "ウェザーボール" and resolved_type != "normal" else ""
+            resolved_type
+            if effective_move is not None
+            and normalize_move_name(effective_move.name_ja) == normalize_move_name("ウェザーボール")
+            and resolved_type != "normal"
+            else ""
         )
         if weather_ball_active_type:
             # Smogon Weather Ball ,
@@ -595,16 +612,52 @@ def _calc_moves(self) -> None:
         opp_ac0_result: Optional[tuple[int, int, int, bool]] = None
         opp_ac32_result: Optional[tuple[int, int, int, bool]] = None
         opp_move_info: Optional[MoveInfo] = None
+        opp_effective_move: Optional[MoveInfo] = None
 
         opp_move_name = opp_moves[slot] if slot < len(opp_moves) else ""
         if opp_move_name:
             opp_move_info = self._move_cache.get(opp_move_name) or get_move_by_name_ja(opp_move_name)
             if opp_move_info:
                 self._move_cache[opp_move_name] = opp_move_info
+                opp_effective_move = opp_move_info
+                _opp_def_ac_rank_preview = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
+                _opp_resolved_type = resolve_effective_move_type(
+                    self._def_custom if self._def_custom else PokemonInstance(),
+                    opp_move_info,
+                    def_tera,
+                    opp_weather,
+                )
+                _opp_resolved_category = resolve_effective_move_category(
+                    self._def_custom if self._def_custom else PokemonInstance(),
+                    opp_move_info,
+                    atk_rank=_opp_def_ac_rank_preview,
+                    terastal_type=def_tera,
+                )
+                _opp_resolved_power = opp_move_info.power
+                if (
+                    normalize_move_name(opp_move_info.name_ja) == normalize_move_name("ウェザーボール")
+                    and _opp_resolved_type != "normal"
+                ):
+                    _opp_resolved_power = 100
+                if (
+                    _opp_resolved_type != opp_move_info.type_name
+                    or _opp_resolved_category != opp_move_info.category
+                    or _opp_resolved_power != opp_move_info.power
+                ):
+                    opp_effective_move = dataclasses.replace(
+                        opp_move_info,
+                        type_name=_opp_resolved_type,
+                        category=_opp_resolved_category,
+                        power=_opp_resolved_power,
+                    )
 
-        if self._def_custom and atk.hp > 0 and opp_move_info and opp_move_info.category != "status":
+        if self._def_custom and atk.hp > 0 and opp_effective_move and opp_effective_move.category != "status":
             _opp_species = self._resolve_species_info(self._def_custom, self._def_species_name)
-            _opp_atk_en = ABILITY_JA_TO_EN.get(self._def_custom.ability or "", "") or "No Ability"
+            _opp_atk_en = _ability_name_to_en(
+                self._def_custom.ability if self._def_custom else "",
+                self._def_custom.name_ja if self._def_custom else "",
+                bool(def_tera),
+            ) or "No Ability"
             _opp_item_en = ITEM_FALLBACK_JA_TO_EN.get(self._def_custom.item or "", "")
             if not _opp_item_en:
                 _opp_item_en = get_item_name_en(self._def_custom.item or "")
@@ -615,7 +668,7 @@ def _calc_moves(self) -> None:
                 _opp_species_en or (self._def_custom.name_en or ""),
                 self._def_custom.name_ja or "",
             )
-            _is_opp_phys = opp_move_info.category == "physical" or opp_move_info.name_ja in (
+            _is_opp_phys = opp_effective_move.category == "physical" or opp_effective_move.name_ja in (
                 "サイコショック", "サイコブレイク", "しんぴのつるぎ"
             )
             _opp_best_nat_en = "Adamant" if _is_opp_phys else "Modest"
@@ -646,24 +699,42 @@ def _calc_moves(self) -> None:
                 _opp_skin_bp_mult = 1.2
 
             _opp_aura_wheel_type = ""
-            if (opp_move_info.name_ja == "オーラぐるま"
+            if (normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("オーラぐるま")
                     and self._def_custom
                     and "はらぺこもよう" in (self._def_custom.name_ja or "")):
                 _opp_aura_wheel_type = "dark"
 
-            _mv_d_opp = smogon_move_to_dict(
-                opp_move_info, is_crit=_opp_is_crit,
-                hits=_opp_hits if _opp_hits > 1 else 0,
-                bp_override=_opp_pow_override,
-                forced_type=_opp_aura_wheel_type or _opp_skin_forced_type,
-                bp_multiplier=_opp_skin_bp_mult,
+            _opp_weather_ball_active_type = (
+                opp_effective_move.type_name
+                if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("ウェザーボール")
+                and opp_effective_move.type_name != "normal"
+                else ""
             )
+            if _opp_weather_ball_active_type:
+                _opp_smogon_type = TYPE_TO_SMOGON.get(_opp_weather_ball_active_type, "Normal")
+                _opp_wb_overrides: dict = {
+                    "basePower": 100,
+                    "type": _opp_smogon_type,
+                    "category": "Special",
+                }
+                _mv_d_opp = {"name": "Tackle", "isCrit": _opp_is_crit, "overrides": _opp_wb_overrides}
+            else:
+                _opp_forced_type = _opp_aura_wheel_type or _opp_skin_forced_type
+                if not _opp_forced_type and opp_effective_move.type_name != opp_move_info.type_name:
+                    _opp_forced_type = opp_effective_move.type_name
+                _mv_d_opp = smogon_move_to_dict(
+                    opp_effective_move, is_crit=_opp_is_crit,
+                    hits=_opp_hits if _opp_hits > 1 else 0,
+                    bp_override=_opp_pow_override,
+                    forced_type=_opp_forced_type,
+                    bp_multiplier=_opp_skin_bp_mult,
+                )
 
             _self_types = atk.types or ["normal"]
             _self_ability = atk.ability or ""
-            _opp_effective_type = _opp_aura_wheel_type or _opp_skin_forced_type or opp_move_info.type_name
+            _opp_effective_type = opp_effective_move.type_name
             _opp_type_eff = move_type_effectiveness(
-                opp_move_info, _opp_effective_type, _self_types, _self_ability
+                opp_effective_move, _opp_effective_type, _self_types, _self_ability
             )
 
             def _call_bridge_rev(opp_atk_d: dict) -> tuple[int, int, int, bool]:
@@ -800,29 +871,15 @@ def _calc_moves(self) -> None:
                 _opp_ac32_atk_d["curHP"] = int(_opp_atk_instance.current_hp)
             opp_ac32_result = _call_bridge_rev(_opp_ac32_atk_d)
 
-        opp_sec.setup_move(opp_move_info)
-        if opp_move_info is not None:
+        opp_sec.setup_move(opp_effective_move)
+        if opp_effective_move is not None:
             _atk_types = atk.types or ["normal"]
             _atk_ability = atk.ability or ""
-            _opp_disp_skin_map = {
-                "エレキスキン": "electric", "Galvanize": "electric",
-                "フェアリースキン": "fairy",  "Pixilate": "fairy",
-                "フリーズスキン": "ice",     "Refrigerate": "ice",
-                "スカイスキン": "flying",    "Aerilate": "flying",
-                "ドラゴンスキン": "dragon",  "Dragonize": "dragon",
-                "ノーマルスキン": "normal",  "Normalize": "normal",
-            }
-            _opp_disp_ability = self._def_custom.ability if self._def_custom else ""
-            _opp_disp_eff_type = (
-                _opp_disp_skin_map.get(_opp_disp_ability, "") or opp_move_info.type_name
-                if opp_move_info.type_name == "normal"
-                else opp_move_info.type_name
-            )
-            _opp_eff = move_type_effectiveness(opp_move_info, _opp_disp_eff_type, _atk_types, _atk_ability)
+            _opp_eff = move_type_effectiveness(opp_effective_move, opp_effective_move.type_name, _atk_types, _atk_ability)
             opp_sec.set_effectiveness(_opp_eff)
-            if opp_move_info.category != "status" and self._def_custom and atk.hp > 0:
+            if opp_effective_move.category != "status" and self._def_custom and atk.hp > 0:
                 _opp_move_shared = dict(
-                    weather=weather, terrain=terrain,
+                    weather=opp_weather, terrain=terrain,
                     is_critical=self._opp_crit_btn.isChecked(),
                     has_reflect=self_reflect, has_light_screen=self_lightscreen,
                     helping_hand=opp_helping, steel_spirit=opp_steel_spirit, charged=opp_charged,
@@ -846,7 +903,7 @@ def _calc_moves(self) -> None:
                     is_grounded=is_grounded(_opp_atk_instance),
                 )
                 _opp_notes = get_damage_modifier_notes(
-                    _opp_atk_instance, opp_move_info, atk,
+                    _opp_atk_instance, opp_effective_move, atk,
                     **_opp_move_shared,
                     defender_is_grounded=is_grounded(atk),
                 )

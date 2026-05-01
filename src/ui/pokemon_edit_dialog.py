@@ -40,6 +40,7 @@ from src.data import database as db
 from src.data.item_catalog import get_item_names
 from src.data import zukan_client
 from src.data import pokeapi_client
+from src.data.form_catalog import FORM_POKEAPI_EN
 from src.models import MoveInfo, PokemonInstance, SpeciesInfo
 
 _STAT_LABELS = {
@@ -171,6 +172,7 @@ _POKEAPI_VARIETY_CACHE: dict[int, list[_PokeApiVarietyStats]] = {}
 _FORM_SPECIES_CACHE: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_ABILITY_JA_CACHE: dict[str, str] = {}
 _POKEAPI_POKEMON_ABILITY_CACHE: dict[str, list[str]] = {}
+_SPECIES_ID_BY_NAME_EN_CACHE: dict[str, int] | None = None
 
 # Stats for Mega forms that exist in Smogon calc but NOT in PokeAPI
 # Key: Smogon species name (as returned by smogon_mega_species()).
@@ -517,9 +519,17 @@ def _is_same_species_form_option(base_name: str, entry: zukan_client.ZukanPokemo
         # Mega is a same-species option UNLESS it belongs to an excluded base
         # whose Mega is only accessible from a specific alternate form.
         return base_name not in _MEGA_EXCLUDED_FROM_BASE
-    if any(keyword in text for keyword in _IN_BATTLE_FORM_KEYWORDS):
+    # Battle-only forms are opt-in by explicit allow-list.
+    if _is_in_battle_form_entry(entry):
+        if any(keyword in text for keyword in _IN_BATTLE_FORM_KEYWORDS):
+            return True
+        return base_name in _IN_BATTLE_FORM_BASE_NAMES
+    # Out-of-battle variant forms should generally be selectable.
+    if (entry.sub_name or "").strip():
         return True
-    return base_name in _IN_BATTLE_FORM_BASE_NAMES
+    if (entry.name_ja or "").strip() and (entry.name_ja or "").strip() != (base_name or "").strip():
+        return True
+    return False
 
 
 # Pokémon whose names naturally contain 「」 but are NOT Mega evolutions.
@@ -766,10 +776,19 @@ def _build_form_options_by_base(species_list: list[SpeciesInfo]) -> dict[str, li
             zukan_by_base_no.setdefault(base_no, []).append(entry)
 
     form_options: dict[str, list[FormOption]] = {}
+    base_species_id_by_name: dict[str, int] = {}
     for species in species_list:
+        existing_base_id = base_species_id_by_name.get(species.name_ja)
+        if existing_base_id is not None:
+            # Keep one canonical base entry per Japanese display name.
+            # Form rows (e.g. calyrex-ice/shadow sharing "バドレックス") must not overwrite
+            # the already-built option set for that base name.
+            if species.species_id >= existing_base_id:
+                continue
         # Skip hidden forms
         if pokeapi_client.is_form_hidden(species.species_id, species.name_en):
             continue
+        base_species_id_by_name[species.name_ja] = species.species_id
 
         base_types = tuple(type_name for type_name in [species.type1, species.type2] if type_name)
         base_match = _pick_best_zukan_entry(species, zukan_by_name.get(species.name_ja, []))
@@ -839,6 +858,20 @@ def _safe_float(value: object, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _species_id_for_name_en(name_en: str, fallback_species_id: int) -> int:
+    global _SPECIES_ID_BY_NAME_EN_CACHE
+    key = (name_en or "").strip().lower()
+    if not key:
+        return fallback_species_id
+    if _SPECIES_ID_BY_NAME_EN_CACHE is None:
+        _SPECIES_ID_BY_NAME_EN_CACHE = {}
+        for species_id, _, species_name_en in db.get_all_species_name_entries():
+            cache_key = (species_name_en or "").strip().lower()
+            if cache_key and cache_key not in _SPECIES_ID_BY_NAME_EN_CACHE:
+                _SPECIES_ID_BY_NAME_EN_CACHE[cache_key] = int(species_id)
+    return int(_SPECIES_ID_BY_NAME_EN_CACHE.get(key, fallback_species_id))
 
 
 def _pokeapi_get_json(url: str) -> dict:
@@ -1036,6 +1069,43 @@ def _resolve_form_species_from_pokeapi(base_species: SpeciesInfo, option: FormOp
         _FORM_SPECIES_CACHE[cache_key] = None
         return None
 
+    preferred_form_name_en = ""
+    for key in (
+        option.display_name or "",
+        option.display_name.replace("（", "(").replace("）", ")") if option.display_name else "",
+        option.display_name.replace("(", "（").replace(")", "）") if option.display_name else "",
+    ):
+        mapped = FORM_POKEAPI_EN.get(key, "")
+        if mapped:
+            preferred_form_name_en = mapped
+            break
+
+    if preferred_form_name_en:
+        preferred = next(
+            (row for row in varieties if (row.name_en or "").lower() == preferred_form_name_en.lower()),
+            None,
+        )
+        if preferred:
+            preferred_types = preferred.type_names or tuple(
+                type_name for type_name in [base_species.type1, base_species.type2] if type_name
+            )
+            resolved = SpeciesInfo(
+                species_id=_species_id_for_name_en(preferred.name_en, base_species.species_id),
+                name_ja=option.display_name or base_species.name_ja,
+                name_en=preferred.name_en or base_species.name_en,
+                type1=preferred_types[0] if len(preferred_types) >= 1 else base_species.type1,
+                type2=preferred_types[1] if len(preferred_types) >= 2 else "",
+                base_hp=preferred.base_hp or base_species.base_hp,
+                base_attack=preferred.base_attack or base_species.base_attack,
+                base_defense=preferred.base_defense or base_species.base_defense,
+                base_sp_attack=preferred.base_sp_attack or base_species.base_sp_attack,
+                base_sp_defense=preferred.base_sp_defense or base_species.base_sp_defense,
+                base_speed=preferred.base_speed or base_species.base_speed,
+                weight_kg=preferred.weight_kg if preferred.weight_kg > 0 else (target_weight or base_species.weight_kg),
+            )
+            _FORM_SPECIES_CACHE[cache_key] = resolved
+            return resolved
+
     def score(candidate: _PokeApiVarietyStats) -> tuple[int, int, int, float, int, str]:
         candidate_name = (candidate.name_en or "").lower()
         if is_mega:
@@ -1126,7 +1196,7 @@ def _resolve_form_species_from_pokeapi(base_species: SpeciesInfo, option: FormOp
             return resolved
 
     resolved = SpeciesInfo(
-        species_id=base_species.species_id,
+        species_id=_species_id_for_name_en(chosen.name_en, base_species.species_id),
         name_ja=option.display_name or base_species.name_ja,
         name_en=chosen.name_en or base_species.name_en,
         type1=chosen_types[0] if len(chosen_types) >= 1 else base_species.type1,
@@ -1180,7 +1250,14 @@ def _build_pokemon_picker_entries() -> list[PokemonPickerEntry]:
             fallback_dex = "{:04d}".format(species.species_id)
         display_name = _normalize_picker_display_name(species.name_ja)
         if display_name in added_names:
-            continue
+            fallback_display_name = ""
+            if match:
+                fallback_display_name = _normalize_picker_display_name(
+                    _build_form_display_name(species.name_ja, match)
+                )
+            if not fallback_display_name or fallback_display_name in added_names:
+                continue
+            display_name = fallback_display_name
         result.append(
             PokemonPickerEntry(
                 display_name=display_name,

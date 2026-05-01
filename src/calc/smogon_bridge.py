@@ -581,7 +581,7 @@ def attacker_scenario_dict(
             boosts["atk"] = atk_rank
             boosts["spa"] = atk_rank
         else:
-            boosts["atk" if not is_physical else "spa"] = atk_rank
+            boosts["atk" if is_physical else "spa"] = atk_rank
 
     tera_en = TYPE_TO_SMOGON.get(terastal_type, "")
     result = {
