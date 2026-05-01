@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QDialogButtonBox, QVBoxLayout, QWidget
+from src.ui.ui_utils import make_dialog
 
 if TYPE_CHECKING:
     from src.models import PokemonInstance
@@ -17,7 +18,7 @@ def show_pick_dialog(
 ) -> str | None:
     from src.ui.pokemon_edit_dialog import SuggestComboBox
 
-    dlg = QDialog(parent)
+    dlg = make_dialog(parent)
     dlg.setWindowTitle(title)
     dlg.setMinimumWidth(320)
     lay = QVBoxLayout(dlg)
