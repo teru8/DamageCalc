@@ -337,7 +337,8 @@ def _build_box_side_panel(self) -> QWidget:
 
 def _build_options_dialog(self) -> None:
     _bootstrap()
-    self._options_dialog = QDialog(self)
+    from src.ui.ui_utils import make_dialog
+    self._options_dialog = make_dialog(self)
     self._options_dialog.setWindowTitle("オプション")
     self._options_dialog.setModal(False)
     self._options_dialog.setMinimumSize(760, 600)
@@ -481,6 +482,8 @@ def _open_options_dialog(self) -> None:
         self._option_detailed_log_cb.blockSignals(True)
         self._option_detailed_log_cb.setChecked(self._detailed_log_enabled)
         self._option_detailed_log_cb.blockSignals(False)
+    on_top = bool(self.windowFlags() & Qt.WindowStaysOnTopHint)
+    self._options_dialog.setWindowFlag(Qt.WindowStaysOnTopHint, on_top)
     self._options_dialog.show()
     self._options_dialog.raise_()
     self._options_dialog.activateWindow()
@@ -589,7 +592,8 @@ def _show_usage_password_dialog(self) -> None:
 
 def _show_usage_fetch_dialog(self) -> None:
     _bootstrap()
-    dlg = QDialog(self)
+    from src.ui.ui_utils import make_dialog
+    dlg = make_dialog(self)
     dlg.setWindowTitle("使用率取得設定")
     dlg.setMinimumWidth(400)
     
@@ -767,6 +771,10 @@ def _toggle_topmost(self, checked: bool) -> None:
     _bootstrap()
     self.setWindowFlag(Qt.WindowStaysOnTopHint, checked)
     self.show()
+    if self._options_dialog:
+        self._options_dialog.setWindowFlag(Qt.WindowStaysOnTopHint, checked)
+        if self._options_dialog.isVisible():
+            self._options_dialog.show()
 
 
 
