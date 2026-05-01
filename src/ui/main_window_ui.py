@@ -769,12 +769,25 @@ def _set_auto_detect_enabled(self, enabled: bool) -> None:
 
 def _toggle_topmost(self, checked: bool) -> None:
     _bootstrap()
+    options_was_visible = bool(self._options_dialog and self._options_dialog.isVisible())
+    options_pos = self._options_dialog.pos() if self._options_dialog else None
     self.setWindowFlag(Qt.WindowStaysOnTopHint, checked)
     self.show()
     if self._options_dialog:
         self._options_dialog.setWindowFlag(Qt.WindowStaysOnTopHint, checked)
-        if self._options_dialog.isVisible():
+        if options_was_visible:
+            if options_pos is not None:
+                self._options_dialog.move(options_pos)
             self._options_dialog.show()
+            # setWindowFlag can reorder windows on Windows; restore front order
+            # after Qt flushes native window updates.
+            QTimer.singleShot(
+                0,
+                lambda: (
+                    self._options_dialog.raise_(),
+                    self._options_dialog.activateWindow(),
+                ),
+            )
 
 
 
