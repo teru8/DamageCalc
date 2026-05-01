@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 def _bootstrap() -> None:
-    from src.ui import main_window as _mw
+    from src.ui import main_window_deps as _mw
     globals().update(_mw.__dict__)
 
 def _get_usage_scraper_symbols(self):

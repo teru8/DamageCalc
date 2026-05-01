@@ -53,6 +53,7 @@ def _resolve_bridge_js() -> Path:
     return Path(__file__).resolve().parent / "bridge.js"
 
 _BRIDGE_JS = _resolve_bridge_js()
+_BRIDGE_READ_TIMEOUT_SECONDS = 5.0
 
 def _item_name_to_en(item_name_ja: str) -> str:
     name = (item_name_ja or "").strip()
@@ -389,6 +390,35 @@ class SmogonBridge:
             if line:
                 logging.warning("smogon-bridge stderr: %s", line)
 
+    def _readline_with_timeout(self, timeout_seconds: float) -> str:
+        if self._proc is None or self._proc.stdout is None:
+            raise RuntimeError("smogon bridge process is not started")
+
+        line_holder: dict[str, str] = {}
+        error_holder: dict[str, BaseException] = {}
+        done = threading.Event()
+
+        def _reader() -> None:
+            try:
+                line_holder["line"] = self._proc.stdout.readline()
+            except BaseException as exc:  # pragma: no cover - defensive IO guard
+                error_holder["error"] = exc
+            finally:
+                done.set()
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+        if not done.wait(timeout_seconds):
+            self.close()
+            raise TimeoutError(
+                "smogon bridge response timeout ({:.1f}s)".format(timeout_seconds)
+            )
+
+        error = error_holder.get("error")
+        if error is not None:
+            raise error
+        return line_holder.get("line", "")
+
     def _send(self, req: dict) -> dict:
         if self._proc is None or self._proc.poll() is not None:
             self._start()
@@ -396,7 +426,7 @@ class SmogonBridge:
         with self._io_lock:
             self._proc.stdin.write(payload)
             self._proc.stdin.flush()
-            line = self._proc.stdout.readline()
+            line = self._readline_with_timeout(_BRIDGE_READ_TIMEOUT_SECONDS)
         if not line:
             return {"min": 0, "max": 0, "error": "bridge closed"}
         return json.loads(line)
@@ -413,6 +443,7 @@ class SmogonBridge:
             ConnectionError,
             json.JSONDecodeError,
             OSError,
+            TimeoutError,
             TypeError,
             ValueError,
         ) as e:

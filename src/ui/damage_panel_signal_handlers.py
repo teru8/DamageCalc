@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 def _bootstrap() -> None:
-    from src.ui import damage_panel as _dp
+    from src.ui import damage_panel_deps as _dp
     globals().update(_dp.__dict__)
 
 def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
@@ -486,22 +486,12 @@ def _change_def_item(self) -> None:
 
 def _on_form_change_atk(self) -> None:
     _bootstrap()
-    from src.data.database import get_abilities_by_usage, get_species_by_name_ja
-    from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
+    from src.data.database import get_abilities_by_usage
 
     def _fallback_original_ability(current_ability: str, canon_name: str) -> str:
-        species = get_species_by_name_ja(canon_name)
-        candidates: list[str] = []
-        if species and species.name_en:
-            candidates = _pokeapi_ability_names_for_pokemon(species.name_en or "")
-        if current_ability and current_ability in candidates:
-            return current_ability
         ranked = get_abilities_by_usage(canon_name)
-        if candidates:
-            for ability in ranked:
-                if ability in candidates:
-                    return ability
-            return candidates[0]
+        if current_ability and current_ability in ranked:
+            return current_ability
         return ranked[0] if ranked else ""
 
     if not self._atk:
@@ -536,22 +526,12 @@ def _on_form_change_atk(self) -> None:
 
 def _on_form_change_def(self) -> None:
     _bootstrap()
-    from src.data.database import get_abilities_by_usage, get_species_by_name_ja
-    from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
+    from src.data.database import get_abilities_by_usage
 
     def _fallback_original_ability(current_ability: str, canon_name: str) -> str:
-        species = get_species_by_name_ja(canon_name)
-        candidates: list[str] = []
-        if species and species.name_en:
-            candidates = _pokeapi_ability_names_for_pokemon(species.name_en or "")
-        if current_ability and current_ability in candidates:
-            return current_ability
         ranked = get_abilities_by_usage(canon_name)
-        if candidates:
-            for ability in ranked:
-                if ability in candidates:
-                    return ability
-            return candidates[0]
+        if current_ability and current_ability in ranked:
+            return current_ability
         return ranked[0] if ranked else ""
 
     if not self._def_custom:

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 APP_NAME = "DamageCalc"
-APP_VERSION = "0.1.1-alpha"
+APP_VERSION = "0.1.2-alpha"
 APP_USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 
 
