@@ -33,6 +33,7 @@ pnpm-debug.log*
 # Logs
 *.log
 usage_scraper.log
+logs/
 
 # Test / lint / type-check caches
 .pytest_cache/

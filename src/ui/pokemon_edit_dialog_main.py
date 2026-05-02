@@ -27,8 +27,7 @@ class PokemonEditDialog(QDialog):
         self._pane_tooltip_shown: bool = False
         self._current_nature = "がんばりや"
         self._selected_moves = ["", "", "", ""]
-        self._species_list = db.get_all_species()
-        self._form_options_by_base = _build_form_options_by_base(self._species_list)
+        self._form_options_by_base = _build_form_options_by_base()
         self._current_form_options: list[FormOption] = []
         self._picker_entries = _build_pokemon_picker_entries()
         self._picker_entry_map = {entry.display_name: entry for entry in self._picker_entries}
@@ -41,6 +40,8 @@ class PokemonEditDialog(QDialog):
             for name in _unique(canonical_names)
             if name and name not in _REGION_PREFIX_TO_SUB.values() and name not in ("オスのすがた", "メスのすがた", "ロトムのすがた")
         ]
+        _usage_name_set = {entry.display_name for entry in self._picker_entries if entry.usage_rank}
+        self._usage_species_names = [name for name in self._all_species_names if name in _usage_name_set]
         self._all_abilities = sorted(_unique(list(ABILITIES_JA)))
         self._all_items = sorted(_unique(list(ITEMS_JA)))
         fallback_only_items = [name for name in get_item_names() if name not in set(self._all_items)]
@@ -78,7 +79,11 @@ class PokemonEditDialog(QDialog):
 
         basic_box = QGroupBox("基本")
         basic_form = QFormLayout(basic_box)
-        self.name_combo = SuggestComboBox([""] + self._all_species_names)
+        self.name_combo = SuggestComboBox(parent=self)
+        self.name_combo.set_items(
+            [""] + self._usage_species_names,
+            completer_items=[""] + self._all_species_names,
+        )
         self.name_combo.setPlaceholderText("名前を入力または選択")
         basic_form.addRow("名前:", self.name_combo)
 
@@ -282,7 +287,10 @@ class PokemonEditDialog(QDialog):
         main_layout.addWidget(right_pane, 1)
 
         self.name_combo.currentTextChanged.connect(self._on_name_changed)
-        self.name_combo.currentTextChanged.connect(lambda _: self._pane_refresh_list())
+        self.name_combo.lineEdit().returnPressed.connect(self._pane_refresh_list)
+        self.name_combo.activated.connect(lambda _: self._pane_refresh_list())
+        if self.name_combo.completer():
+            self.name_combo.completer().activated.connect(lambda _: self._pane_refresh_list())
         self.name_combo.lineEdit().textEdited.connect(self._on_name_manually_edited)
         self._pane_list.installEventFilter(self)
         self._set_nature("がんばりや", recalc=False)
@@ -403,6 +411,8 @@ class PokemonEditDialog(QDialog):
 
         filtered: list[PokemonPickerEntry] = []
         for entry in self._picker_entries:
+            if not keyword and not entry.usage_rank:
+                continue
             if keyword:
                 lowered = _normalize_kana(keyword.lower())
                 if not (

@@ -338,6 +338,11 @@ _JA_FORM_KEYWORD_MAP: list[tuple[str, str]] = [
     ("パルデアのすがた", "Paldea"),
     ("パルデア", "Paldea"),
     ("キョダイマックスのすがた", "Gigantamax"),
+    ("ブレードフォルム", "Blade"),
+    ("たいようのすがた", "Sunny"),
+    ("あまみずのすがた", "Rainy"),
+    ("ゆきぐものすがた", "Snowy"),
+    ("えいえんのはな", "Eternal"),
 ]
 
 
