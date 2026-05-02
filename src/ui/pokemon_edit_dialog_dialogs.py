@@ -282,6 +282,8 @@ class PokemonSelectDialog(QDialog):
 
         filtered: list[PokemonPickerEntry] = []
         for entry in self._entries:
+            if not keyword and not entry.usage_rank:
+                continue
             if not self._matches_keyword(entry, keyword):
                 continue
             if self._type_filters and not self._type_filters.issubset(set(entry.type_names)):

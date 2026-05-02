@@ -123,8 +123,65 @@ def _pane_format_item_text(entry: PokemonPickerEntry) -> str:
     return "{}\nNo.{}   {}   {}".format(name, dex, type_text, usage_text)
 
 
+# Sorted longest-first so greedy matching picks "shi" before "si", etc.
+_ROMAJI_TO_HIRA: list[tuple[str, str]] = sorted([
+    ("sha", "しゃ"), ("shi", "し"), ("shu", "しゅ"), ("she", "しぇ"), ("sho", "しょ"),
+    ("chi", "ち"), ("cha", "ちゃ"), ("chu", "ちゅ"), ("che", "ちぇ"), ("cho", "ちょ"),
+    ("tsu", "つ"), ("tchi", "っち"), ("cchi", "っち"), ("ssh", "っし"),
+    ("kka", "っか"), ("kki", "っき"), ("kku", "っく"), ("kke", "っけ"), ("kko", "っこ"),
+    ("ssa", "っさ"), ("ssi", "っし"), ("ssu", "っす"), ("sse", "っせ"), ("sso", "っそ"),
+    ("tta", "った"), ("tte", "って"), ("tto", "っと"),
+    ("ppa", "っぱ"), ("ppi", "っぴ"), ("ppu", "っぷ"), ("ppe", "っぺ"), ("ppo", "っぽ"),
+    ("bba", "っば"), ("bbi", "っび"), ("bbu", "っぶ"), ("bbe", "っべ"), ("bbo", "っぼ"),
+    ("dda", "っだ"), ("dde", "っで"), ("ddo", "っど"),
+    ("ka", "か"), ("ki", "き"), ("ku", "く"), ("ke", "け"), ("ko", "こ"),
+    ("sa", "さ"), ("si", "し"), ("su", "す"), ("se", "せ"), ("so", "そ"),
+    ("ta", "た"), ("ti", "ち"), ("tu", "つ"), ("te", "て"), ("to", "と"),
+    ("na", "な"), ("ni", "に"), ("nu", "ぬ"), ("ne", "ね"), ("no", "の"),
+    ("ha", "は"), ("hi", "ひ"), ("hu", "ふ"), ("he", "へ"), ("ho", "ほ"),
+    ("fu", "ふ"), ("fa", "ふぁ"), ("fi", "ふぃ"), ("fe", "ふぇ"), ("fo", "ふぉ"),
+    ("ma", "ま"), ("mi", "み"), ("mu", "む"), ("me", "め"), ("mo", "も"),
+    ("ya", "や"), ("yu", "ゆ"), ("yo", "よ"),
+    ("ra", "ら"), ("ri", "り"), ("ru", "る"), ("re", "れ"), ("ro", "ろ"),
+    ("wa", "わ"), ("wo", "を"),
+    ("ga", "が"), ("gi", "ぎ"), ("gu", "ぐ"), ("ge", "げ"), ("go", "ご"),
+    ("za", "ざ"), ("zi", "じ"), ("zu", "ず"), ("ze", "ぜ"), ("zo", "ぞ"),
+    ("da", "だ"), ("di", "ぢ"), ("du", "づ"), ("de", "で"), ("do", "ど"),
+    ("ba", "ば"), ("bi", "び"), ("bu", "ぶ"), ("be", "べ"), ("bo", "ぼ"),
+    ("pa", "ぱ"), ("pi", "ぴ"), ("pu", "ぷ"), ("pe", "ぺ"), ("po", "ぽ"),
+    ("ja", "じゃ"), ("ji", "じ"), ("ju", "じゅ"), ("jo", "じょ"),
+    ("a", "あ"), ("i", "い"), ("u", "う"), ("e", "え"), ("o", "お"),
+    ("n", "ん"),
+], key=lambda x: -len(x[0]))
+
+
+def _romaji_to_hiragana(text: str) -> str:
+    result: list[str] = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        # double consonant → っ (skip one copy, next iteration converts remainder)
+        if c.isalpha() and c != "n" and i + 1 < len(text) and text[i + 1] == c:
+            result.append("っ")
+            i += 1
+            continue
+        matched = False
+        for romaji, hira in _ROMAJI_TO_HIRA:
+            if text[i: i + len(romaji)] == romaji:
+                result.append(hira)
+                i += len(romaji)
+                matched = True
+                break
+        if not matched:
+            result.append(c)
+            i += 1
+    return "".join(result)
+
+
 def _normalize_kana(text: str) -> str:
-    """カタカナをひらがなに変換してカナ区別なし比較を可能にする。"""
+    """カタカナ・ローマ字をひらがなに変換して区別なし比較を可能にする。"""
+    if text and all(c.isascii() for c in text if not c.isspace()):
+        text = _romaji_to_hiragana(text)
     return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ン" else c for c in text)
 
 
@@ -765,7 +822,14 @@ def _build_form_display_name(base_name: str, entry: zukan_client.ZukanPokemonEnt
     return "{} ({})".format(base_name, entry.dex_no)
 
 
-def _build_form_options_by_base(species_list: list[SpeciesInfo]) -> dict[str, list[FormOption]]:
+_FORM_OPTIONS_CACHE: dict[str, list[FormOption]] | None = None
+
+
+def _build_form_options_by_base(_unused: list[SpeciesInfo] | None = None) -> dict[str, list[FormOption]]:
+    global _FORM_OPTIONS_CACHE
+    if _FORM_OPTIONS_CACHE is not None:
+        return _FORM_OPTIONS_CACHE
+    species_list = db.get_all_species()
     zukan_entries = zukan_client.get_pokemon_index()
     zukan_by_name: dict[str, list[zukan_client.ZukanPokemonEntry]] = {}
     zukan_by_base_no: dict[str, list[zukan_client.ZukanPokemonEntry]] = {}
@@ -843,6 +907,7 @@ def _build_form_options_by_base(species_list: list[SpeciesInfo]) -> dict[str, li
                 )
             )
         form_options[species.name_ja] = variants
+    _FORM_OPTIONS_CACHE = form_options
     return form_options
 
 
@@ -1213,7 +1278,13 @@ def _resolve_form_species_from_pokeapi(base_species: SpeciesInfo, option: FormOp
     return resolved
 
 
+_PICKER_ENTRIES_CACHE: list[PokemonPickerEntry] | None = None
+
+
 def _build_pokemon_picker_entries() -> list[PokemonPickerEntry]:
+    global _PICKER_ENTRIES_CACHE
+    if _PICKER_ENTRIES_CACHE is not None:
+        return _PICKER_ENTRIES_CACHE
     usage_ranks = db.get_species_usage_rank_map()
     species_list = db.get_all_species()
 
@@ -1332,6 +1403,7 @@ def _build_pokemon_picker_entries() -> list[PokemonPickerEntry]:
         )
         added_names.add(display_name)
 
+    _PICKER_ENTRIES_CACHE = result
     return result
 
 
@@ -1388,7 +1460,7 @@ class SuggestComboBox(ArrowComboBox):
         completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         completer.setMaxVisibleItems(20)
         self.setCompleter(completer)
-        self.lineEdit().textEdited.connect(lambda text, p=proxy, c=completer: (p.set_filter_pattern(text), c.complete() if text else None))
+        self.lineEdit().textEdited.connect(lambda text, p=proxy: p.set_filter_pattern(text))
 
     def set_items(
         self,

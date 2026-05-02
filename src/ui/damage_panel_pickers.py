@@ -15,6 +15,7 @@ def show_pick_dialog(
     separator_after: int | None,
     current: str,
     parent: QWidget,
+    completer_items: list[str] | None = None,
 ) -> str | None:
     from src.ui.pokemon_edit_dialog import SuggestComboBox
 
@@ -23,7 +24,7 @@ def show_pick_dialog(
     dlg.setMinimumWidth(320)
     lay = QVBoxLayout(dlg)
     combo = SuggestComboBox(parent=dlg)
-    combo.set_items(items, preserve_text=False, separator_after=separator_after)
+    combo.set_items(items, preserve_text=False, separator_after=separator_after, completer_items=completer_items)
     combo.set_text(current)
     lay.addWidget(combo)
     btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -38,11 +39,14 @@ def show_pick_dialog(
 def pick_ability(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
     from src.constants import ABILITIES_JA
     from src.data import database as db
+    from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
     from src.ui.pokemon_edit_dialog import _build_ranked_options, _unique
 
     all_abilities = sorted(_unique(list(ABILITIES_JA)))
     usage_name = pokemon.usage_name or pokemon.name_ja
-    ranked = _unique(db.get_abilities_by_usage(usage_name) if usage_name else [])
+    species_abilities = _pokeapi_ability_names_for_pokemon(pokemon.name_en) if pokemon.name_en else []
+    usage_abilities = db.get_abilities_by_usage(usage_name) if usage_name else []
+    ranked = _unique(species_abilities + usage_abilities)
     items, sep = _build_ranked_options(ranked, all_abilities)
     return show_pick_dialog("特性を選択", items, sep, pokemon.ability or "", parent)
 
@@ -53,8 +57,9 @@ def pick_item(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
     from src.data.item_catalog import get_item_names
     from src.ui.pokemon_edit_dialog import _build_ranked_options, _unique
 
-    all_items = sorted(_unique(list(ITEMS_JA) + get_item_names()))
+    list_items = sorted(_unique(list(ITEMS_JA)))
+    completer_items = sorted(_unique(list(ITEMS_JA) + get_item_names()))
     usage_name = pokemon.usage_name or pokemon.name_ja
     ranked = _unique(db.get_items_by_usage(usage_name) if usage_name else [])
-    items, sep = _build_ranked_options(ranked, all_items)
-    return show_pick_dialog("持ち物を選択", items, sep, pokemon.item or "", parent)
+    items, sep = _build_ranked_options(ranked, list_items)
+    return show_pick_dialog("持ち物を選択", items, sep, pokemon.item or "", parent, completer_items=completer_items)
