@@ -484,7 +484,12 @@ class PokemonEditDialog(QDialog):
         # is_new_entry
         self._auto_template_key = ""
         self._is_new_entry = True
+        # Apply selection deterministically instead of relying on signal emission
+        # from setCurrentIndex/setEditText for same-text cases.
+        self.name_combo.blockSignals(True)
         self.name_combo.set_text(display_name)
+        self.name_combo.blockSignals(False)
+        self._on_name_changed(display_name)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._pane_list and event.type() == QEvent.ToolTip:
@@ -508,11 +513,16 @@ class PokemonEditDialog(QDialog):
         for base_name, options in self._form_options_by_base.items():
             if any(option.display_name == name for option in options):
                 return base_name
+        normalized = _normalize_picker_display_name(name)
+        if normalized != name:
+            for base_name, options in self._form_options_by_base.items():
+                if any(_normalize_picker_display_name(option.display_name) == normalized for option in options):
+                    return base_name
         entry = self._picker_entry_map.get(name)
         if entry:
             return entry.species_lookup_name
         # Try normalized display name (e.g. ♀ → () display) to find picker entry
-        normalized_display = _normalize_picker_display_name(name)
+        normalized_display = normalized
         if normalized_display != name:
             entry2 = self._picker_entry_map.get(normalized_display)
             if entry2:
@@ -566,8 +576,12 @@ class PokemonEditDialog(QDialog):
         index = 0
         effective_display = preferred_display_name or self.name_combo.current_text_stripped()
         if effective_display and options:
+            normalized_effective = _normalize_picker_display_name(effective_display)
             for idx, option in enumerate(options):
-                if option.display_name == effective_display:
+                if (
+                    option.display_name == effective_display
+                    or _normalize_picker_display_name(option.display_name) == normalized_effective
+                ):
                     index = idx
                     break
             else:

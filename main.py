@@ -40,7 +40,7 @@ def _configure_runtime_paths() -> None:
 
 
 def _error_log_path() -> Path:
-    base = Path.home() / ".damage_calc"
+    base = Path.home() / ".pokemon_damage_calc"
     base.mkdir(parents=True, exist_ok=True)
     return base / "error.log"
 
