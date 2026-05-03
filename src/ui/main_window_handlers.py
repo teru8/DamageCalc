@@ -74,9 +74,12 @@ def _on_webhook_url_changed(self) -> None:
 
 def _start_background_tasks(self) -> None:
     _bootstrap()
-    self._ocr_thread = OcrInitThread(use_gpu=False)
-    self._ocr_thread.finished.connect(self._on_ocr_ready)
-    self._ocr_thread.start()
+    # 既に起動中の OCR スレッドがある場合は多重起動しない
+    existing: "OcrInitThread | None" = getattr(self, "_ocr_thread", None)
+    if existing is None or not existing.isRunning():
+        self._ocr_thread = OcrInitThread(use_gpu=False)
+        self._ocr_thread.finished.connect(self._on_ocr_ready)
+        self._ocr_thread.start()
 
     settings = self._load_settings()
     if settings.get("sample_party_applied"):
@@ -133,7 +136,7 @@ def _fetch_usage_data(self) -> None:
         QMessageBox.information(
             self,
             "使用率取得は利用不可",
-            "usage_scraper が見つからないため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
+            "usage_scraper の読み込みに失敗したため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
         )
         return
     source = self._option_source_combo.currentData() if self._option_source_combo else usage_default
@@ -172,26 +175,36 @@ def _refresh_cameras(self) -> None:
 
 def _toggle_camera(self) -> None:
     _bootstrap()
-    if self._video_thread and self._video_thread.isRunning():
-        self._stop_live_battle_tracking(show_message=False, write_log=False)
-        self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
-        self._video_thread.stop()
-        self._video_thread = None
-        self._connect_btn.setText("接続")
-        self._preview_lbl.setText("カメラ未接続")
-        self._log("カメラ切断")
-        return
+    # 二重クリック防止: 処理中はボタンを無効化し、終了時に必ず再有効化する
+    self._connect_btn.setEnabled(False)
+    try:
+        if self._video_thread and self._video_thread.isRunning():
+            self._stop_live_battle_tracking(show_message=False, write_log=False)
+            self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
+            self._video_thread.stop()
+            self._video_thread = None
+            self._connect_btn.setText("接続")
+            self._preview_lbl.setText("カメラ未接続")
+            self._log("カメラ切断")
+            return
 
-    idx = self._cam_combo.currentData()
-    if idx is None or idx < 0:
-        return
+        # 参照は残っているが停止済みの thread を確実にクリーンアップ
+        if self._video_thread is not None:
+            self._video_thread.stop()
+            self._video_thread = None
 
-    self._video_thread = VideoThread(idx)
-    self._video_thread.frame_ready.connect(self._on_frame)
-    self._video_thread.start()
-    self._connect_btn.setText("切断")
-    self._log("カメラ接続: インデックス {}".format(idx))
-    self._save_settings(last_camera_index=idx)
+        idx = self._cam_combo.currentData()
+        if idx is None or idx < 0:
+            return
+
+        self._video_thread = VideoThread(idx)
+        self._video_thread.frame_ready.connect(self._on_frame)
+        self._video_thread.start()
+        self._connect_btn.setText("切断")
+        self._log("カメラ接続: インデックス {}".format(idx))
+        self._save_settings(last_camera_index=idx)
+    finally:
+        self._connect_btn.setEnabled(True)
 
 
 
@@ -247,7 +260,7 @@ def _fetch_usage_data_with_source(self, season: str, source: str) -> None:
         QMessageBox.information(
             self,
             "使用率取得は利用不可",
-            "usage_scraper が見つからないため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
+            "usage_scraper の読み込みに失敗したため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
         )
         return
     status = db.get_local_data_status(season)
