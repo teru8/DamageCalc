@@ -688,53 +688,17 @@ def _calc_moves(self) -> None:
             _opp_pow_override = opp_sec.power_override()
             _opp_hits = opp_sec.hit_count()
 
-            _opp_skin_map = {
-                "エレキスキン": "electric", "Galvanize": "electric",
-                "フェアリースキン": "fairy",  "Pixilate": "fairy",
-                "フリーズスキン": "ice",     "Refrigerate": "ice",
-                "スカイスキン": "flying",    "Aerilate": "flying",
-                "ドラゴンスキン": "dragon",  "Dragonize": "dragon",
-                "ノーマルスキン": "normal",  "Normalize": "normal",
-            }
             _opp_ability_for_skin = self._def_custom.ability if self._def_custom else ""
-            _opp_skin_type = _opp_skin_map.get(_opp_ability_for_skin, "")
-            _opp_skin_forced_type = ""
-            _opp_skin_bp_mult = 1.0
-            if _opp_skin_type and opp_move_info.type_name == "normal":
-                _opp_skin_forced_type = _opp_skin_type
-                _opp_skin_bp_mult = 1.2
-
-            _opp_aura_wheel_type = ""
-            if (normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("オーラぐるま")
-                    and self._def_custom
-                    and "はらぺこもよう" in (self._def_custom.name_ja or "")):
-                _opp_aura_wheel_type = "dark"
-
-            _opp_weather_ball_active_type = (
-                opp_effective_move.type_name
-                if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("ウェザーボール")
-                and opp_effective_move.type_name != "normal"
-                else ""
+            _opp_defender_name_ja = self._def_custom.name_ja if self._def_custom else ""
+            _mv_d_opp = _calc.build_opponent_move_dict(
+                opp_effective_move,
+                opp_move_info,
+                _opp_ability_for_skin,
+                _opp_defender_name_ja,
+                _opp_is_crit,
+                _opp_hits,
+                _opp_pow_override,
             )
-            if _opp_weather_ball_active_type:
-                _opp_smogon_type = TYPE_TO_SMOGON.get(_opp_weather_ball_active_type, "Normal")
-                _opp_wb_overrides: dict = {
-                    "basePower": 100,
-                    "type": _opp_smogon_type,
-                    "category": "Special",
-                }
-                _mv_d_opp = {"name": "Tackle", "isCrit": _opp_is_crit, "overrides": _opp_wb_overrides}
-            else:
-                _opp_forced_type = _opp_aura_wheel_type or _opp_skin_forced_type
-                if not _opp_forced_type and opp_effective_move.type_name != opp_move_info.type_name:
-                    _opp_forced_type = opp_effective_move.type_name
-                _mv_d_opp = smogon_move_to_dict(
-                    opp_effective_move, is_crit=_opp_is_crit,
-                    hits=_opp_hits if _opp_hits > 1 else 0,
-                    bp_override=_opp_pow_override,
-                    forced_type=_opp_forced_type,
-                    bp_multiplier=_opp_skin_bp_mult,
-                )
 
             _self_types = atk.types or ["normal"]
             _self_ability = atk.ability or ""

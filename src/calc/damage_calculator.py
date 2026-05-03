@@ -292,6 +292,69 @@ class DamageCalculator:
         )
 
     @staticmethod
+    def build_opponent_move_dict(
+        opp_effective_move: MoveInfo,
+        opp_move_info: MoveInfo,
+        defender_ability: str,
+        defender_name_ja: str,
+        is_crit: bool,
+        hits: int,
+        pow_override: int,
+    ) -> dict:
+        """Build smogon move dict for the opponent's move (defender→attacker direction)."""
+        from src.calc.smogon_bridge import move_to_dict, TYPE_TO_SMOGON
+        from src.calc.calc_utils import normalize_move_name
+
+        _SKIN_MAP = {
+            "エレキスキン": "electric", "Galvanize": "electric",
+            "フェアリースキン": "fairy",  "Pixilate": "fairy",
+            "フリーズスキン": "ice",     "Refrigerate": "ice",
+            "スカイスキン": "flying",    "Aerilate": "flying",
+            "ドラゴンスキン": "dragon",  "Dragonize": "dragon",
+            "ノーマルスキン": "normal",  "Normalize": "normal",
+        }
+        skin_type = _SKIN_MAP.get(defender_ability, "")
+        skin_forced_type = ""
+        skin_bp_mult = 1.0
+        if skin_type and opp_move_info.type_name == "normal":
+            skin_forced_type = skin_type
+            skin_bp_mult = 1.2
+
+        aura_wheel_type = ""
+        if (
+            normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("オーラぐるま")
+            and "はらぺこもよう" in (defender_name_ja or "")
+        ):
+            aura_wheel_type = "dark"
+
+        weather_ball_active_type = (
+            opp_effective_move.type_name
+            if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("ウェザーボール")
+            and opp_effective_move.type_name != "normal"
+            else ""
+        )
+        if weather_ball_active_type:
+            smogon_type = TYPE_TO_SMOGON.get(weather_ball_active_type, "Normal")
+            return {
+                "name": "Tackle",
+                "isCrit": is_crit,
+                "overrides": {"basePower": 100, "type": smogon_type, "category": "Special"},
+            }
+
+        forced_type = aura_wheel_type or skin_forced_type
+        if not forced_type and opp_effective_move.type_name != opp_move_info.type_name:
+            forced_type = opp_effective_move.type_name
+
+        return move_to_dict(
+            opp_effective_move,
+            is_crit=is_crit,
+            hits=hits if hits > 1 else 0,
+            bp_override=pow_override,
+            forced_type=forced_type,
+            bp_multiplier=skin_bp_mult,
+        )
+
+    @staticmethod
     def adjust_attacker_dict_for_move(
         atk_d: dict,
         effective_move: MoveInfo,
