@@ -278,53 +278,61 @@ class DamagePanel(QWidget):
     def defender_side(self) -> str:
         return "my" if self._party_source == "opp" else "opp"
 
-    def _sync_attacker_ability_support_buttons(self) -> None:
-        if not hasattr(self, "_attacker_ability_cond_btns"):
-            return
-        ability = (self._atk.ability if self._atk else "").strip()
-        show_map = {
-            "しんりょく": ability in ("しんりょく", "Overgrow"),
-            "もうか": ability in ("もうか", "Blaze"),
-            "げきりゅう": ability in ("げきりゅう", "Torrent"),
-            "むしのしらせ": ability in ("むしのしらせ", "Swarm"),
-            "どくぼうそう": ability in ("どくぼうそう", "Toxic Boost"),
-        }
-        for key, btn in self._attacker_ability_cond_btns.items():
+    # ── Ability combo shared style constants ─────────────────────────────
+    _ABILITY_COMBO_STYLE_ACTIVE = (
+        "QComboBox{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
+        "border-radius:4px;padding:4px 8px;font-size:14px;font-weight:bold;}"
+        "QComboBox::drop-down{border:none;}"
+        "QComboBox::down-arrow{image:none;width:0;height:0;}"
+        "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;"
+        "selection-background-color:#f9e2af;selection-color:#3a3218;}"
+    )
+    _ABILITY_COMBO_STYLE_INACTIVE = (
+        "QComboBox{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
+        "border-radius:4px;padding:4px 8px;font-size:14px;}"
+        "QComboBox::drop-down{border:none;}"
+        "QComboBox::down-arrow{image:none;width:0;height:0;}"
+        "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;"
+        "selection-background-color:#f9e2af;selection-color:#3a3218;}"
+    )
+
+    def _refresh_ability_combo(self, combo: QComboBox) -> None:
+        """コンボボックスのスタイルを選択状態に合わせて更新し、再計算を実行する。"""
+        self.recalculate()
+        style = (
+            self._ABILITY_COMBO_STYLE_ACTIVE
+            if combo.currentIndex() > 0
+            else self._ABILITY_COMBO_STYLE_INACTIVE
+        )
+        combo.setStyleSheet(style)
+
+    def _refresh_supreme_combo(self) -> None:
+        self._refresh_ability_combo(self._supreme_combo)
+
+    def _refresh_rivalry_combo(self) -> None:
+        self._refresh_ability_combo(self._rivalry_combo)
+
+    def _refresh_opp_rivalry_combo(self) -> None:
+        self._refresh_ability_combo(self._opp_rivalry_combo)
+
+    def _refresh_opp_supreme_combo(self) -> None:
+        self._refresh_ability_combo(self._opp_supreme_combo)
+
+    def _update_cond_btn_visibility(
+        self,
+        btns: dict,
+        show_map: dict[str, bool],
+        *,
+        auto_check_on_show: bool = False,
+    ) -> None:
+        """能力条件ボタン群の表示/非表示と選択状態をまとめて更新する。
+
+        auto_check_on_show=True の場合、非表示→表示に変わったボタンを自動でオンにする（守備側のフルHP特性用）。
+        False の場合、非表示になるボタンはオフにする（攻撃/守備の通常ボタン用）。
+        """
+        for key, btn in btns.items():
             show = show_map.get(key, False)
-            if not show and btn.isChecked():
-                btn.blockSignals(True)
-                btn.setChecked(False)
-                btn.blockSignals(False)
-                btn._refresh()
-            btn.setVisible(show)
-
-        trigger_show_map = {
-            "はりこみ": ability in ("はりこみ", "Stakeout"),
-            "もらいび": ability in ("もらいび", "Flash Fire"),
-            "こだいかっせい": ability in ("こだいかっせい", "Protosynthesis"),
-            "クォークチャージ": ability in ("クォークチャージ", "Quark Drive"),
-            "アナライズ": ability in ("アナライズ", "Analytic"),
-            "ねつぼうそう": ability in ("ねつぼうそう", "Flare Boost"),
-            "こんじょう": ability in ("こんじょう", "Guts"),
-        }
-        if hasattr(self, "_attacker_trigger_cond_btns"):
-            for key, btn in self._attacker_trigger_cond_btns.items():
-                show = trigger_show_map.get(key, False)
-                if not show and btn.isChecked():
-                    btn.blockSignals(True)
-                    btn.setChecked(False)
-                    btn.blockSignals(False)
-                    btn._refresh()
-                btn.setVisible(show)
-
-        full_hp_guard_show_map = {
-            "マルチスケイル": ability in ("マルチスケイル", "Multiscale"),
-            "ファントムガード": ability in ("ファントムガード", "Shadow Shield"),
-            "テラスシェル": ability in ("テラスシェル", "Tera Shell"),
-        }
-        if hasattr(self, "_attacker_full_hp_guard_btns"):
-            for key, btn in self._attacker_full_hp_guard_btns.items():
-                show = full_hp_guard_show_map.get(key, False)
+            if auto_check_on_show:
                 was_visible = btn.isVisible()
                 btn.setVisible(show)
                 if show and not was_visible:
@@ -332,116 +340,46 @@ class DamagePanel(QWidget):
                     btn.setChecked(True)
                     btn.blockSignals(False)
                     btn._refresh()
+            else:
+                if not show and btn.isChecked():
+                    btn.blockSignals(True)
+                    btn.setChecked(False)
+                    btn.blockSignals(False)
+                    btn._refresh()
+                btn.setVisible(show)
 
-        show_supreme = ability in ("そうだいしょう", "Supreme Overlord")
-        self._supreme_combo.setVisible(show_supreme)
-        if not show_supreme:
-            self._supreme_combo.blockSignals(True)
-            self._supreme_combo.setCurrentIndex(0)
-            self._supreme_combo.blockSignals(False)
-
-        show_rivalry = ability in ("とうそうしん", "Rivalry")
-        self._rivalry_combo.setVisible(show_rivalry)
-        if not show_rivalry:
-            self._rivalry_combo.blockSignals(True)
-            self._rivalry_combo.setCurrentIndex(0)
-            self._rivalry_combo.blockSignals(False)
-
-    def _refresh_supreme_combo(self) -> None:
-        self.recalculate()
-        if self._supreme_combo.currentIndex() > 0:
-            self._supreme_combo.setStyleSheet(
-                "QComboBox{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;font-weight:bold;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-        else:
-            self._supreme_combo.setStyleSheet(
-                "QComboBox{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-
-    def _refresh_rivalry_combo(self) -> None:
-        self.recalculate()
-        if self._rivalry_combo.currentIndex() > 0:
-            self._rivalry_combo.setStyleSheet(
-                "QComboBox{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;font-weight:bold;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-        else:
-            self._rivalry_combo.setStyleSheet(
-                "QComboBox{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-
-    def _refresh_opp_rivalry_combo(self) -> None:
-        self.recalculate()
-        if self._opp_rivalry_combo.currentIndex() > 0:
-            self._opp_rivalry_combo.setStyleSheet(
-                "QComboBox{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;font-weight:bold;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-        else:
-            self._opp_rivalry_combo.setStyleSheet(
-                "QComboBox{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-
-    def _refresh_opp_supreme_combo(self) -> None:
-        self.recalculate()
-        if self._opp_supreme_combo.currentIndex() > 0:
-            self._opp_supreme_combo.setStyleSheet(
-                "QComboBox{background:#f9e2af;color:#3a3218;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;font-weight:bold;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
-        else:
-            self._opp_supreme_combo.setStyleSheet(
-                "QComboBox{background:#3a3218;color:#f9e2af;border:1px solid #a87d3a;"
-                "border-radius:4px;padding:4px 8px;font-size:14px;}"
-                "QComboBox::drop-down{border:none;}"
-                "QComboBox::down-arrow{image:none;width:0;height:0;}"
-                "QComboBox QAbstractItemView{background:#3a3218;color:#f9e2af;selection-background-color:#f9e2af;selection-color:#3a3218;}"
-            )
+    def _sync_attacker_ability_support_buttons(self) -> None:
+        if not hasattr(self, "_attacker_ability_cond_btns"):
+            return
+        self._sync_ability_support_buttons(is_attacker=True)
 
     def _sync_defender_ability_support_buttons(self) -> None:
         if not hasattr(self, "_defender_ability_cond_btns"):
             return
-        ability = (self._def_custom.ability if self._def_custom else "").strip()
-        show_map = {
+        self._sync_ability_support_buttons(is_attacker=False)
+
+    def _sync_ability_support_buttons(self, is_attacker: bool) -> None:
+        """攻撃側/守備側の能力条件ボタン表示を ability に合わせて一括更新する。"""
+        if is_attacker:
+            ability = (self._atk.ability if self._atk else "").strip()
+            cond_btns_attr = "_attacker_ability_cond_btns"
+            trigger_btns_attr = "_attacker_trigger_cond_btns"
+            full_hp_btns_attr = "_attacker_full_hp_guard_btns"
+        else:
+            ability = (self._def_custom.ability if self._def_custom else "").strip()
+            cond_btns_attr = "_defender_ability_cond_btns"
+            trigger_btns_attr = "_defender_trigger_cond_btns"
+            full_hp_btns_attr = "_defender_full_hp_guard_btns"
+
+        cond_show_map = {
             "しんりょく": ability in ("しんりょく", "Overgrow"),
             "もうか": ability in ("もうか", "Blaze"),
             "げきりゅう": ability in ("げきりゅう", "Torrent"),
             "むしのしらせ": ability in ("むしのしらせ", "Swarm"),
             "どくぼうそう": ability in ("どくぼうそう", "Toxic Boost"),
         }
-        for key, btn in self._defender_ability_cond_btns.items():
-            show = show_map.get(key, False)
-            if not show and btn.isChecked():
-                btn.blockSignals(True)
-                btn.setChecked(False)
-                btn.blockSignals(False)
-                btn._refresh()
-            btn.setVisible(show)
+        self._update_cond_btn_visibility(getattr(self, cond_btns_attr), cond_show_map)
+
         trigger_show_map = {
             "はりこみ": ability in ("はりこみ", "Stakeout"),
             "もらいび": ability in ("もらいび", "Flash Fire"),
@@ -451,39 +389,41 @@ class DamagePanel(QWidget):
             "ねつぼうそう": ability in ("ねつぼうそう", "Flare Boost"),
             "こんじょう": ability in ("こんじょう", "Guts"),
         }
-        if hasattr(self, "_defender_trigger_cond_btns"):
-            for key, btn in self._defender_trigger_cond_btns.items():
-                show = trigger_show_map.get(key, False)
-                if not show and btn.isChecked():
-                    btn.blockSignals(True)
-                    btn.setChecked(False)
-                    btn.blockSignals(False)
-                    btn._refresh()
-                btn.setVisible(show)
+        if hasattr(self, trigger_btns_attr):
+            self._update_cond_btn_visibility(getattr(self, trigger_btns_attr), trigger_show_map)
 
-        full_hp_guard_show_map = {
+        full_hp_show_map = {
             "マルチスケイル": ability in ("マルチスケイル", "Multiscale"),
             "ファントムガード": ability in ("ファントムガード", "Shadow Shield"),
             "テラスシェル": ability in ("テラスシェル", "Tera Shell"),
         }
-        if hasattr(self, "_defender_full_hp_guard_btns"):
-            for key, btn in self._defender_full_hp_guard_btns.items():
-                show = full_hp_guard_show_map.get(key, False)
-                was_visible = btn.isVisible()
-                btn.setVisible(show)
-                if show and not was_visible:
-                    btn.blockSignals(True)
-                    btn.setChecked(True)
-                    btn.blockSignals(False)
-                    btn._refresh()
+        if hasattr(self, full_hp_btns_attr):
+            self._update_cond_btn_visibility(
+                getattr(self, full_hp_btns_attr), full_hp_show_map, auto_check_on_show=True
+            )
 
-        if hasattr(self, "_opp_supreme_combo"):
-            show_opp_supreme = ability in ("そうだいしょう", "Supreme Overlord")
-            self._opp_supreme_combo.setVisible(show_opp_supreme)
-            if not show_opp_supreme:
-                self._opp_supreme_combo.blockSignals(True)
-                self._opp_supreme_combo.setCurrentIndex(0)
-                self._opp_supreme_combo.blockSignals(False)
+        if is_attacker:
+            show_supreme = ability in ("そうだいしょう", "Supreme Overlord")
+            self._supreme_combo.setVisible(show_supreme)
+            if not show_supreme:
+                self._supreme_combo.blockSignals(True)
+                self._supreme_combo.setCurrentIndex(0)
+                self._supreme_combo.blockSignals(False)
+
+            show_rivalry = ability in ("とうそうしん", "Rivalry")
+            self._rivalry_combo.setVisible(show_rivalry)
+            if not show_rivalry:
+                self._rivalry_combo.blockSignals(True)
+                self._rivalry_combo.setCurrentIndex(0)
+                self._rivalry_combo.blockSignals(False)
+        else:
+            if hasattr(self, "_opp_supreme_combo"):
+                show_opp_supreme = ability in ("そうだいしょう", "Supreme Overlord")
+                self._opp_supreme_combo.setVisible(show_opp_supreme)
+                if not show_opp_supreme:
+                    self._opp_supreme_combo.blockSignals(True)
+                    self._opp_supreme_combo.setCurrentIndex(0)
+                    self._opp_supreme_combo.blockSignals(False)
 
     # ── Recalculation ─────────────────────────────────────────────────
 
