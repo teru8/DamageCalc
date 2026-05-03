@@ -186,7 +186,8 @@ class DamagePanel(QWidget):
             if child is not None:
                 child.setParent(None)
         if widget is not None:
-            layout.addWidget(widget, 0, Qt.AlignVCenter)
+            layout.addStretch()
+            layout.addWidget(widget, 0, Qt.AlignRight | Qt.AlignBottom)
 
     def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
         from src.ui.damage_panel_signal_handlers import _on_party_slot_context_menu as _impl
@@ -795,6 +796,10 @@ class DamagePanel(QWidget):
     def _on_opp_party_slot_clicked(self, idx: int) -> None:
         from src.ui.damage_panel_signal_handlers import _on_opp_party_slot_clicked as _impl
         return _impl(self, idx)
+
+    def _open_copy_dialog(self) -> None:
+        from src.ui.damage_panel_signal_handlers import _open_copy_dialog as _impl
+        return _impl(self)
 
     def _set_battle_format(self, mode: str) -> None:
         from src.ui.damage_panel_signal_handlers import _set_battle_format as _impl

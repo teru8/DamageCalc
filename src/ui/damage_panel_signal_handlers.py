@@ -661,7 +661,9 @@ def _open_copy_dialog(self) -> None:
     from src.ui.damage_panel_copy_dialog import CopyDialog
     webhook_url = ""
     main_win = self.window()
-    if hasattr(main_win, "_load_settings"):
+    if hasattr(main_win, "_webhook_url_edit") and main_win._webhook_url_edit is not None:
+        webhook_url = main_win._webhook_url_edit.text().strip()
+    if not webhook_url and hasattr(main_win, "_load_settings"):
         settings = main_win._load_settings()
         webhook_url = settings.get("webhook_url", "")
     dlg = CopyDialog(self, webhook_url=webhook_url, parent=self)

@@ -534,26 +534,22 @@ def _build_content(self) -> None:
     self._opp_party_action_layout = QVBoxLayout(self._opp_party_action_host)
     self._opp_party_action_layout.setContentsMargins(0, 0, 0, 0)
     self._opp_party_action_layout.setSpacing(0)
-    opp_party_row.addWidget(self._opp_party_action_host, 0, Qt.AlignVCenter)
-    opp_party_row.addStretch()
-    cl.addLayout(opp_party_row)
-
-    cl.addWidget(_sep())
-
-    # ── Copy button row ───────────────────────────────────────────
-    copy_row = QHBoxLayout()
-    copy_row.setContentsMargins(0, 0, 0, 0)
+    opp_party_row.addWidget(self._opp_party_action_host, 0, Qt.AlignRight | Qt.AlignBottom)
     self._copy_btn = QPushButton("コピー / Discord")
-    self._copy_btn.setFixedHeight(28)
+    _copy_base_w = self._copy_btn.sizeHint().width()
+    self._copy_btn.setFixedSize(max(1, int(_copy_base_w * 1.14)), 56)
+    self._copy_btn.setMinimumHeight(56)
+    self._copy_btn.setMaximumHeight(56)
     self._copy_btn.setStyleSheet(
         "QPushButton{background:#313244;border:1px solid #cba6f7;color:#cba6f7;"
-        "font-weight:bold;border-radius:4px;font-size:13px;padding:0 8px;}"
+        "font-weight:bold;border-radius:4px;font-size:13px;padding:0 8px;"
+        "min-height:56px;max-height:56px;}"
         "QPushButton:hover{background:#3b3250;}"
     )
     self._copy_btn.clicked.connect(self._open_copy_dialog)
-    copy_row.addStretch()
-    copy_row.addWidget(self._copy_btn)
-    cl.addLayout(copy_row)
+    opp_party_row.addWidget(self._copy_btn, 0, Qt.AlignRight | Qt.AlignBottom)
+    opp_party_row.addStretch()
+    cl.addLayout(opp_party_row)
 
     # ── Attacker / Defender cards in one horizontal row ───────────
     cards_row = QHBoxLayout()

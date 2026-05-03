@@ -271,6 +271,10 @@ class MainWindow(QMainWindow):
         from src.ui.main_window_handlers import _toggle_detailed_log_option as _impl
         return _impl(self, checked)
 
+    def _on_webhook_url_changed(self) -> None:
+        from src.ui.main_window_handlers import _on_webhook_url_changed as _impl
+        return _impl(self)
+
     def _start_background_tasks(self) -> None:
         from src.ui.main_window_handlers import _start_background_tasks as _impl
         return _impl(self)

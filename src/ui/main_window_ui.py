@@ -157,6 +157,20 @@ def _build_ui(self) -> None:
     cam_layout.addWidget(self._damage_side, 1)
     self._damage_side.setVisible(False)
     self._detect_opponent_btn = QPushButton("相手PT検出")
+    _detect_base_w = self._detect_opponent_btn.sizeHint().width()
+    self._detect_opponent_btn.setFixedSize(
+        max(1, int(_detect_base_w * 1.14)),
+        56,
+    )
+    self._detect_opponent_btn.setMinimumHeight(56)
+    self._detect_opponent_btn.setMaximumHeight(56)
+    self._detect_opponent_btn.setStyleSheet(
+        "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
+        "font-weight:bold;border-radius:4px;font-size:13px;padding:0 8px;"
+        "min-height:56px;max-height:56px;}"
+        "QPushButton:hover{background:#4a2b35;}"
+        "QPushButton:disabled{border-color:#585b70;color:#585b70;}"
+    )
     self._detect_opponent_btn.clicked.connect(self._auto_detect_opponent_party)
     self._damage_panel.set_opp_party_action_widget(self._detect_opponent_btn)
 

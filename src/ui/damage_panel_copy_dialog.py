@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from urllib.error import HTTPError, URLError
 from typing import TYPE_CHECKING
 
+from src.constants import TYPE_EN_TO_JA
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -30,26 +32,32 @@ def _pokemon_header(pokemon) -> str:
     ability = pokemon.ability or ""
     nature = getattr(pokemon, "nature", "") or ""
 
-    evs = getattr(pokemon, "evs", None)
     hp = getattr(pokemon, "hp", 0) or 0
-    atk = getattr(pokemon, "atk", 0) or 0
-    def_ = getattr(pokemon, "def_", 0) or 0
-    spa = getattr(pokemon, "spa", 0) or 0
-    spd = getattr(pokemon, "spd", 0) or 0
-    spe = getattr(pokemon, "spe", 0) or 0
+    atk = getattr(pokemon, "attack", 0) or 0
+    def_ = getattr(pokemon, "defense", 0) or 0
+    spa = getattr(pokemon, "sp_attack", 0) or 0
+    spd = getattr(pokemon, "sp_defense", 0) or 0
+    spe = getattr(pokemon, "speed", 0) or 0
+    ev_hp = int((getattr(pokemon, "ev_hp", 0) or 0) / 8)
+    ev_atk = int((getattr(pokemon, "ev_attack", 0) or 0) / 8)
+    ev_def = int((getattr(pokemon, "ev_defense", 0) or 0) / 8)
+    ev_spa = int((getattr(pokemon, "ev_sp_attack", 0) or 0) / 8)
+    ev_spd = int((getattr(pokemon, "ev_sp_defense", 0) or 0) / 8)
+    ev_spe = int((getattr(pokemon, "ev_speed", 0) or 0) / 8)
 
-    def _ev(v: int) -> int:
-        if evs and isinstance(evs, dict):
-            return evs.get(v, 0)
-        return 0
-
-    stats = "{hp}({ev_hp})-{atk}({ev_atk})-{def_}({ev_def})-{spa}-{spd}-{spe}({ev_spe})".format(
-        hp=hp, ev_hp=_ev("hp"),
-        atk=atk, ev_atk=_ev("atk"),
-        def_=def_, ev_def=_ev("def_"),
+    stats = "{hp}({ev_hp})-{atk}({ev_atk})-{def_}({ev_def})-{spa}({ev_spa})-{spd}({ev_spd})-{spe}({ev_spe})".format(
+        hp=hp,
+        ev_hp=ev_hp,
+        atk=atk,
+        ev_atk=ev_atk,
+        def_=def_,
+        ev_def=ev_def,
         spa=spa,
+        ev_spa=ev_spa,
         spd=spd,
-        spe=spe, ev_spe=_ev("spe"),
+        ev_spd=ev_spd,
+        spe=spe,
+        ev_spe=ev_spe,
     )
 
     parts = [p for p in [item, ability, nature] if p]
@@ -57,17 +65,40 @@ def _pokemon_header(pokemon) -> str:
     return header
 
 
+def _normalize_webhook_url(url: str) -> str:
+    return (url or "").strip().strip("<>").strip()
+
+
 def _send_discord(url: str, text: str) -> None:
+    normalized_url = _normalize_webhook_url(url)
+    if not normalized_url.startswith("https://discord.com/api/webhooks/"):
+        raise ValueError("Webhook URL形式が不正です（discord.com/api/webhooks/...）")
     chunks = [text[i : i + 2000] for i in range(0, len(text), 2000)]
     for chunk in chunks:
         data = json.dumps({"content": chunk}).encode()
         req = urllib.request.Request(
-            url,
+            normalized_url,
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "DamageCalc/1.0",
+            },
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=10)
+        try:
+            urllib.request.urlopen(req, timeout=10)
+        except HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            msg = "HTTP {} {}".format(exc.code, exc.reason)
+            if body:
+                msg = "{}: {}".format(msg, body[:500])
+            raise RuntimeError(msg) from exc
+        except URLError as exc:
+            raise RuntimeError("接続エラー: {}".format(exc.reason)) from exc
 
 
 class CopyDialog(QDialog):
@@ -119,14 +150,14 @@ class CopyDialog(QDialog):
 
         atk_col = QVBoxLayout()
         atk_col.setSpacing(4)
-        atk_col_lbl = QLabel("→ 攻撃")
-        atk_col_lbl.setStyleSheet("font-size:13px;color:#89b4fa;font-weight:bold;")
+        atk_col_lbl = QLabel("自分")
+        atk_col_lbl.setStyleSheet("font-size:13px;font-weight:bold;")
         atk_col.addWidget(atk_col_lbl)
 
         def_col = QVBoxLayout()
         def_col.setSpacing(4)
-        def_col_lbl = QLabel("← 防御")
-        def_col_lbl.setStyleSheet("font-size:13px;color:#f38ba8;font-weight:bold;")
+        def_col_lbl = QLabel("相手")
+        def_col_lbl.setStyleSheet("font-size:13px;font-weight:bold;")
         def_col.addWidget(def_col_lbl)
 
         for i in range(4):
@@ -140,7 +171,7 @@ class CopyDialog(QDialog):
             has_damage = bool(move_name) and dmg_txt not in ("---", "", "0-0 (0.0~0.0%)")
 
             cb = QCheckBox()
-            cb.setChecked(False)
+            cb.setChecked(has_damage)
             cb.setEnabled(has_damage)
             label_text = "{}: {} {}".format(move_name or "---", dmg_txt, ko_txt).strip()
             row_w = QWidget()
@@ -162,7 +193,7 @@ class CopyDialog(QDialog):
             opp_has_damage = bool(opp_move_name) and opp_dmg_txt not in ("---", "", "0-0 (0.0~0.0%)")
 
             ocb = QCheckBox()
-            ocb.setChecked(False)
+            ocb.setChecked(opp_has_damage)
             ocb.setEnabled(opp_has_damage)
             opp_label = "{}: {} {}".format(opp_move_name or "---", opp_dmg_txt, opp_ko_txt).strip()
             orow_w = QWidget()
@@ -216,13 +247,10 @@ class CopyDialog(QDialog):
         discord_btn = QPushButton("Discord送信")
         discord_btn.setFixedHeight(32)
         discord_btn.setMinimumWidth(100)
-        has_webhook = bool(self._webhook_url)
-        discord_btn.setEnabled(has_webhook)
         discord_btn.setStyleSheet(
             "QPushButton{background:#313244;border:1px solid #cba6f7;color:#cba6f7;"
             "font-weight:bold;border-radius:4px;font-size:14px;}"
             "QPushButton:hover{background:#3b3250;}"
-            "QPushButton:disabled{border-color:#585b70;color:#585b70;}"
         )
         discord_btn.clicked.connect(self._on_discord)
         btn_row.addWidget(discord_btn)
@@ -248,6 +276,23 @@ class CopyDialog(QDialog):
         atk_lines = []
         def_lines = []
 
+        def _damage_and_ko(sec) -> tuple[str, str]:
+            row = getattr(sec, "_row_custom", None)
+            if row is None:
+                return "", ""
+            detail = getattr(row, "_detail_txt", None)
+            ko = getattr(row, "_ko_txt", None)
+            return (
+                detail.text() if detail is not None else "",
+                ko.text() if ko is not None else "",
+            )
+
+        def _move_type_ja(move) -> str:
+            type_en = getattr(move, "type_name", "") or getattr(move, "move_type", "") or ""
+            if not type_en:
+                return ""
+            return TYPE_EN_TO_JA.get(type_en, type_en)
+
         for i, cb in enumerate(self._checks_atk):
             if not cb.isChecked():
                 continue
@@ -255,11 +300,19 @@ class CopyDialog(QDialog):
             if not sec._move:
                 continue
             move = sec._move
-            dmg = sec._row_custom._detail_txt.text()
-            ko = sec._row_custom._ko_txt.text()
-            cat_map = {"ぶつり": "物理", "とくしゅ": "特殊", "へんか": "変化"}
+            dmg, ko = _damage_and_ko(sec)
+            if not dmg:
+                continue
+            cat_map = {
+                "ぶつり": "物理",
+                "とくしゅ": "特殊",
+                "へんか": "変化",
+                "physical": "物理",
+                "special": "特殊",
+                "status": "変化",
+            }
             cat = cat_map.get(move.category or "", move.category or "")
-            type_ja = move.move_type or ""
+            type_ja = _move_type_ja(move)
             suffix = " {}".format(ko) if ko else ""
             atk_lines.append("→ {} ({}/{}): {}{}".format(move.name_ja, type_ja, cat, dmg, suffix))
 
@@ -270,11 +323,19 @@ class CopyDialog(QDialog):
             if not sec._move:
                 continue
             move = sec._move
-            dmg = sec._row_custom._detail_txt.text()
-            ko = sec._row_custom._ko_txt.text()
-            cat_map = {"ぶつり": "物理", "とくしゅ": "特殊", "へんか": "変化"}
+            dmg, ko = _damage_and_ko(sec)
+            if not dmg:
+                continue
+            cat_map = {
+                "ぶつり": "物理",
+                "とくしゅ": "特殊",
+                "へんか": "変化",
+                "physical": "物理",
+                "special": "特殊",
+                "status": "変化",
+            }
             cat = cat_map.get(move.category or "", move.category or "")
-            type_ja = move.move_type or ""
+            type_ja = _move_type_ja(move)
             suffix = " {}".format(ko) if ko else ""
             def_lines.append("← {} ({}/{}): {}{}".format(move.name_ja, type_ja, cat, dmg, suffix))
 
@@ -294,20 +355,23 @@ class CopyDialog(QDialog):
             if nature:
                 parts.append(nature)
             hp = getattr(pokemon, "hp", 0) or 0
-            atk_v = getattr(pokemon, "atk", 0) or 0
-            def_v = getattr(pokemon, "def_", 0) or 0
-            spa = getattr(pokemon, "spa", 0) or 0
-            spd = getattr(pokemon, "spd", 0) or 0
-            spe = getattr(pokemon, "spe", 0) or 0
-            ev_hp = getattr(pokemon, "ev_hp", 0) or 0
-            ev_atk = getattr(pokemon, "ev_atk", 0) or 0
-            ev_def = getattr(pokemon, "ev_def", 0) or 0
-            ev_spe = getattr(pokemon, "ev_spe", 0) or 0
-            stats = "{hp}({ev_hp})-{atk}({ev_atk})-{def_}({ev_def})-{spa}-{spd}-{spe}({ev_spe})".format(
+            atk_v = getattr(pokemon, "attack", 0) or 0
+            def_v = getattr(pokemon, "defense", 0) or 0
+            spa = getattr(pokemon, "sp_attack", 0) or 0
+            spd = getattr(pokemon, "sp_defense", 0) or 0
+            spe = getattr(pokemon, "speed", 0) or 0
+            ev_hp = int((getattr(pokemon, "ev_hp", 0) or 0) / 8)
+            ev_atk = int((getattr(pokemon, "ev_attack", 0) or 0) / 8)
+            ev_def = int((getattr(pokemon, "ev_defense", 0) or 0) / 8)
+            ev_spa = int((getattr(pokemon, "ev_sp_attack", 0) or 0) / 8)
+            ev_spd = int((getattr(pokemon, "ev_sp_defense", 0) or 0) / 8)
+            ev_spe = int((getattr(pokemon, "ev_speed", 0) or 0) / 8)
+            stats = "{hp}({ev_hp})-{atk}({ev_atk})-{def_}({ev_def})-{spa}({ev_spa})-{spd}({ev_spd})-{spe}({ev_spe})".format(
                 hp=hp, ev_hp=ev_hp,
                 atk=atk_v, ev_atk=ev_atk,
                 def_=def_v, ev_def=ev_def,
-                spa=spa, spd=spd,
+                spa=spa, ev_spa=ev_spa,
+                spd=spd, ev_spd=ev_spd,
                 spe=spe, ev_spe=ev_spe,
             )
             parts.append(stats)
@@ -326,7 +390,12 @@ class CopyDialog(QDialog):
         return "\n".join(lines)
 
     def _on_copy(self) -> None:
-        text = self._build_text()
+        try:
+            text = self._build_text()
+        except Exception as exc:
+            self._status_lbl.setStyleSheet("font-size:13px;color:#f38ba8;")
+            self._status_lbl.setText("コピー生成エラー: {}".format(exc))
+            return
         if text is None:
             self._status_lbl.setStyleSheet("font-size:13px;color:#f38ba8;")
             self._status_lbl.setText("技を1つ以上チェックしてください")
@@ -336,10 +405,19 @@ class CopyDialog(QDialog):
         self._status_lbl.setText("クリップボードにコピーしました")
 
     def _on_discord(self) -> None:
-        text = self._build_text()
+        try:
+            text = self._build_text()
+        except Exception as exc:
+            self._status_lbl.setStyleSheet("font-size:13px;color:#f38ba8;")
+            self._status_lbl.setText("送信文生成エラー: {}".format(exc))
+            return
         if text is None:
             self._status_lbl.setStyleSheet("font-size:13px;color:#f38ba8;")
             self._status_lbl.setText("技を1つ以上チェックしてください")
+            return
+        if not _normalize_webhook_url(self._webhook_url):
+            self._status_lbl.setStyleSheet("font-size:13px;color:#f38ba8;")
+            self._status_lbl.setText("Webhook URL が未設定です（オプションで設定してください）")
             return
         try:
             _send_discord(self._webhook_url, text)
