@@ -1,20 +1,48 @@
 """Extracted methods from main_window.py."""
 from __future__ import annotations
 
+import sys
+import traceback
 
-_BOOTSTRAPPED = False
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
+from src.constants import TYPE_EN_TO_JA
+from src.data import database as db
+from src.ui.damage_panel import DamagePanel
+from src.ui.main_window_panels import _MyPartyPanel, _SavedPartyPanel
+from src.ui.pokemon_edit_dialog import TypeIconButton
 
-def _bootstrap() -> None:
-    global _BOOTSTRAPPED
-    if _BOOTSTRAPPED:
-        return
-    from src.ui import main_window as _mw
-    globals().update(_mw.__dict__)
-    _BOOTSTRAPPED = True
+_RIGHT_PANEL_MIN_WIDTH = 760
+_CAM_PANEL_WIDTH = 600
+_PREVIEW_W, _PREVIEW_H = 320, 180
+_WINDOW_WIDTH_PADDING = 28
+_USAGE_SOURCE_DEFAULT_FALLBACK = "pokedb_tokyo"
+_USAGE_SOURCES_FALLBACK = {
+    "pokedb_tokyo": "pokedb.tokyo",
+}
 
 def _get_usage_scraper_symbols(self):
-    _bootstrap()
     try:
         from src.data.usage_scraper import UsageScraper, USAGE_SOURCES, USAGE_SOURCE_DEFAULT
 
@@ -27,7 +55,6 @@ def _get_usage_scraper_symbols(self):
 
 
 def _build_ui(self) -> None:
-    _bootstrap()
     old_damage_panel = getattr(self, "_damage_panel", None)
     if old_damage_panel is not None:
         try:
@@ -225,7 +252,6 @@ def _build_ui(self) -> None:
 
 
 def _build_registry_tab(self) -> QWidget:
-    _bootstrap()
     widget = QWidget()
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(6, 6, 6, 6)
@@ -317,7 +343,6 @@ def _build_registry_tab(self) -> QWidget:
 
 
 def _build_box_side_panel(self) -> QWidget:
-    _bootstrap()
     widget = QWidget()
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(6, 6, 6, 6)
@@ -367,7 +392,6 @@ def _build_box_side_panel(self) -> QWidget:
 
 
 def _build_options_dialog(self) -> None:
-    _bootstrap()
     from src.ui.ui_utils import make_dialog
     self._options_dialog = make_dialog(self)
     self._options_dialog.setWindowTitle("オプション")
@@ -509,7 +533,6 @@ def _build_options_dialog(self) -> None:
 
 
 def _open_options_dialog(self) -> None:
-    _bootstrap()
     if not self._options_dialog:
         return
     self._refresh_usage_season_options(self._current_usage_season())
@@ -530,7 +553,6 @@ def _open_options_dialog(self) -> None:
 
 
 def _set_fetch_buttons_enabled(self, enabled: bool) -> None:
-    _bootstrap()
     if self._fetch_api_btn:
         self._fetch_api_btn.setEnabled(enabled)
     if self._fetch_usage_btn:
@@ -539,7 +561,6 @@ def _set_fetch_buttons_enabled(self, enabled: bool) -> None:
 
 
 def _refresh_usage_season_options(self, selected: str | None = None) -> None:
-    _bootstrap()
     if not self._option_season_combo:
         return
     current = db.normalize_season_token(selected or self._option_season_combo.currentText())
@@ -559,13 +580,11 @@ def _refresh_usage_season_options(self, selected: str | None = None) -> None:
 
 
 def _apply_splitter_layout(self) -> None:
-    _bootstrap()
     self._splitter.insertWidget(1, self._cam_panel)
 
 
 
 def _set_initial_window_size(self) -> None:
-    _bootstrap()
     screen = QApplication.primaryScreen()
     if not screen:
         return
@@ -581,7 +600,6 @@ def _set_initial_window_size(self) -> None:
 
 
 def _on_damage_tab_visibility(self, index: int) -> None:
-    _bootstrap()
     damage_idx = self._tabs.indexOf(self._damage_panel)
     box_idx = 1
     self._damage_side.setVisible(index == damage_idx)
@@ -594,7 +612,6 @@ def _on_damage_tab_visibility(self, index: int) -> None:
 
 
 def _sync_tab_switcher_buttons(self, index: int) -> None:
-    _bootstrap()
     if self._tab_damage_btn:
         self._tab_damage_btn.setChecked(index == 0)
         self._tab_damage_btn.setEnabled(index != 0)
@@ -607,7 +624,6 @@ def _sync_tab_switcher_buttons(self, index: int) -> None:
 
 
 def _show_usage_password_dialog(self) -> None:
-    _bootstrap()
     from datetime import date
     from PyQt5.QtWidgets import QLineEdit
     today = date.today().strftime("%Y%m%d")
@@ -630,7 +646,6 @@ def _show_usage_password_dialog(self) -> None:
 
 
 def _show_usage_fetch_dialog(self) -> None:
-    _bootstrap()
     from src.ui.ui_utils import make_dialog
     dlg = make_dialog(self)
     dlg.setWindowTitle("使用率取得設定")
@@ -699,7 +714,6 @@ def _show_usage_fetch_dialog(self) -> None:
 
 
 def _refresh_auto_detect_button_style(self) -> None:
-    _bootstrap()
     if not self._auto_detect_btn:
         return
     active = self._auto_detect_btn.isChecked()
@@ -717,7 +731,6 @@ def _refresh_auto_detect_button_style(self) -> None:
 
 
 def _show_loading_overlay(self, message: str = "読み込み中...") -> None:
-    _bootstrap()
     try:
         if hasattr(self, "_loading_overlay") and self._loading_overlay:
             labels = self._loading_overlay.findChildren(QLabel)
@@ -749,7 +762,6 @@ def _show_loading_overlay(self, message: str = "読み込み中...") -> None:
 
 
 def _hide_loading_overlay(self) -> None:
-    _bootstrap()
     try:
         if hasattr(self, "_loading_overlay") and self._loading_overlay:
             self._loading_overlay.hide()
@@ -761,7 +773,6 @@ def _hide_loading_overlay(self) -> None:
 
 
 def _refresh_party_presets_ui(self, selected_name: str = "") -> None:
-    _bootstrap()
     if self._saved_party_list_layout is None:
         return
     while self._saved_party_list_layout.count():
@@ -786,7 +797,6 @@ def _refresh_party_presets_ui(self, selected_name: str = "") -> None:
 
 
 def _update_box_party_ui(self) -> None:
-    _bootstrap()
     if not hasattr(self, "_box_my_panel"):
         return
     my_active = self._active_index(self._battle_state.my_party, self._battle_state.my_pokemon)
@@ -795,7 +805,6 @@ def _update_box_party_ui(self) -> None:
 
 
 def _set_auto_detect_enabled(self, enabled: bool) -> None:
-    _bootstrap()
     if not self._detect_opponent_btn:
         return
     enabled = bool(enabled)
@@ -807,7 +816,6 @@ def _set_auto_detect_enabled(self, enabled: bool) -> None:
 
 
 def _toggle_topmost(self, checked: bool) -> None:
-    _bootstrap()
     options_was_visible = bool(self._options_dialog and self._options_dialog.isVisible())
     options_pos = self._options_dialog.pos() if self._options_dialog else None
     self.setWindowFlag(Qt.WindowStaysOnTopHint, checked)
@@ -831,7 +839,6 @@ def _toggle_topmost(self, checked: bool) -> None:
 
 
 def _refresh_data_status(self) -> None:
-    _bootstrap()
     season = self._current_usage_season()
     db.set_active_usage_season(season)
     status = db.get_local_data_status(season)
