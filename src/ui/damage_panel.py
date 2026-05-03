@@ -5,7 +5,6 @@ import copy
 import dataclasses
 import json
 import math
-from typing import Optional
 
 from PyQt5.QtCore import QPointF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -66,7 +65,7 @@ def _form_group(name_ja: str) -> list[str]:
     return form_group(name_ja, _FORM_NAME_TO_GROUP)
 
 
-def _next_form_name(name_ja: str) -> Optional[str]:
+def _next_form_name(name_ja: str) -> str | None:
     from src.ui.damage_panel_forms import next_form_name
 
     return next_form_name(name_ja, _FORM_NAME_TO_GROUP)
@@ -122,16 +121,16 @@ class DamagePanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._atk: Optional[PokemonInstance] = None
-        self._def_custom: Optional[PokemonInstance] = None   # registered / edited defender
+        self._atk: PokemonInstance | None = None
+        self._def_custom: PokemonInstance | None = None   # registered / edited defender
         self._def_species_name: str = ""
-        self._my_party: list[Optional[PokemonInstance]] = []
-        self._opp_party: list[Optional[PokemonInstance]] = []
+        self._my_party: list[PokemonInstance | None] = []
+        self._opp_party: list[PokemonInstance | None] = []
         self._party_source = "my"
-        self._atk_party_side: Optional[str] = None
-        self._atk_party_idx: Optional[int] = None
-        self._def_party_side: Optional[str] = None
-        self._def_party_idx: Optional[int] = None
+        self._atk_party_side: str | None = None
+        self._atk_party_idx: int | None = None
+        self._def_party_side: str | None = None
+        self._def_party_idx: int | None = None
         self._show_bulk_rows = True
         self._move_cache: dict[str, MoveInfo] = {}
         self._display_to_move_slot = [0, 1, 2, 3]
@@ -205,14 +204,14 @@ class DamagePanel(QWidget):
         from src.ui.damage_panel_signal_handlers import _add_party_slot as _impl
         return _impl(self, side, idx)
 
-    def set_my_party(self, party: list[Optional[PokemonInstance]]) -> None:
+    def set_my_party(self, party: list[PokemonInstance | None]) -> None:
         self._my_party = [copy.deepcopy(p) if p else None for p in party]
         self._refresh_party_slots()
 
     def set_opponent_options(
         self,
-        party: list[Optional[PokemonInstance]],
-        active: Optional[PokemonInstance] = None,
+        party: list[PokemonInstance | None],
+        active: PokemonInstance | None = None,
     ) -> None:
         if not any(p for p in party):
             return
@@ -248,10 +247,10 @@ class DamagePanel(QWidget):
         self._refresh_defender_card()
         self.recalculate()
 
-    def get_my_party_snapshot(self) -> list[Optional[PokemonInstance]]:
+    def get_my_party_snapshot(self) -> list[PokemonInstance | None]:
         return [copy.deepcopy(p) if p else None for p in self._my_party]
 
-    def get_opp_party_snapshot(self) -> list[Optional[PokemonInstance]]:
+    def get_opp_party_snapshot(self) -> list[PokemonInstance | None]:
         return [copy.deepcopy(p) if p else None for p in self._opp_party]
 
     def set_weather(self, weather: str) -> None:
@@ -515,9 +514,9 @@ class DamagePanel(QWidget):
 
     def _resolve_species_info(
         self,
-        pokemon: Optional[PokemonInstance],
+        pokemon: PokemonInstance | None,
         fallback_name_ja: str = "",
-    ) -> Optional[SpeciesInfo]:
+    ) -> SpeciesInfo | None:
         from src.data.database import get_species_by_id, get_species_by_name_ja
 
         species = None
@@ -603,7 +602,7 @@ class DamagePanel(QWidget):
         from src.ui.damage_panel_calc_logic import _calc_moves as _impl
         return _impl(self)
 
-    def _refresh_defender_card(self, atk_view: Optional[PokemonInstance] = None) -> None:
+    def _refresh_defender_card(self, atk_view: PokemonInstance | None = None) -> None:
         self._atk_card.set_pokemon(atk_view if atk_view is not None else self._atk)
         self._def_card.set_pokemon(self._def_custom)
 
@@ -651,7 +650,7 @@ class DamagePanel(QWidget):
             return self._def_custom.types or ["normal"]
         return ["normal"]
 
-    def _active_party(self) -> list[Optional[PokemonInstance]]:
+    def _active_party(self) -> list[PokemonInstance | None]:
         return self._opp_party if self._party_source == "opp" else self._my_party
 
     def _refresh_party_selector_labels(self) -> None:

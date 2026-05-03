@@ -276,10 +276,10 @@ def _calc_moves(self) -> None:
         gravity=gravity,
     )
 
-    slot_to_move: dict[int, tuple[str, Optional[MoveInfo]]] = {}
+    slot_to_move: dict[int, tuple[str, MoveInfo | None]] = {}
     for slot in range(4):
         move_name = atk.moves[slot] if slot < len(atk.moves) else ""
-        move_info: Optional[MoveInfo] = None
+        move_info: MoveInfo | None = None
         if move_name:
             move_info = self._move_cache.get(move_name) or get_move_by_name_ja(move_name)
             if move_info:
@@ -292,7 +292,7 @@ def _calc_moves(self) -> None:
     for disp_slot, sec in enumerate(self._move_sections):
         src_slot = self._display_to_move_slot[disp_slot] if disp_slot < len(self._display_to_move_slot) else disp_slot
         move_name, move = slot_to_move.get(src_slot, ("", None))
-        effective_move: Optional[MoveInfo] = None
+        effective_move: MoveInfo | None = None
         if not move_name or not move:
             sec.setup_move(None)
         else:
@@ -546,7 +546,7 @@ def _calc_moves(self) -> None:
             )
 
         # ── custom defender ───────────────────────────────────────────
-        custom_result: Optional[tuple[int, int, int, bool]] = None
+        custom_result: tuple[int, int, int, bool] | None = None
         mod_target = hbd0
         if self._def_custom and self._def_custom.hp > 0:
             cd = copy.copy(self._def_custom)
@@ -608,11 +608,11 @@ def _calc_moves(self) -> None:
 
     opp_moves = self._def_custom.moves if self._def_custom else []
     for slot, opp_sec in enumerate(self._opp_move_sections):
-        opp_custom_result: Optional[tuple[int, int, int, bool]] = None
-        opp_ac0_result: Optional[tuple[int, int, int, bool]] = None
-        opp_ac32_result: Optional[tuple[int, int, int, bool]] = None
-        opp_move_info: Optional[MoveInfo] = None
-        opp_effective_move: Optional[MoveInfo] = None
+        opp_custom_result: tuple[int, int, int, bool] | None = None
+        opp_ac0_result: tuple[int, int, int, bool] | None = None
+        opp_ac32_result: tuple[int, int, int, bool] | None = None
+        opp_move_info: MoveInfo | None = None
+        opp_effective_move: MoveInfo | None = None
 
         opp_move_name = opp_moves[slot] if slot < len(opp_moves) else ""
         if opp_move_name:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -28,7 +27,7 @@ class MoveSection(QWidget):
         super().__init__(parent)
         self._slot = slot
         self._right_side = right_side
-        self._move: Optional[MoveInfo] = None
+        self._move: MoveInfo | None = None
         self._last_move_name = ""
         self._details_visible = False
         self._has_extra_controls = False
@@ -245,7 +244,7 @@ class MoveSection(QWidget):
             self._pow_combo.setCurrentIndex(selected_index)
         self._pow_combo.blockSignals(False)
 
-    def setup_move(self, move: Optional[MoveInfo]) -> None:
+    def setup_move(self, move: MoveInfo | None) -> None:
         prev_pow_data = self._pow_combo.currentData()
         prev_hit = self._hit_spin.value()
         prev_is_var = not self._pow_combo.isHidden()

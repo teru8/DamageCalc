@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -41,7 +40,7 @@ class _AttackerPanel(QWidget):
         super().__init__(parent)
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._base_pokemon: Optional[PokemonInstance] = None
+        self._base_pokemon: PokemonInstance | None = None
         self._tera_visible = False
         self._actions_visible = False
         layout = QVBoxLayout(self)
@@ -242,7 +241,7 @@ class _AttackerPanel(QWidget):
 
     # ── Public ──────────────────────────────────────────────────────────
 
-    def set_pokemon(self, p: Optional[PokemonInstance]) -> None:
+    def set_pokemon(self, p: PokemonInstance | None) -> None:
         if p is None:
             self._base_pokemon = None
             self._name_lbl.setText("（未設定）")
@@ -308,7 +307,7 @@ class _AttackerPanel(QWidget):
         self._tera_combo.setEnabled(enable_tera)
         self._update_stat_display(p)
 
-    def update_stat_display(self, p: Optional[PokemonInstance]) -> None:
+    def update_stat_display(self, p: PokemonInstance | None) -> None:
         if p:
             self._update_stat_display(p)
 
@@ -500,7 +499,7 @@ class _DefenderPanel(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._ac_rank = 0
         self._bd_rank = 0
-        self._base_pokemon: Optional[PokemonInstance] = None
+        self._base_pokemon: PokemonInstance | None = None
         self._current_key = ""
         self._tera_visible = False
         self._actions_visible = False
@@ -700,7 +699,7 @@ class _DefenderPanel(QWidget):
         self._ability_lbl.setVisible(False)
         layout.addWidget(self._ability_lbl)
 
-    def set_pokemon(self, p: Optional[PokemonInstance]) -> None:
+    def set_pokemon(self, p: PokemonInstance | None) -> None:
         if p is None:
             self._base_pokemon = None
             self._name_lbl.setText("（未設定）")
@@ -868,7 +867,7 @@ class _DefenderPanel(QWidget):
     def disguise_intact(self) -> bool:
         return (not self._disguise_cb.isHidden()) and self._disguise_cb.isChecked()
 
-    def update_stat_display(self, p: Optional[PokemonInstance]) -> None:
+    def update_stat_display(self, p: PokemonInstance | None) -> None:
         if p:
             self._update_stat_display(p)
 

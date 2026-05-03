@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -30,7 +29,7 @@ class PokemonCard(QWidget):
 
     def __init__(self, role_text: str, role_color: str, parent=None):
         super().__init__(parent)
-        self._pokemon: Optional[PokemonInstance] = None
+        self._pokemon: PokemonInstance | None = None
         self.setFixedHeight(self._CARD_HEIGHT)
         frame = QFrame(self)
         frame.setFrameShape(QFrame.StyledPanel)
@@ -110,7 +109,7 @@ class PokemonCard(QWidget):
 
         frame_vbox.addLayout(frame_row)
 
-    def set_pokemon(self, custom: Optional[PokemonInstance]) -> None:
+    def set_pokemon(self, custom: PokemonInstance | None) -> None:
         self._pokemon = custom
         if custom:
             from src.ui.ui_utils import sprite_pixmap_or_zukan
