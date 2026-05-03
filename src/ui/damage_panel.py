@@ -132,6 +132,7 @@ class DamagePanel(QWidget):
         self._def_party_side: str | None = None
         self._def_party_idx: int | None = None
         self._show_bulk_rows = True
+        self._is_recalculating = False
         self._move_cache: dict[str, MoveInfo] = {}
         self._display_to_move_slot = [0, 1, 2, 3]
         self._atk_form_cache: dict[str, str] = {}
@@ -428,8 +429,14 @@ class DamagePanel(QWidget):
     # ── Recalculation ─────────────────────────────────────────────────
 
     def recalculate(self) -> None:
-        from src.ui.damage_panel_calc_logic import recalculate as _impl
-        return _impl(self)
+        if self._is_recalculating:
+            return
+        self._is_recalculating = True
+        try:
+            from src.ui.damage_panel_calc_logic import recalculate as _impl
+            _impl(self)
+        finally:
+            self._is_recalculating = False
 
     def _show_opp_moves_only(self) -> None:
         """自分未設定・相手のみ設定時に相手のわざ名だけ右側に表示する。"""
