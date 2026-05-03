@@ -4,6 +4,21 @@ from __future__ import annotations
 from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 
 
+def _safe_disconnect(worker: QThread | None, *signals) -> None:
+    """旧ワーカーのシグナル接続を安全に切断する。
+
+    新しいワーカーを生成する直前に呼び出し、旧オブジェクトの finished/progress 等が
+    二重接続されたまま残らないようにする。接続済みでない場合は RuntimeError を無視する。
+    """
+    if worker is None:
+        return
+    for sig in signals:
+        try:
+            sig.disconnect()
+        except RuntimeError:
+            pass
+
+
 def _bootstrap() -> None:
     from src.ui import main_window as _mw
     globals().update(_mw.__dict__)
@@ -118,6 +133,7 @@ def _fetch_pokeapi_data(self) -> None:
     _bootstrap()
     if self._api_loader and self._api_loader.isRunning():
         return
+    _safe_disconnect(self._api_loader, self._api_loader.progress, self._api_loader.finished)
     self._api_loader = PokeApiLoader()
     self._api_loader.progress.connect(self._on_api_progress)
     self._api_loader.finished.connect(self._on_api_done)
@@ -151,6 +167,7 @@ def _fetch_usage_data(self) -> None:
         return
     if self._scraper and self._scraper.isRunning():
         return
+    _safe_disconnect(self._scraper, self._scraper.progress, self._scraper.finished)
     self._scraper = scraper_cls(season=season, source=source)
     self._scraper.progress.connect(self._on_usage_progress)
     self._scraper.finished.connect(self._on_scraper_done)
@@ -273,6 +290,7 @@ def _fetch_usage_data_with_source(self, season: str, source: str) -> None:
         return
     if self._scraper and self._scraper.isRunning():
         return
+    _safe_disconnect(self._scraper, self._scraper.progress, self._scraper.finished)
     self._scraper = scraper_cls(season=season, source=source)
     self._scraper.progress.connect(self._on_usage_progress)
     self._scraper.finished.connect(self._on_scraper_done)
