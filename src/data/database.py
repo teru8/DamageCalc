@@ -2,6 +2,7 @@ import re
 import sqlite3
 import json
 import logging
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -10,6 +11,7 @@ from src.constants import TYPE_EN_TO_JA, TYPE_JA_TO_EN
 
 DEFAULT_USAGE_SEASON = "M-1"
 _ACTIVE_USAGE_SEASON = DEFAULT_USAGE_SEASON
+_season_lock = threading.Lock()
 _TERA_EN_TO_JA: dict[str, str] = {
     **TYPE_EN_TO_JA,
     "stellar": "ステラ",
@@ -43,17 +45,22 @@ def normalize_season_token(season: str | None) -> str:
 
 
 def get_active_usage_season() -> str:
-    return _ACTIVE_USAGE_SEASON
+    with _season_lock:
+        return _ACTIVE_USAGE_SEASON
 
 
 def set_active_usage_season(season: str | None) -> str:
     global _ACTIVE_USAGE_SEASON
-    _ACTIVE_USAGE_SEASON = normalize_season_token(season)
-    return _ACTIVE_USAGE_SEASON
+    normalized = normalize_season_token(season)
+    with _season_lock:
+        _ACTIVE_USAGE_SEASON = normalized
+    return normalized
 
 
 def _season_or_active(season: str | None) -> str:
-    return normalize_season_token(season or _ACTIVE_USAGE_SEASON)
+    with _season_lock:
+        active = _ACTIVE_USAGE_SEASON
+    return normalize_season_token(season or active)
 
 
 def _db_path() -> Path:
@@ -63,6 +70,7 @@ def _db_path() -> Path:
 
 
 _write_generation: int = 0
+_generation_lock = threading.Lock()
 
 
 def normalize_species_name_ja(name_ja: str) -> str:
@@ -78,12 +86,14 @@ def get_write_generation() -> int:
 
     Callers can cache this value and compare on next use to detect stale data.
     """
-    return _write_generation
+    with _generation_lock:
+        return _write_generation
 
 
 def _bump_generation() -> None:
     global _write_generation
-    _write_generation += 1
+    with _generation_lock:
+        _write_generation += 1
 
 
 def get_connection() -> sqlite3.Connection:
