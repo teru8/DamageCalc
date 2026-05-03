@@ -26,7 +26,7 @@ def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -
             _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
             return None
     except (requests.RequestException, TypeError, ValueError) as exc:
-        logging.warning("species lookup failed: %s", exc, exc_info=True)
+        logging.warning("species lookup failed (name_en=%r name_ja=%r): %s", key, name_ja, exc, exc_info=True)
         _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key] = None
         return None
 

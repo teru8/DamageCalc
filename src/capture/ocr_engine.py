@@ -121,7 +121,8 @@ def read_text(image: np.ndarray, allowlist: str | None = None) -> list[str]:
         _OCR_RESULT_CACHE[cache_key] = result
         return result
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logging.warning("read_text failed: %s", e, exc_info=True)
+        h, w = image.shape[:2] if image is not None and image.ndim >= 2 else (0, 0)
+        logging.warning("read_text failed (image=%dx%d allowlist=%r): %s", w, h, allowlist, e, exc_info=True)
         return []
 
 

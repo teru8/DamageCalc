@@ -524,7 +524,11 @@ def _calc_moves(self) -> None:
                 )
             except (AttributeError, TypeError, ValueError) as exc:
                 import logging
-                logging.warning("bridge payload emit failed (atk->def): %s", exc, exc_info=True)
+                logging.warning(
+                    "bridge payload emit failed (atk->def atk=%r def=%r move=%r): %s",
+                    _atk_d_for_move.get("name"), d_copy.get("name"), _mv_d.get("name"),
+                    exc, exc_info=True,
+                )
             mn, mx, is_error = _bridge.calc(_atk_d_for_move, d_copy, _mv_d, _field_d)
             return (mn, mx, hp or 1, is_error)
 
@@ -764,7 +768,11 @@ def _calc_moves(self) -> None:
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
                     import logging
-                    logging.warning("bridge payload emit failed (def->atk): %s", exc, exc_info=True)
+                    logging.warning(
+                        "bridge payload emit failed (def->atk atk=%r def=%r move=%r): %s",
+                        opp_atk_d.get("name"), def_payload.get("name"), _mv_d_opp.get("name"),
+                        exc, exc_info=True,
+                    )
                 mn, mx, is_error = _bridge.calc(opp_atk_d, def_payload, _mv_d_opp, _field_d_rev)
                 return (mn, mx, self_hp, is_error)
 

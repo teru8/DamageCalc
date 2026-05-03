@@ -417,7 +417,11 @@ class SmogonBridge:
             ValueError,
         ) as e:
             import logging
-            logging.warning("SmogonBridge calc error: %s", e, exc_info=True)
+            logging.warning(
+                "SmogonBridge calc error (atk=%r def=%r move=%r): %s",
+                attacker_d.get("name"), defender_d.get("name"), move_d.get("name"),
+                e, exc_info=True,
+            )
             return (0, 0, True)
         is_error = bool(res.get("error"))
         return (max(0, res.get("min", 0)), max(0, res.get("max", 0)), is_error)
