@@ -15,12 +15,13 @@ from src.constants import POKEAPI_BASE
 
 _SESSION = requests.Session()
 _SESSION.headers["User-Agent"] = APP_USER_AGENT
+_TIMEOUT_SECONDS = 15
 
 
 def _get(url: str, retries: int = 3) -> dict[str, Any]:
     for i in range(retries):
         try:
-            r = _SESSION.get(url, timeout=10)
+            r = _SESSION.get(url, timeout=_TIMEOUT_SECONDS)
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
