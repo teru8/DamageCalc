@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self._option_damage_bulk_cb: QCheckBox | None = None
         self._option_damage_double_cb: QCheckBox | None = None
         self._option_detailed_log_cb: QCheckBox | None = None
+        self._webhook_url_edit: "QLineEdit | None" = None
         self._option_season_combo: QComboBox | None = None
         self._option_source_combo: QComboBox | None = None
         self._options_dialog: QDialog | None = None

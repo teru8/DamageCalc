@@ -431,8 +431,16 @@ def _build_options_dialog(self) -> None:
     self._option_detailed_log_cb = QCheckBox("詳細ログ")
     self._option_detailed_log_cb.toggled.connect(self._toggle_detailed_log_option)
     other_layout.addWidget(self._option_detailed_log_cb)
+    webhook_row = QHBoxLayout()
+    webhook_row.setSpacing(4)
+    webhook_row.addWidget(QLabel("Discord Webhook URL:"))
+    from PyQt5.QtWidgets import QLineEdit
+    self._webhook_url_edit = QLineEdit()
+    self._webhook_url_edit.setPlaceholderText("https://discord.com/api/webhooks/...")
+    self._webhook_url_edit.editingFinished.connect(self._on_webhook_url_changed)
+    webhook_row.addWidget(self._webhook_url_edit, 1)
+    other_layout.addLayout(webhook_row)
     other_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-    other_box.setFixedHeight(90)
     left_col.addWidget(other_box)
 
     log_box = QGroupBox("ログ")

@@ -60,6 +60,14 @@ def _toggle_detailed_log_option(self, checked: bool) -> None:
     self._detailed_log_enabled = bool(checked)
     self._save_settings(detailed_log_enabled=self._detailed_log_enabled)
 
+
+def _on_webhook_url_changed(self) -> None:
+    _bootstrap()
+    if not hasattr(self, "_webhook_url_edit") or self._webhook_url_edit is None:
+        return
+    url = self._webhook_url_edit.text().strip()
+    self._save_settings(webhook_url=url)
+
 # ── Background tasks ──────────────────────────────────────────────
 
 
@@ -1943,6 +1951,11 @@ def _apply_saved_settings(self) -> None:
         self._option_detailed_log_cb.blockSignals(True)
         self._option_detailed_log_cb.setChecked(self._detailed_log_enabled)
         self._option_detailed_log_cb.blockSignals(False)
+
+    if hasattr(self, "_webhook_url_edit") and self._webhook_url_edit:
+        self._webhook_url_edit.blockSignals(True)
+        self._webhook_url_edit.setText(settings.get("webhook_url", ""))
+        self._webhook_url_edit.blockSignals(False)
 
     self._refresh_data_status()
 
