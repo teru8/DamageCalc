@@ -8,13 +8,8 @@ import numpy as np
 
 from src.capture import ocr_engine
 from src.models import PokemonInstance
-from src.constants import MY_HP_ROI, OPP_HP_ROI
+from src.constants import MY_HP_ROI, MY_HUD_SPRITE_ROI, OPP_HP_ROI, OPP_HUD_SPRITE_ROI, WATCH_COMMAND_ROI
 from src.recognition import champions_sprite_matcher, text_matcher
-
-# Battle HUD icon areas (1280x720).
-_OPP_HUD_SPRITE_ROI = (930, 8, 1068, 102)
-_MY_HUD_SPRITE_ROI = (0, 620, 128, 720)
-_WATCH_COMMAND_ROI = (1070, 260, 1275, 340)
 
 
 def _crop(frame: np.ndarray, roi: tuple[int, int, int, int]) -> np.ndarray:
@@ -188,7 +183,7 @@ def is_watch_command_visible(frame: np.ndarray) -> tuple[bool, str]:
     if frame.shape[:2] != (720, 1280):
         frame = cv2.resize(frame, (1280, 720))
 
-    raw = _read_text(frame, _WATCH_COMMAND_ROI)
+    raw = _read_text(frame, WATCH_COMMAND_ROI)
     norm = text_matcher.normalize_ocr_text(raw)
     if not norm:
         return False, ""
@@ -224,8 +219,8 @@ def read_live_battle(
 
     my_names = _unique_party_names(my_party)
     opp_names = _unique_party_names(opponent_party)
-    my_sprite = _extract_sprite(_crop(frame, _MY_HUD_SPRITE_ROI))
-    opp_sprite = _extract_sprite(_crop(frame, _OPP_HUD_SPRITE_ROI))
+    my_sprite = _extract_sprite(_crop(frame, MY_HUD_SPRITE_ROI))
+    opp_sprite = _extract_sprite(_crop(frame, OPP_HUD_SPRITE_ROI))
 
     my_name, my_score, my_ranked = _match_sprite_name(my_sprite, my_names, current_name=current_my_name)
     opp_name, opp_score, opp_ranked = _match_sprite_name(opp_sprite, opp_names, current_name=current_opp_name)
