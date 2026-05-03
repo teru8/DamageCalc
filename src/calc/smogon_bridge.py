@@ -345,7 +345,9 @@ class SmogonBridge:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
+                    import atexit
                     cls._instance = SmogonBridge()
+                    atexit.register(cls._instance.close)
         return cls._instance
 
     def __init__(self) -> None:

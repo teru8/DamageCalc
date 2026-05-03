@@ -585,12 +585,16 @@ def load_all_pokemon() -> list[PokemonInstance]:
         ).fetchall()
     result = []
     for row in rows:
-        p = PokemonInstance(
+        try:
+            types = json.loads(row["types_json"] or "[]")
+        except json.JSONDecodeError:
+            types = []
+        pokemon = PokemonInstance(
             species_id=row["species_id"],
             name_ja=row["name_ja"],
             usage_name=row["usage_name"] or "",
             name_en=row["name_en"],
-            types=json.loads(row["types_json"] or "[]"),
+            types=types,
             nature=row["nature"],
             ability=row["ability"],
             item=row["item"],
@@ -601,11 +605,11 @@ def load_all_pokemon() -> list[PokemonInstance]:
             ev_defense=_from_db_ev(row["ev_defense"]), ev_sp_attack=_from_db_ev(row["ev_sp_attack"]),
             ev_sp_defense=_from_db_ev(row["ev_sp_defense"]), ev_speed=_from_db_ev(row["ev_speed"]),
             terastal_type=_terastal_from_db_ja(row["terastal_type"]),
-            moves=[m for m in [row["move1"], row["move2"],
-                                row["move3"], row["move4"]] if m],
+            moves=[move for move in [row["move1"], row["move2"],
+                                     row["move3"], row["move4"]] if move],
             db_id=row["id"],
         )
-        result.append(p)
+        result.append(pokemon)
     return result
 
 

@@ -41,8 +41,11 @@ def _read_text(frame: np.ndarray, roi: tuple[int, int, int, int], allowlist: str
 def _parse_hp_actual(text: str) -> tuple[int, int]:
     m = re.search(r"(\d+)\s*/\s*(\d+)", text or "")
     if m:
-        cur = int(m.group(1))
-        mx = int(m.group(2))
+        try:
+            cur = int(m.group(1))
+            mx = int(m.group(2))
+        except (ValueError, IndexError):
+            return 0, 0
         if mx > 0:
             return max(0, min(cur, mx)), mx
     return 0, 0

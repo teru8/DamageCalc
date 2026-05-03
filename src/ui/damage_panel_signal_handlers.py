@@ -59,7 +59,7 @@ def _edit_party_slot(self, side: str, idx: int) -> None:
         self._def_party_side = side
         self._def_party_idx = idx
         self._def_custom = copy.deepcopy(updated)
-        self._def_species_name = self._def_custom.name_ja
+        self._def_species_name = self._def_custom.name_ja or ""
         self._def_panel.set_pokemon(self._def_custom)
         self.defender_changed.emit(self._def_custom)
 

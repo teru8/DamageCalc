@@ -464,86 +464,8 @@ class DamagePanel(QWidget):
         pokemon: PokemonInstance | None,
         fallback_name_ja: str = "",
     ) -> SpeciesInfo | None:
-        from src.data.database import get_species_by_id, get_species_by_name_ja
-
-        species = None
-
-        name_ja = ""
-        if pokemon and pokemon.name_ja:
-            name_ja = pokemon.name_ja
-        elif fallback_name_ja:
-            name_ja = fallback_name_ja
-
-        if name_ja:
-            species = get_species_by_name_ja(name_ja)
-
-        if species is None and pokemon and pokemon.species_id:
-            species = get_species_by_id(pokemon.species_id)
-
-        if pokemon and pokemon.name_en:
-            if species is None or (species.name_en and species.name_en != pokemon.name_en):
-                form_species = _species_from_name_en(pokemon.name_en, pokemon.species_id, pokemon.name_ja)
-                if form_species is not None:
-                    species = form_species
-
-            if species is None:
-                normalized = pokemon.name_en.lower()
-                en_candidates: list[str] = []
-                if normalized.startswith("mega-"):
-                    en_candidates.append(normalized[5:])
-                if "-mega-" in normalized:
-                    en_candidates.append(normalized.split("-mega-")[0])
-                if normalized.endswith("-mega"):
-                    en_candidates.append(normalized[:-5])
-                for cand in en_candidates:
-                    if not cand:
-                        continue
-                    form_species = _species_from_name_en(cand, pokemon.species_id, pokemon.name_ja)
-                    if form_species is not None:
-                        species = form_species
-                        break
-
-        if species is None and name_ja.startswith("メガ"):
-            from src.calc.smogon_bridge import smogon_mega_species as _smogon_mega
-            base_name = name_ja[2:]
-            base_species = get_species_by_name_ja(base_name)
-            if base_species is None and base_name.endswith(("X", "Y", "Ｘ", "Ｙ")):
-                base_species = get_species_by_name_ja(base_name[:-1])
-            # Try _FORM_MISSING_MEGA_STATS first for accurate mega stats
-            if base_species:
-                smogon_name = _smogon_mega(base_species.name_en or "", name_ja)
-                fb = _FORM_MISSING_MEGA_STATS.get(smogon_name)
-                if fb:
-                    fb_en, fb_t1, fb_t2, fb_hp, fb_atk, fb_def, fb_spa, fb_spd, fb_spe, fb_wt = fb
-                    species = SpeciesInfo(
-                        species_id=base_species.species_id,
-                        name_ja=name_ja, name_en=fb_en,
-                        type1=fb_t1, type2=fb_t2,
-                        base_hp=fb_hp, base_attack=fb_atk, base_defense=fb_def,
-                        base_sp_attack=fb_spa, base_sp_defense=fb_spd, base_speed=fb_spe,
-                        weight_kg=fb_wt,
-                    )
-                else:
-                    species = base_species
-
-        # Fallback: resolve usage-scraper shorthand forms that may differ from DB name_ja.
-        # e.g. "()" → " ()" (if fetched) or ""
-        if species is None and name_ja:
-            _FLOETTE_ALIASES = ("フラエッテ(えいえん)", "フラエッテ (えいえん)",
-                                "フラエッテ(えいえんのはな)", "フラエッテ (えいえんのはな)")
-            if name_ja in _FLOETTE_ALIASES:
-                species = get_species_by_name_ja("フラエッテ (えいえんのはな)")
-                if species is None:
-                    species = get_species_by_name_ja("フラエッテ")
-
-        # Last resort: strip parenthetical form suffix and try base name
-        if species is None and name_ja:
-            import re as _re
-            base = _re.sub(r"\s*[（(].*?[)）]", "", name_ja).strip()
-            if base and base != name_ja:
-                species = get_species_by_name_ja(base)
-
-        return species
+        from src.ui.damage_panel_species import resolve_species
+        return resolve_species(pokemon, fallback_name_ja)
 
     def _calc_moves(self) -> None:
         from src.ui.damage_panel_calc_logic import _calc_moves as _impl
