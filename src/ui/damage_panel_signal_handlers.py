@@ -656,6 +656,18 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
 # ── Key mapping helpers ───────────────────────────────────────────
 
 
+def _open_copy_dialog(self) -> None:
+    _bootstrap()
+    from src.ui.damage_panel_copy_dialog import CopyDialog
+    webhook_url = ""
+    main_win = self.window()
+    if hasattr(main_win, "_load_settings"):
+        settings = main_win._load_settings()
+        webhook_url = settings.get("webhook_url", "")
+    dlg = CopyDialog(self, webhook_url=webhook_url, parent=self)
+    dlg.exec_()
+
+
 def _set_battle_format(self, mode: str) -> None:
     _bootstrap()
     self._battle_format = mode
