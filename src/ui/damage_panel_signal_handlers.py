@@ -170,9 +170,9 @@ def _change_attacker(self) -> None:
     dlg = MyBoxSelectDialog("攻撃側PT", self)
     if not dlg.exec_():
         return
-    p = dlg.selected_pokemon()
-    if p:
-        self._atk = copy.deepcopy(p)
+    selected_pokemon = dlg.selected_pokemon()
+    if selected_pokemon:
+        self._atk = copy.deepcopy(selected_pokemon)
         self._atk_party_side = None
         self._atk_party_idx = None
         self._atk_panel.set_pokemon(self._atk)
@@ -346,7 +346,7 @@ def _swap_atk_def(self) -> None:
     old_atk = self._atk
     self._atk = copy.deepcopy(self._def_custom)
     self._def_custom = copy.deepcopy(old_atk) if old_atk else None
-    self._def_species_name = self._def_custom.name_ja if self._def_custom else ""
+    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
     self._party_source = "opp" if self._party_source == "my" else "my"
     self._refresh_bulk_rows_visibility()
     self._atk_panel.set_pokemon(self._atk)
@@ -419,7 +419,7 @@ def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> Non
 def _set_defender_from_party(self, pokemon: PokemonInstance) -> None:
     _bootstrap()
     self._def_custom = copy.deepcopy(pokemon)
-    self._def_species_name = self._def_custom.name_ja if self._def_custom else ""
+    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
     self._def_panel.set_pokemon(self._def_custom)
     self.defender_changed.emit(self._def_custom)
 
@@ -575,7 +575,7 @@ def _on_form_change_def(self) -> None:
         self._def_form_cache[canon] = (next_name, original_ability)
         new_p = _apply_form(self._def_custom, next_name)
     self._def_custom = new_p
-    self._def_species_name = new_p.name_ja
+    self._def_species_name = new_p.name_ja or ""
     self._persist_party_member_edits()
     self._def_panel.set_pokemon(self._def_custom)
     self.defender_changed.emit(self._def_custom)
@@ -589,12 +589,12 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
     if idx >= len(self._my_party) or self._my_party[idx] is None:
         self._add_party_slot("my", idx)
         return
-    p = self._my_party[idx]
+    party_member = self._my_party[idx]
     if self._party_source == "my":
         self._atk_party_side = "my"
         self._atk_party_idx = idx
-        self._set_attacker_from_party(p, source="my")
-        norm = _normalize_form_name(p.name_ja)
+        self._set_attacker_from_party(party_member, source="my")
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
@@ -605,14 +605,14 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
     else:
         self._def_party_side = "my"
         self._def_party_idx = idx
-        self._set_defender_from_party(p)
-        norm = _normalize_form_name(p.name_ja)
+        self._set_defender_from_party(party_member)
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
             self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja
+            self._def_species_name = self._def_custom.name_ja or ""
             self._def_panel.set_pokemon(self._def_custom)
             self.defender_changed.emit(self._def_custom)
     self._refresh_party_slots()
@@ -624,12 +624,12 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
     if idx >= len(self._opp_party) or self._opp_party[idx] is None:
         self._add_party_slot("opp", idx)
         return
-    p = self._opp_party[idx]
+    party_member = self._opp_party[idx]
     if self._party_source == "opp":
         self._atk_party_side = "opp"
         self._atk_party_idx = idx
-        self._set_attacker_from_party(p, source="opp")
-        norm = _normalize_form_name(p.name_ja)
+        self._set_attacker_from_party(party_member, source="opp")
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
@@ -640,14 +640,14 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
     else:
         self._def_party_side = "opp"
         self._def_party_idx = idx
-        self._set_defender_from_party(p)
-        norm = _normalize_form_name(p.name_ja)
+        self._set_defender_from_party(party_member)
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
             self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja
+            self._def_species_name = self._def_custom.name_ja or ""
             self._def_panel.set_pokemon(self._def_custom)
             self.defender_changed.emit(self._def_custom)
     self._refresh_party_slots()

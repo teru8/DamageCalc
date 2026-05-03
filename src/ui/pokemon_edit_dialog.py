@@ -225,6 +225,7 @@ class _PokeApiVarietyStats:
 
 _POKEAPI_SESSION = requests.Session()
 _POKEAPI_SESSION.headers["User-Agent"] = APP_USER_AGENT
+_POKEAPI_TIMEOUT = (5, 15)
 _POKEAPI_VARIETY_CACHE: dict[int, list[_PokeApiVarietyStats]] = {}
 _FORM_SPECIES_CACHE: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_ABILITY_JA_CACHE: dict[str, str] = {}
@@ -944,7 +945,7 @@ def _pokeapi_get_json(url: str) -> dict:
     if not url:
         return {}
     try:
-        response = _POKEAPI_SESSION.get(url, timeout=15)
+        response = _POKEAPI_SESSION.get(url, timeout=_POKEAPI_TIMEOUT)
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else {}

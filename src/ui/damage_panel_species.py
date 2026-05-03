@@ -11,6 +11,7 @@ from src.models import PokemonInstance, SpeciesInfo
 _POKEAPI_SPECIES_CACHE_BY_NAME_EN: dict[str, SpeciesInfo | None] = {}
 _POKEAPI_SESSION = requests.Session()
 _POKEAPI_SESSION.headers["User-Agent"] = APP_USER_AGENT
+_POKEAPI_TIMEOUT = (5, 15)
 
 
 def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -> SpeciesInfo | None:
@@ -20,7 +21,7 @@ def species_from_name_en(name_en: str, species_id: int = 0, name_ja: str = "") -
     if key in _POKEAPI_SPECIES_CACHE_BY_NAME_EN:
         return _POKEAPI_SPECIES_CACHE_BY_NAME_EN[key]
     try:
-        response = _POKEAPI_SESSION.get("{}/pokemon/{}".format(POKEAPI_BASE, key), timeout=15)
+        response = _POKEAPI_SESSION.get("{}/pokemon/{}".format(POKEAPI_BASE, key), timeout=_POKEAPI_TIMEOUT)
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):

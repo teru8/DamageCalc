@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import json
 import math
+from itertools import zip_longest
 
 from PyQt5.QtCore import QPointF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -56,7 +57,7 @@ from src.ui.damage_panel_form_data import (
 def _normalize_form_name(name_ja: str) -> str:
     from src.ui.damage_panel_forms import normalize_form_name
 
-    return normalize_form_name(name_ja, _FORM_NAME_TO_GROUP)
+    return normalize_form_name((name_ja or "").strip(), _FORM_NAME_TO_GROUP)
 
 
 def _form_group(name_ja: str) -> list[str]:
@@ -71,7 +72,7 @@ def _next_form_name(name_ja: str) -> str | None:
     return next_form_name(name_ja, _FORM_NAME_TO_GROUP)
 
 
-def _apply_form(p: "PokemonInstance", form_name: str, original_ability: str = "") -> "PokemonInstance":
+def _apply_form(p: PokemonInstance, form_name: str, original_ability: str = "") -> PokemonInstance:
     return _apply_form_impl(
         pokemon=p,
         form_name=form_name,
@@ -87,13 +88,13 @@ def _apply_form(p: "PokemonInstance", form_name: str, original_ability: str = ""
 
 # ── Ability / Item quick-pick helpers ────────────────────────────────────
 
-def _pick_ability(pokemon: "PokemonInstance", parent: QWidget) -> "str | None":
+def _pick_ability(pokemon: PokemonInstance, parent: QWidget) -> str | None:
     from src.ui.damage_panel_pickers import pick_ability
 
     return pick_ability(pokemon, parent)
 
 
-def _pick_item(pokemon: "PokemonInstance", parent: QWidget) -> "str | None":
+def _pick_item(pokemon: PokemonInstance, parent: QWidget) -> str | None:
     from src.ui.damage_panel_pickers import pick_item
 
     return pick_item(pokemon, parent)
@@ -102,10 +103,10 @@ def _pick_item(pokemon: "PokemonInstance", parent: QWidget) -> "str | None":
 def _show_pick_dialog(
     title: str,
     items: list,
-    separator_after: "int | None",
+    separator_after: int | None,
     current: str,
     parent: QWidget,
-) -> "str | None":
+) -> str | None:
     from src.ui.damage_panel_pickers import show_pick_dialog
 
     return show_pick_dialog(title, items, separator_after, current, parent)
@@ -149,8 +150,8 @@ class DamagePanel(QWidget):
     # ── UI construction ───────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        from src.ui.damage_panel_ui_builders import _build_ui as _impl
-        return _impl(self)
+        from src.ui.damage_panel_ui_builders import _build_ui as build_ui_impl
+        return build_ui_impl(self)
 
     @property
     def side_panel(self) -> QWidget:
@@ -158,12 +159,12 @@ class DamagePanel(QWidget):
         return self._side_panel
 
     def _build_side_panel(self) -> None:
-        from src.ui.damage_panel_ui_builders import _build_side_panel as _impl
-        return _impl(self)
+        from src.ui.damage_panel_ui_builders import _build_side_panel as build_side_panel_impl
+        return build_side_panel_impl(self)
 
     def _build_content(self) -> None:
-        from src.ui.damage_panel_ui_builders import _build_content as _impl
-        return _impl(self)
+        from src.ui.damage_panel_ui_builders import _build_content as build_content_impl
+        return build_content_impl(self)
 
     def set_my_pokemon(self, pokemon: PokemonInstance) -> None:
         self._atk = copy.deepcopy(pokemon)
@@ -190,23 +191,23 @@ class DamagePanel(QWidget):
             layout.addWidget(widget, 0, Qt.AlignRight | Qt.AlignBottom)
 
     def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_party_slot_context_menu as _impl
-        return _impl(self, side, idx, global_pos)
+        from src.ui.damage_panel_signal_handlers import _on_party_slot_context_menu as on_party_slot_context_menu_impl
+        return on_party_slot_context_menu_impl(self, side, idx, global_pos)
 
     def _edit_party_slot(self, side: str, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _edit_party_slot as _impl
-        return _impl(self, side, idx)
+        from src.ui.damage_panel_signal_handlers import _edit_party_slot as edit_party_slot_impl
+        return edit_party_slot_impl(self, side, idx)
 
     def _save_party_slot_to_db(self, side: str, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _save_party_slot_to_db as _impl
-        return _impl(self, side, idx)
+        from src.ui.damage_panel_signal_handlers import _save_party_slot_to_db as save_party_slot_to_db_impl
+        return save_party_slot_to_db_impl(self, side, idx)
 
     def _add_party_slot(self, side: str, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _add_party_slot as _impl
-        return _impl(self, side, idx)
+        from src.ui.damage_panel_signal_handlers import _add_party_slot as add_party_slot_impl
+        return add_party_slot_impl(self, side, idx)
 
     def set_my_party(self, party: list[PokemonInstance | None]) -> None:
-        self._my_party = [copy.deepcopy(p) if p else None for p in party]
+        self._my_party = [copy.deepcopy(member) if member else None for member in party]
         self._refresh_party_slots()
 
     def set_opponent_options(
@@ -214,17 +215,17 @@ class DamagePanel(QWidget):
         party: list[PokemonInstance | None],
         active: PokemonInstance | None = None,
     ) -> None:
-        if not any(p for p in party):
+        if not any(member for member in party):
             return
-        self._opp_party = [(copy.deepcopy(p) if p else None) for p in (list(party) + [None] * 6)[:6]]
-        defender = active or next((p for p in self._opp_party if p), None)
+        self._opp_party = [(copy.deepcopy(member) if member else None) for member in (list(party) + [None] * 6)[:6]]
+        defender = active or next((member for member in self._opp_party if member), None)
         if not defender:
             return
         self._def_custom = copy.deepcopy(defender)
         self._def_species_name = defender.name_ja or ""
         self._def_party_side = "opp"
         self._def_party_idx = next(
-            (i for i, p in enumerate(self._opp_party) if p and p.name_ja == defender.name_ja),
+            (index for index, member in enumerate(self._opp_party) if member and member.name_ja == defender.name_ja),
             None,
         )
         self._def_panel.set_pokemon(self._def_custom)
@@ -249,10 +250,10 @@ class DamagePanel(QWidget):
         self.recalculate()
 
     def get_my_party_snapshot(self) -> list[PokemonInstance | None]:
-        return [copy.deepcopy(p) if p else None for p in self._my_party]
+        return [copy.deepcopy(member) if member else None for member in self._my_party]
 
     def get_opp_party_snapshot(self) -> list[PokemonInstance | None]:
-        return [copy.deepcopy(p) if p else None for p in self._opp_party]
+        return [copy.deepcopy(member) if member else None for member in self._opp_party]
 
     def set_weather(self, weather: str) -> None:
         _map = {"sun": "はれ", "rain": "あめ", "sand": "すな", "hail": "ゆき"}
@@ -433,8 +434,8 @@ class DamagePanel(QWidget):
             return
         self._is_recalculating = True
         try:
-            from src.ui.damage_panel_calc_logic import recalculate as _impl
-            _impl(self)
+            from src.ui.damage_panel_calc_logic import recalculate as recalculate_impl
+            recalculate_impl(self)
         finally:
             self._is_recalculating = False
 
@@ -448,9 +449,9 @@ class DamagePanel(QWidget):
             return
 
         opp_moves = self._def_custom.moves or []
-
-        for slot, opp_sec in enumerate(self._opp_move_sections):
-            opp_move_name = opp_moves[slot] if slot < len(opp_moves) else ""
+        for opp_sec, opp_move_name in zip_longest(self._opp_move_sections, opp_moves, fillvalue=None):
+            if opp_sec is None:
+                continue
             if opp_move_name:
                 opp_move_info = self._move_cache.get(opp_move_name) or get_move_by_name_ja(opp_move_name)
                 if opp_move_info:
@@ -468,12 +469,12 @@ class DamagePanel(QWidget):
         return resolve_species(pokemon, fallback_name_ja)
 
     def collect_calc_inputs(self):
-        from src.ui.damage_panel_calc_logic import collect_calc_inputs as _impl
-        return _impl(self)
+        from src.ui.damage_panel_calc_logic import collect_calc_inputs as collect_calc_inputs_impl
+        return collect_calc_inputs_impl(self)
 
     def _calc_moves(self) -> None:
-        from src.ui.damage_panel_calc_logic import _calc_moves as _impl
-        return _impl(self)
+        from src.ui.damage_panel_calc_logic import _calc_moves as _calc_moves_impl
+        return _calc_moves_impl(self)
 
     def _refresh_defender_card(self, atk_view: PokemonInstance | None = None) -> None:
         self._atk_card.set_pokemon(atk_view if atk_view is not None else self._atk)
@@ -508,12 +509,12 @@ class DamagePanel(QWidget):
                 party[self._def_party_idx] = copy.deepcopy(self._def_custom)
 
     def _on_atk_panel_changed(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_atk_panel_changed as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _on_atk_panel_changed as _on_atk_panel_changed_impl
+        return _on_atk_panel_changed_impl(self)
 
     def _on_def_panel_changed(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_def_panel_changed as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _on_def_panel_changed as _on_def_panel_changed_impl
+        return _on_def_panel_changed_impl(self)
 
     def _effective_def_types(self) -> list[str]:
         tera = self._def_panel.terastal_type() if hasattr(self, "_def_panel") else ""
@@ -536,15 +537,17 @@ class DamagePanel(QWidget):
         if not hasattr(self, "_my_party_slots"):
             return
         my_is_attacker = (self._party_source == "my")
-        atk_canon = (_FORM_NAME_TO_GROUP.get(self._atk.name_ja) or [self._atk.name_ja])[0] if self._atk else ""
-        def_canon = (_FORM_NAME_TO_GROUP.get(self._def_custom.name_ja) or [self._def_custom.name_ja])[0] if self._def_custom else ""
-        atk_current = self._atk.name_ja if self._atk else ""
-        def_current = self._def_custom.name_ja if self._def_custom else ""
+        atk_name = (self._atk.name_ja or "") if self._atk else ""
+        def_name = (self._def_custom.name_ja or "") if self._def_custom else ""
+        atk_canon = (_FORM_NAME_TO_GROUP.get(atk_name) or [atk_name])[0] if atk_name else ""
+        def_canon = (_FORM_NAME_TO_GROUP.get(def_name) or [def_name])[0] if def_name else ""
+        atk_current = atk_name
+        def_current = def_name
         atk_idx_known = self._atk_party_side is not None and self._atk_party_idx is not None
         def_idx_known = self._def_party_side is not None and self._def_party_idx is not None
         for i, slot in enumerate(self._my_party_slots):
             if i < len(self._my_party) and self._my_party[i]:
-                name = self._my_party[i].name_ja
+                name = self._my_party[i].name_ja or ""
                 name_canon = (_FORM_NAME_TO_GROUP.get(name) or [name])[0]
                 if atk_idx_known:
                     is_atk = my_is_attacker and self._atk_party_side == "my" and self._atk_party_idx == i
@@ -560,7 +563,7 @@ class DamagePanel(QWidget):
                 slot.set_name("")
         for i, slot in enumerate(self._opp_party_slots):
             if i < len(self._opp_party) and self._opp_party[i]:
-                name = self._opp_party[i].name_ja
+                name = self._opp_party[i].name_ja or ""
                 name_canon = (_FORM_NAME_TO_GROUP.get(name) or [name])[0]
                 if atk_idx_known:
                     is_atk = not my_is_attacker and self._atk_party_side == "opp" and self._atk_party_idx == i
@@ -578,120 +581,120 @@ class DamagePanel(QWidget):
     # ── Event handlers ────────────────────────────────────────────────
 
     def _edit_attacker(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _edit_attacker as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _edit_attacker as _edit_attacker_impl
+        return _edit_attacker_impl(self)
 
     def _new_attacker(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _new_attacker as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _new_attacker as _new_attacker_impl
+        return _new_attacker_impl(self)
 
     def _clear_attacker(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _clear_attacker as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _clear_attacker as _clear_attacker_impl
+        return _clear_attacker_impl(self)
 
     def _change_attacker(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_attacker as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_attacker as _change_attacker_impl
+        return _change_attacker_impl(self)
 
     def _edit_defender(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _edit_defender as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _edit_defender as _edit_defender_impl
+        return _edit_defender_impl(self)
 
     def _new_defender(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _new_defender as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _new_defender as _new_defender_impl
+        return _new_defender_impl(self)
 
     def _clear_defender(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _clear_defender as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _clear_defender as _clear_defender_impl
+        return _clear_defender_impl(self)
 
     def _change_defender(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_defender as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_defender as _change_defender_impl
+        return _change_defender_impl(self)
 
     def _box_select_into_slot(self, side: str, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _box_select_into_slot as _impl
-        return _impl(self, side, idx)
+        from src.ui.damage_panel_signal_handlers import _box_select_into_slot as _box_select_into_slot_impl
+        return _box_select_into_slot_impl(self, side, idx)
 
     def _change_move(self, slot: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_move as _impl
-        return _impl(self, slot)
+        from src.ui.damage_panel_signal_handlers import _change_move as _change_move_impl
+        return _change_move_impl(self, slot)
 
     def _change_opp_move(self, slot: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_opp_move as _impl
-        return _impl(self, slot)
+        from src.ui.damage_panel_signal_handlers import _change_opp_move as _change_opp_move_impl
+        return _change_opp_move_impl(self, slot)
 
     def _swap_atk_def(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _swap_atk_def as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _swap_atk_def as _swap_atk_def_impl
+        return _swap_atk_def_impl(self)
 
     def _reset_conditions(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _reset_conditions as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _reset_conditions as _reset_conditions_impl
+        return _reset_conditions_impl(self)
 
     def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> None:
-        from src.ui.damage_panel_signal_handlers import _set_attacker_from_party as _impl
-        return _impl(self, pokemon, source)
+        from src.ui.damage_panel_signal_handlers import _set_attacker_from_party as _set_attacker_from_party_impl
+        return _set_attacker_from_party_impl(self, pokemon, source)
 
     def _set_defender_from_party(self, pokemon: PokemonInstance) -> None:
-        from src.ui.damage_panel_signal_handlers import _set_defender_from_party as _impl
-        return _impl(self, pokemon)
+        from src.ui.damage_panel_signal_handlers import _set_defender_from_party as _set_defender_from_party_impl
+        return _set_defender_from_party_impl(self, pokemon)
 
     def _change_atk_ability(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_atk_ability as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_atk_ability as _change_atk_ability_impl
+        return _change_atk_ability_impl(self)
 
     def _change_atk_item(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_atk_item as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_atk_item as _change_atk_item_impl
+        return _change_atk_item_impl(self)
 
     def _change_def_ability(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_def_ability as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_def_ability as _change_def_ability_impl
+        return _change_def_ability_impl(self)
 
     def _change_def_item(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _change_def_item as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _change_def_item as _change_def_item_impl
+        return _change_def_item_impl(self)
 
     def _on_form_change_atk(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_form_change_atk as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _on_form_change_atk as _on_form_change_atk_impl
+        return _on_form_change_atk_impl(self)
 
     def _on_form_change_def(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_form_change_def as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _on_form_change_def as _on_form_change_def_impl
+        return _on_form_change_def_impl(self)
 
     def _on_my_party_slot_clicked(self, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_my_party_slot_clicked as _impl
-        return _impl(self, idx)
+        from src.ui.damage_panel_signal_handlers import _on_my_party_slot_clicked as _on_my_party_slot_clicked_impl
+        return _on_my_party_slot_clicked_impl(self, idx)
 
     def _on_opp_party_slot_clicked(self, idx: int) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_opp_party_slot_clicked as _impl
-        return _impl(self, idx)
+        from src.ui.damage_panel_signal_handlers import _on_opp_party_slot_clicked as _on_opp_party_slot_clicked_impl
+        return _on_opp_party_slot_clicked_impl(self, idx)
 
     def _open_copy_dialog(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _open_copy_dialog as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _open_copy_dialog as _open_copy_dialog_impl
+        return _open_copy_dialog_impl(self)
 
     def _set_battle_format(self, mode: str) -> None:
-        from src.ui.damage_panel_signal_handlers import _set_battle_format as _impl
-        return _impl(self, mode)
+        from src.ui.damage_panel_signal_handlers import _set_battle_format as _set_battle_format_impl
+        return _set_battle_format_impl(self, mode)
 
     def _toggle_details(self, checked: bool) -> None:
-        from src.ui.damage_panel_signal_handlers import _toggle_details as _impl
-        return _impl(self, checked)
+        from src.ui.damage_panel_signal_handlers import _toggle_details as _toggle_details_impl
+        return _toggle_details_impl(self, checked)
 
     def _apply_bulk_rows_default(self) -> None:
-        from src.ui.damage_panel_signal_handlers import _apply_bulk_rows_default as _impl
-        return _impl(self)
+        from src.ui.damage_panel_signal_handlers import _apply_bulk_rows_default as _apply_bulk_rows_default_impl
+        return _apply_bulk_rows_default_impl(self)
 
     def _set_bulk_rows_visible(self, visible: bool, refresh: bool = True) -> None:
-        from src.ui.damage_panel_signal_handlers import _set_bulk_rows_visible as _impl
-        return _impl(self, visible, refresh)
+        from src.ui.damage_panel_signal_handlers import _set_bulk_rows_visible as _set_bulk_rows_visible_impl
+        return _set_bulk_rows_visible_impl(self, visible, refresh)
 
     def _on_bulk_toggle_clicked(self, checked: bool) -> None:
-        from src.ui.damage_panel_signal_handlers import _on_bulk_toggle_clicked as _impl
-        return _impl(self, checked)
+        from src.ui.damage_panel_signal_handlers import _on_bulk_toggle_clicked as _on_bulk_toggle_clicked_impl
+        return _on_bulk_toggle_clicked_impl(self, checked)
 
     def _refresh_bulk_rows_visibility(self) -> None:
         pass

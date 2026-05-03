@@ -21,6 +21,16 @@ def _get_usage_scraper_symbols(self):
 
 def _build_ui(self) -> None:
     _bootstrap()
+    old_damage_panel = getattr(self, "_damage_panel", None)
+    if old_damage_panel is not None:
+        try:
+            old_damage_panel.attacker_changed.disconnect(self._on_damage_panel_atk_changed)
+            old_damage_panel.defender_changed.disconnect(self._on_damage_panel_def_changed)
+            old_damage_panel.registry_maybe_changed.disconnect(self._refresh_registry_list)
+            old_damage_panel.bridge_payload_logged.disconnect(self._on_bridge_payload_log)
+        except (RuntimeError, TypeError):
+            pass
+
     central = QWidget()
     self.setCentralWidget(central)
     self._root_layout = QHBoxLayout(central)

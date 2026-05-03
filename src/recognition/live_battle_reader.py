@@ -55,12 +55,18 @@ def _parse_hp_percent(text: str) -> float:
     clean = (text or "").replace(" ", "").replace("　", "")
     m = re.search(r"(\d+(?:\.\d+)?)\s*[%％]", clean)
     if m:
-        value = float(m.group(1))
+        try:
+            value = float(m.group(1))
+        except (TypeError, ValueError, IndexError):
+            value = -1.0
         if 0.0 <= value <= 100.0:
             return value
     m = re.search(r"(\d+(?:\.\d+)?)", clean)
     if m:
-        value = float(m.group(1))
+        try:
+            value = float(m.group(1))
+        except (TypeError, ValueError, IndexError):
+            value = -1.0
         if 0.0 <= value <= 100.0:
             return value
     return -1.0

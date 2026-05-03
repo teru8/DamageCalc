@@ -14,7 +14,7 @@ _BASE_URL = "https://zukan.pokemon.co.jp"
 _SEARCH_API_URL = _BASE_URL + "/zukan-api/api/search/?limit=2000&page=1"
 _MASTERS_API_URL = _BASE_URL + "/zukan-api/api/masters/"
 _CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
-_TIMEOUT_SECONDS = 20
+_TIMEOUT = (5, 15)
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ def get_pokemon_index(force_refresh: bool = False) -> list[ZukanPokemonEntry]:
     try:
         response = requests.get(
             _SEARCH_API_URL,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=_TIMEOUT,
             headers={"User-Agent": "PokeDamageCalc/1.0"},
         )
         response.raise_for_status()
@@ -150,7 +150,7 @@ def get_masters(force_refresh: bool = False) -> dict[str, Any]:
     try:
         response = requests.get(
             _MASTERS_API_URL,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=_TIMEOUT,
             headers={"User-Agent": "PokeDamageCalc/1.0"},
         )
         response.raise_for_status()
@@ -201,7 +201,7 @@ def get_cached_asset_bytes(url: str) -> bytes | None:
     try:
         response = requests.get(
             url,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=_TIMEOUT,
             headers={"User-Agent": "PokeDamageCalc/1.0"},
         )
         response.raise_for_status()
@@ -237,7 +237,7 @@ def get_pokemon_detail(dex_no: str, force_refresh: bool = False) -> dict[str, An
     try:
         response = requests.get(
             url,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=_TIMEOUT,
             headers={"User-Agent": "PokeDamageCalc/1.0"},
         )
         response.raise_for_status()

@@ -19,6 +19,42 @@ def _safe_disconnect(worker: QThread | None, *signals) -> None:
             pass
 
 
+def _disconnect_damage_panel_signals(self) -> None:
+    try:
+        self._damage_panel.attacker_changed.disconnect()
+        self._damage_panel.defender_changed.disconnect()
+        self._damage_panel.registry_maybe_changed.disconnect()
+        self._damage_panel.bridge_payload_logged.disconnect()
+    except RuntimeError:
+        pass
+
+
+def _stop_and_disconnect_timers(self) -> None:
+    self._live_battle_timer.stop()
+    self._live_battle_timer.timeout.disconnect()
+    self._opp_auto_detect_timer.stop()
+    self._opp_auto_detect_timer.timeout.disconnect()
+
+
+def _cleanup_runtime_resources(self) -> None:
+    _stop_and_disconnect_timers(self)
+    _disconnect_damage_panel_signals(self)
+    self._stop_live_battle_tracking(show_message=False, write_log=False)
+    self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
+    _stop_video_thread_if_present(self)
+
+
+def _stop_video_thread_if_present(self, wait_timeout_ms: int = 3000) -> None:
+    """Stop and clear current video thread if present."""
+    if self._video_thread is None:
+        self._camera_state.mark_inactive()
+        return
+    self._video_thread.stop()
+    self._video_thread.wait(wait_timeout_ms)
+    self._video_thread = None
+    self._camera_state.mark_inactive()
+
+
 def _bootstrap() -> None:
     from src.ui import main_window as _mw
     globals().update(_mw.__dict__)
@@ -89,12 +125,7 @@ def _on_webhook_url_changed(self) -> None:
 
 def _start_background_tasks(self) -> None:
     _bootstrap()
-    # 既に起動中の OCR スレッドがある場合は多重起動しない
-    existing: "OcrInitThread | None" = getattr(self, "_ocr_thread", None)
-    if existing is None or not existing.isRunning():
-        self._ocr_thread = OcrInitThread(use_gpu=False)
-        self._ocr_thread.finished.connect(self._on_ocr_ready)
-        self._ocr_thread.start()
+    self._start_ocr_init_thread()
 
     settings = self._load_settings()
     if settings.get("sample_party_applied"):
@@ -195,11 +226,10 @@ def _toggle_camera(self) -> None:
     # 二重クリック防止: 処理中はボタンを無効化し、終了時に必ず再有効化する
     self._connect_btn.setEnabled(False)
     try:
-        if self._video_thread and self._video_thread.isRunning():
+        if self._camera_state.active and self._video_thread and self._video_thread.isRunning():
             self._stop_live_battle_tracking(show_message=False, write_log=False)
             self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
-            self._video_thread.stop()
-            self._video_thread = None
+            _stop_video_thread_if_present(self)
             self._connect_btn.setText("接続")
             self._preview_lbl.setText("カメラ未接続")
             self._log("カメラ切断")
@@ -207,8 +237,7 @@ def _toggle_camera(self) -> None:
 
         # 参照は残っているが停止済みの thread を確実にクリーンアップ
         if self._video_thread is not None:
-            self._video_thread.stop()
-            self._video_thread = None
+            _stop_video_thread_if_present(self)
 
         idx = self._cam_combo.currentData()
         if idx is None or idx < 0:
@@ -217,6 +246,7 @@ def _toggle_camera(self) -> None:
         self._video_thread = VideoThread(idx)
         self._video_thread.frame_ready.connect(self._on_frame)
         self._video_thread.start()
+        self._camera_state.mark_active()
         self._connect_btn.setText("切断")
         self._log("カメラ接続: インデックス {}".format(idx))
         self._save_settings(last_camera_index=idx)
@@ -410,12 +440,12 @@ def _on_party_slot_clicked(self, index: int, is_my: bool) -> None:
         if selected:
             self._battle_state.my_pokemon = copy.deepcopy(selected)
         elif previous and self._battle_state.my_pokemon and self._battle_state.my_pokemon.name_ja == previous.name_ja:
-            self._battle_state.my_pokemon = copy.deepcopy(next((p for p in target_party if p), None))
+            self._battle_state.my_pokemon = copy.deepcopy(next((member for member in target_party if member), None))
     else:
         if selected:
             self._battle_state.opponent_pokemon = copy.deepcopy(selected)
         elif previous and self._battle_state.opponent_pokemon and self._battle_state.opponent_pokemon.name_ja == previous.name_ja:
-            self._battle_state.opponent_pokemon = copy.deepcopy(next((p for p in target_party if p), None))
+            self._battle_state.opponent_pokemon = copy.deepcopy(next((member for member in target_party if member), None))
 
     self._sync_battle_state_to_panels()
 
@@ -430,7 +460,7 @@ def _on_my_party_panel_dropped(self, name_ja: str) -> None:
 def _try_add_to_my_party(self, name_ja: str, source: str = "click") -> None:
     _bootstrap()
     self._ensure_party_slots()
-    pokemon = next((p for p in self._registered_pokemon if p and p.name_ja == name_ja), None)
+    pokemon = next((registered for registered in self._registered_pokemon if registered and registered.name_ja == name_ja), None)
     if pokemon is None:
         return
     empty_idx = next((i for i, p in enumerate(self._battle_state.my_party) if p is None), -1)
@@ -482,7 +512,7 @@ def _on_my_party_panel_context_menu(self, global_pos) -> None:
 def _on_party_slot_dropped(self, index: int, name_ja: str) -> None:
     _bootstrap()
     self._ensure_party_slots()
-    pokemon = next((p for p in self._registered_pokemon if p and p.name_ja == name_ja), None)
+    pokemon = next((registered for registered in self._registered_pokemon if registered and registered.name_ja == name_ja), None)
     if pokemon is None:
         return
     previous = self._battle_state.my_party[index]
@@ -506,7 +536,7 @@ def _on_party_slot_cleared(self, index: int) -> None:
     self._battle_state.my_party[index] = None
     if previous and self._battle_state.my_pokemon and self._battle_state.my_pokemon.name_ja == previous.name_ja:
         self._battle_state.my_pokemon = copy.deepcopy(
-            next((p for p in self._battle_state.my_party if p), None)
+            next((member for member in self._battle_state.my_party if member), None)
         )
     self._sync_battle_state_to_panels()
 
@@ -775,7 +805,9 @@ def _auto_detect_opponent_party(self) -> None:
                 summary.append("{}: --- [{}]".format(slot["slot_index"] + 1, type_text))
 
         self._battle_state.opponent_party = (detected_party + [None] * 6)[:6]
-        self._battle_state.opponent_pokemon = copy.deepcopy(next((p for p in self._battle_state.opponent_party if p), None))
+        self._battle_state.opponent_pokemon = copy.deepcopy(
+            next((member for member in self._battle_state.opponent_party if member), None)
+        )
         self._sync_battle_state_to_panels()
         self._log("相手PT検出[{}]: {}".format(season, " | ".join(summary)))
         self._status_bar.showMessage("相手PTを検出しました")
@@ -1058,12 +1090,16 @@ def _apply_live_battle_data(self, live_data: dict) -> tuple[bool, str]:
 
     my_text = "---"
     if self._battle_state.my_pokemon:
-        p = self._battle_state.my_pokemon
-        my_text = "{} {}/{}".format(p.name_ja, max(0, int(p.current_hp)), max(0, int(p.max_hp)))
+        my_pokemon = self._battle_state.my_pokemon
+        my_text = "{} {}/{}".format(
+            my_pokemon.name_ja,
+            max(0, int(my_pokemon.current_hp)),
+            max(0, int(my_pokemon.max_hp)),
+        )
     opp_text = "---"
     if self._battle_state.opponent_pokemon:
-        p = self._battle_state.opponent_pokemon
-        opp_text = "{} {:.1f}%".format(p.name_ja, float(p.current_hp_percent))
+        opponent_pokemon = self._battle_state.opponent_pokemon
+        opp_text = "{} {:.1f}%".format(opponent_pokemon.name_ja, float(opponent_pokemon.current_hp_percent))
     return changed, "自分 {} | 相手 {}".format(my_text, opp_text)
 
 
@@ -1239,8 +1275,8 @@ def _refresh_registry_list(self) -> None:
     self._registered_pokemon = db.load_all_pokemon()
     type_filter: set[str] = getattr(self, "_box_type_filter", set())
     filtered = [
-        p for p in self._registered_pokemon
-        if not type_filter or type_filter.issubset(set(p.types or []))
+        registered_pokemon for registered_pokemon in self._registered_pokemon
+        if not type_filter or type_filter.issubset(set(registered_pokemon.types or []))
     ]
 
     if not hasattr(self, "_reg_grid_layout"):
@@ -1258,21 +1294,21 @@ def _refresh_registry_list(self) -> None:
     _CELL_H = 112
     _SPRITE_SIZE = 72
 
-    for idx, p in enumerate(filtered):
+    for idx, registered_pokemon in enumerate(filtered):
         ev_pairs = [
-            ("H", p.ev_hp // 8),
-            ("A", p.ev_attack // 8),
-            ("B", p.ev_defense // 8),
-            ("C", p.ev_sp_attack // 8),
-            ("D", p.ev_sp_defense // 8),
-            ("S", p.ev_speed // 8),
+            ("H", registered_pokemon.ev_hp // 8),
+            ("A", registered_pokemon.ev_attack // 8),
+            ("B", registered_pokemon.ev_defense // 8),
+            ("C", registered_pokemon.ev_sp_attack // 8),
+            ("D", registered_pokemon.ev_sp_defense // 8),
+            ("S", registered_pokemon.ev_speed // 8),
         ]
         ev_pairs = [(lbl, v) for lbl, v in ev_pairs if v > 0]
         ev_pairs.sort(key=lambda x: (-x[1], "HABCDS".find(x[0]) if x[0] in "HABCDS" else 9))
         top2_ev = " ".join("{}:{}".format(lbl, v) for lbl, v in ev_pairs[:2]) if ev_pairs else "無振り"
-        item_text = (p.item or "").strip() or "なし"
+        item_text = (registered_pokemon.item or "").strip() or "なし"
 
-        cell = _DraggableCell(p.name_ja)
+        cell = _DraggableCell(registered_pokemon.name_ja)
         cell.setFrameShape(QFrame.StyledPanel)
         cell.setFixedSize(_CELL_W, _CELL_H)
         cell.setProperty("pokemon_data", idx)
@@ -1289,11 +1325,16 @@ def _refresh_registry_list(self) -> None:
         sprite_lbl.setFixedSize(_SPRITE_SIZE, _SPRITE_SIZE)
         sprite_lbl.setAlignment(Qt.AlignCenter)
         sprite_lbl.setStyleSheet("border: none;")
-        pm = sprite_pixmap_or_zukan(p.name_ja, _SPRITE_SIZE, _SPRITE_SIZE, name_en=p.name_en or "")
+        pm = sprite_pixmap_or_zukan(
+            registered_pokemon.name_ja,
+            _SPRITE_SIZE,
+            _SPRITE_SIZE,
+            name_en=registered_pokemon.name_en or "",
+        )
         if pm:
             sprite_lbl.setPixmap(pm)
         else:
-            sprite_lbl.setText(p.name_ja[:4] if p.name_ja else "?")
+            sprite_lbl.setText(registered_pokemon.name_ja[:4] if registered_pokemon.name_ja else "?")
             sprite_lbl.setStyleSheet("color: #cdd6f4; font-size: 10px;")
         cell_layout.addWidget(sprite_lbl, 0, Qt.AlignHCenter)
 
@@ -1309,7 +1350,7 @@ def _refresh_registry_list(self) -> None:
         ev_lbl.setStyleSheet("color: #a6e3a1; font-size: 16px; font-weight: bold; border: none;")
         cell_layout.addWidget(ev_lbl)
 
-        pokemon_ref = p
+        pokemon_ref = registered_pokemon
 
         def _make_ctx_handler(poke: PokemonInstance, widget: QFrame):
             def handler(pos):
@@ -1452,11 +1493,11 @@ def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, 
         return None, "実数値行は「H-A-B-C-D-S」の6項目で入力してください。"
 
     def _parse_stat_part(part: str) -> tuple[int, int]:
-        m = re.match(r"^(\d+)(?:\((\d+)\))?$", part)
-        if not m:
+        stat_match = re.match(r"^(\d+)(?:\((\d+)\))?$", part)
+        if not stat_match:
             raise ValueError
-        stat_val = int(m.group(1))
-        ev_display = int(m.group(2)) if m.group(2) else 0
+        stat_val = int(stat_match.group(1))
+        ev_display = int(stat_match.group(2)) if stat_match.group(2) else 0
         ev_internal = (ev_display + 4) if ev_display > 0 else 0
         return stat_val, ev_internal
 
@@ -1466,7 +1507,7 @@ def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, 
         return None, "実数値行の形式が不正です。"
 
     move_line = lines[5]
-    moves = [m.strip() for m in move_line.split("/") if m.strip()]
+    moves = [move_name.strip() for move_name in move_line.split("/") if move_name.strip()]
     if not moves:
         return None, "技行が不正です。"
 
@@ -1635,9 +1676,9 @@ def _find_registered(self, name_ja: str) -> PokemonInstance | None:
     target = text_matcher.normalize_ocr_text(text_matcher.match_species_name(name_ja))
     if not target:
         return None
-    for p in self._registered_pokemon:
-        if text_matcher.normalize_ocr_text(p.name_ja) == target:
-            return p
+    for registered_pokemon in self._registered_pokemon:
+        if text_matcher.normalize_ocr_text(registered_pokemon.name_ja) == target:
+            return registered_pokemon
     return None
 
 
@@ -1751,8 +1792,7 @@ def _apply_top_saved_party_on_startup(self) -> None:
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
-        next((p for p in self._battle_state.my_party if p and p.name_ja == my_active_name), None)
-        or next((p for p in self._battle_state.my_party if p), None)
+        _select_active_my_party_member(self._battle_state.my_party, my_active_name)
     )
     self._sync_battle_state_to_panels()
 
@@ -1762,8 +1802,8 @@ def _save_party_preset(self, to_top: bool = False) -> None:
     _bootstrap()
     self._ensure_party_slots()
     entry = {
-        "my_party": [self._serialize_pokemon(p) for p in self._battle_state.my_party],
-        "opponent_party": [self._serialize_pokemon(p) for p in self._battle_state.opponent_party],
+        "my_party": [self._serialize_pokemon(member) for member in self._battle_state.my_party],
+        "opponent_party": [self._serialize_pokemon(member) for member in self._battle_state.opponent_party],
         "my_active_name": self._battle_state.my_pokemon.name_ja if self._battle_state.my_pokemon else "",
         "opp_active_name": self._battle_state.opponent_pokemon.name_ja if self._battle_state.opponent_pokemon else "",
     }
@@ -1797,8 +1837,7 @@ def _load_party_preset_at(self, index: int) -> None:
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
-        next((p for p in self._battle_state.my_party if p and p.name_ja == my_active_name), None)
-        or next((p for p in self._battle_state.my_party if p), None)
+        _select_active_my_party_member(self._battle_state.my_party, my_active_name)
     )
     self._sync_battle_state_to_panels()
     self._status_bar.showMessage("保存済みパーティを反映しました", 4000)
@@ -1845,6 +1884,15 @@ def _move_saved_party_to_top(self, index: int) -> None:
     self._refresh_party_presets_ui()
     self._load_party_preset_at(0)
 
+
+
+def _select_active_my_party_member(
+    party: list[PokemonInstance | None],
+    active_name: str,
+) -> PokemonInstance | None:
+    return next((member for member in party if member and member.name_ja == active_name), None) or next(
+        (member for member in party if member), None
+    )
 
 
 def _reset_all_party(self) -> None:
@@ -2009,21 +2057,7 @@ def _auto_connect_saved_camera(self) -> None:
 
 def closeEvent(self, event) -> None:
     _bootstrap()
-    self._live_battle_timer.stop()
-    self._live_battle_timer.timeout.disconnect()
-    self._opp_auto_detect_timer.stop()
-    self._opp_auto_detect_timer.timeout.disconnect()
-    try:
-        self._damage_panel.attacker_changed.disconnect()
-        self._damage_panel.defender_changed.disconnect()
-        self._damage_panel.registry_maybe_changed.disconnect()
-        self._damage_panel.bridge_payload_logged.disconnect()
-    except RuntimeError:
-        pass
-    self._stop_live_battle_tracking(show_message=False, write_log=False)
-    self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
-    if self._video_thread:
-        self._video_thread.stop()
+    _cleanup_runtime_resources(self)
     event.accept()
 
 

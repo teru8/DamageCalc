@@ -7,6 +7,7 @@ Result dict structure from winocr.recognize_pil_sync:
 """
 import hashlib
 import logging
+import os
 import unicodedata
 from collections import OrderedDict
 from typing import Any
@@ -34,7 +35,33 @@ class _LRUDict(OrderedDict):
         return value
 
 
-_OCR_RESULT_CACHE: _LRUDict = _LRUDict(64)
+_DEFAULT_OCR_CACHE_SIZE = 64
+
+
+def _resolve_ocr_cache_size() -> int:
+    raw_value = os.environ.get("OCR_CACHE_SIZE", "").strip()
+    if not raw_value:
+        return _DEFAULT_OCR_CACHE_SIZE
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        logging.warning(
+            "Invalid OCR_CACHE_SIZE=%r; using default %d",
+            raw_value,
+            _DEFAULT_OCR_CACHE_SIZE,
+        )
+        return _DEFAULT_OCR_CACHE_SIZE
+    if parsed <= 0:
+        logging.warning(
+            "Non-positive OCR_CACHE_SIZE=%d; using default %d",
+            parsed,
+            _DEFAULT_OCR_CACHE_SIZE,
+        )
+        return _DEFAULT_OCR_CACHE_SIZE
+    return parsed
+
+
+_OCR_RESULT_CACHE: _LRUDict = _LRUDict(_resolve_ocr_cache_size())
 
 
 def is_ready() -> bool:

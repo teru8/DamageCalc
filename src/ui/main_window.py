@@ -33,6 +33,8 @@ from src.recognition import opponent_party_auto_trigger
 from src.constants import OCR_INTERVAL_MS, TYPE_EN_TO_JA, TYPE_JA_TO_EN
 from src.ui.damage_panel import DamagePanel
 from src.ui.main_window_panels import _DraggableCell, _SavedPartyPanel, _MyPartyPanel
+from src.ui.main_window_camera_state import CameraRuntimeState
+from src.ui.main_window_ocr_manager import OcrRetryManager
 from src.ui.pokemon_edit_dialog import ChipButton, TypeIconButton
 from src.ui.ui_utils import open_pokemon_edit_dialog
 
@@ -118,11 +120,11 @@ def _parse_sample_party() -> list[PokemonInstance]:
         parts = block_lines[4].split("-")
         stats: list[int] = []
         evs: list[int] = []
-        for p in parts[:6]:
-            m = stat_re.match(p.strip())
-            if m:
-                stats.append(int(m.group(1)))
-                evs.append(int(m.group(2)) if m.group(2) else 0)
+        for stat_part in parts[:6]:
+            stat_match = stat_re.match(stat_part.strip())
+            if stat_match:
+                stats.append(int(stat_match.group(1)))
+                evs.append(int(stat_match.group(2)) if stat_match.group(2) else 0)
             else:
                 stats.append(0)
                 evs.append(0)
@@ -130,10 +132,10 @@ def _parse_sample_party() -> list[PokemonInstance]:
             stats.append(0)
             evs.append(0)
         # Line 5:
-        moves = [m.strip() for m in block_lines[5].split("/")][:4]
+        moves = [move_name.strip() for move_name in block_lines[5].split("/")][:4]
         # DB
         species = db.get_species_by_name_ja(name_ja)
-        p = PokemonInstance(
+        pokemon_instance = PokemonInstance(
             species_id=species.species_id if species else 0,
             name_ja=name_ja,
             name_en=species.name_en if species else "",
@@ -149,7 +151,7 @@ def _parse_sample_party() -> list[PokemonInstance]:
             moves=moves,
             terastal_type=tera_en,
         )
-        result.append(p)
+        result.append(pokemon_instance)
     return result
 
 
@@ -172,7 +174,7 @@ class MainWindow(QMainWindow):
         self._option_damage_bulk_cb: QCheckBox | None = None
         self._option_damage_double_cb: QCheckBox | None = None
         self._option_detailed_log_cb: QCheckBox | None = None
-        self._webhook_url_edit: "QLineEdit | None" = None
+        self._webhook_url_edit: QLineEdit | None = None
         self._option_season_combo: QComboBox | None = None
         self._option_source_combo: QComboBox | None = None
         self._options_dialog: QDialog | None = None
@@ -194,18 +196,44 @@ class MainWindow(QMainWindow):
         self._sample_party_pending = False
         self._syncing_battle_state_to_panels = False
         self._saved_party_list_layout: QVBoxLayout | None = None
+        self._ocr_thread: OcrInitThread | None = None
+        self._init_runtime_states()
+        self._init_timers()
+
+        self._initialize_application_state()
+
+    def _init_runtime_states(self) -> None:
+        self._camera_state = CameraRuntimeState(active=False)
+        self._ocr_retry_manager = OcrRetryManager(max_retries=3, retry_delay_ms=2000)
+
+    def _init_timers(self) -> None:
+        self._ocr_retry_timer = QTimer(self)
+        self._ocr_retry_timer.setSingleShot(True)
+        self._ocr_retry_timer.timeout.connect(self._start_ocr_init_thread)
+
         self._live_battle_timer = QTimer(self)
         self._live_battle_timer.setInterval(max(300, int(OCR_INTERVAL_MS)))
         self._live_battle_timer.timeout.connect(self._poll_live_battle)
         self._live_battle_signature = ""
+
         self._opp_auto_detect_timer = QTimer(self)
         self._opp_auto_detect_timer.setInterval(250)
         self._opp_auto_detect_timer.timeout.connect(self._poll_opponent_party_auto_detect)
 
+    def _initialize_application_state(self) -> None:
+        # Phase 1: persistent data and in-memory battle state.
+        self._initialize_database_state()
+        # Phase 2: widgets, bindings, and initial view sync.
+        self._initialize_ui_state()
+        # Phase 3: async workers and deferred startup tasks.
+        self._start_background_tasks()
+
+    def _initialize_database_state(self) -> None:
         db.init_db()
         self._registered_pokemon = db.load_all_pokemon()
         self._init_battle_state()
 
+    def _initialize_ui_state(self) -> None:
         self._build_ui()
         self._sync_battle_state_to_panels()
         self._apply_saved_settings()
@@ -213,79 +241,107 @@ class MainWindow(QMainWindow):
         self._apply_top_saved_party_on_startup()
         self._refresh_party_presets_ui()
         self._set_initial_window_size()
-        self._start_background_tasks()
 
     def _get_usage_scraper_symbols(self):
-        from src.ui.main_window_ui import _get_usage_scraper_symbols as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _get_usage_scraper_symbols as get_usage_scraper_symbols_impl
+        return get_usage_scraper_symbols_impl(self)
 
     def _build_ui(self) -> None:
-        from src.ui.main_window_ui import _build_ui as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _build_ui as build_ui_impl
+        return build_ui_impl(self)
 
     def _build_registry_tab(self) -> QWidget:
-        from src.ui.main_window_ui import _build_registry_tab as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _build_registry_tab as build_registry_tab_impl
+        return build_registry_tab_impl(self)
 
     def _build_box_side_panel(self) -> QWidget:
-        from src.ui.main_window_ui import _build_box_side_panel as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _build_box_side_panel as build_box_side_panel_impl
+        return build_box_side_panel_impl(self)
 
     def _build_options_dialog(self) -> None:
-        from src.ui.main_window_ui import _build_options_dialog as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _build_options_dialog as build_options_dialog_impl
+        return build_options_dialog_impl(self)
 
     def _open_options_dialog(self) -> None:
-        from src.ui.main_window_ui import _open_options_dialog as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _open_options_dialog as open_options_dialog_impl
+        return open_options_dialog_impl(self)
 
     def _set_fetch_buttons_enabled(self, enabled: bool) -> None:
-        from src.ui.main_window_ui import _set_fetch_buttons_enabled as _impl
-        return _impl(self, enabled)
+        from src.ui.main_window_ui import _set_fetch_buttons_enabled as set_fetch_buttons_enabled_impl
+        return set_fetch_buttons_enabled_impl(self, enabled)
 
     def _refresh_usage_season_options(self, selected: str | None = None) -> None:
-        from src.ui.main_window_ui import _refresh_usage_season_options as _impl
-        return _impl(self, selected)
+        from src.ui.main_window_ui import _refresh_usage_season_options as refresh_usage_season_options_impl
+        return refresh_usage_season_options_impl(self, selected)
 
     def _current_usage_season(self) -> str:
-        from src.ui.main_window_handlers import _current_usage_season as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _current_usage_season as current_usage_season_impl
+        return current_usage_season_impl(self)
 
     def _on_usage_season_changed(self, text: str) -> None:
-        from src.ui.main_window_handlers import _on_usage_season_changed as _impl
-        return _impl(self, text)
+        from src.ui.main_window_handlers import _on_usage_season_changed as on_usage_season_changed_impl
+        return on_usage_season_changed_impl(self, text)
 
     def _toggle_damage_tera_option(self, checked: bool) -> None:
-        from src.ui.main_window_handlers import _toggle_damage_tera_option as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_handlers import _toggle_damage_tera_option as toggle_damage_tera_option_impl
+        return toggle_damage_tera_option_impl(self, checked)
 
     def _toggle_damage_bulk_option(self, checked: bool) -> None:
-        from src.ui.main_window_handlers import _toggle_damage_bulk_option as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_handlers import _toggle_damage_bulk_option as toggle_damage_bulk_option_impl
+        return toggle_damage_bulk_option_impl(self, checked)
 
     def _toggle_damage_double_option(self, checked: bool) -> None:
-        from src.ui.main_window_handlers import _toggle_damage_double_option as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_handlers import _toggle_damage_double_option as toggle_damage_double_option_impl
+        return toggle_damage_double_option_impl(self, checked)
 
     def _toggle_detailed_log_option(self, checked: bool) -> None:
-        from src.ui.main_window_handlers import _toggle_detailed_log_option as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_handlers import _toggle_detailed_log_option as toggle_detailed_log_option_impl
+        return toggle_detailed_log_option_impl(self, checked)
 
     def _on_webhook_url_changed(self) -> None:
-        from src.ui.main_window_handlers import _on_webhook_url_changed as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _on_webhook_url_changed as on_webhook_url_changed_impl
+        return on_webhook_url_changed_impl(self)
 
     def _start_background_tasks(self) -> None:
-        from src.ui.main_window_handlers import _start_background_tasks as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _start_background_tasks as start_background_tasks_impl
+        return start_background_tasks_impl(self)
+
+    def _start_ocr_init_thread(self) -> None:
+        existing = self._ocr_thread
+        if existing is not None and existing.isRunning():
+            return
+        self._ocr_thread = OcrInitThread(use_gpu=False)
+        self._ocr_thread.finished.connect(self._on_ocr_ready)
+        self._ocr_thread.start()
 
     @pyqtSlot(bool, str)
     def _on_ocr_ready(self, ok: bool, err: str) -> None:
         if ok:
+            self._ocr_retry_manager.reset()
+            if self._ocr_retry_timer.isActive():
+                self._ocr_retry_timer.stop()
             self._status_bar.showMessage("OCR 初期化完了")
             self._log("OCR 初期化完了")
         else:
-            self._log("[ERROR] OCR 初期化失敗: {}".format(err))
+            self._handle_ocr_init_failure(err)
+
+    def _handle_ocr_init_failure(self, err: str) -> None:
+        message = "OCR 初期化失敗: {}".format(err)
+        self._log("[ERROR] {}".format(message))
+        QMessageBox.warning(self, "OCR 初期化エラー", message)
+        self._schedule_ocr_retry_if_available()
+
+    def _schedule_ocr_retry_if_available(self) -> None:
+        retry_count = self._ocr_retry_manager.next_retry()
+        if retry_count is None:
+            return
+        self._log(
+            "OCR 初期化を再試行します ({}/{})".format(
+                retry_count,
+                self._ocr_retry_manager.max_retries,
+            )
+        )
+        self._ocr_retry_timer.start(self._ocr_retry_manager.retry_delay_ms)
 
     @pyqtSlot(int, str)
     def _on_api_progress(self, pct: int, msg: str) -> None:
@@ -295,7 +351,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_api_done(self) -> None:
-        text_matcher.clear_caches()
         self._set_fetch_buttons_enabled(True)
         self._refresh_data_status()
         self._status_bar.showMessage("PokeAPIデータ取得完了")
@@ -306,8 +361,8 @@ class MainWindow(QMainWindow):
             self._apply_sample_party()
 
     def _apply_sample_party(self) -> None:
-        from src.ui.main_window_handlers import _apply_sample_party as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _apply_sample_party as _apply_sample_party_impl
+        return _apply_sample_party_impl(self)
 
     @pyqtSlot(bool, str)
     def _on_scraper_done(self, ok: bool, msg: str) -> None:
@@ -322,16 +377,16 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(msg)
 
     def _fetch_pokeapi_data(self) -> None:
-        from src.ui.main_window_handlers import _fetch_pokeapi_data as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _fetch_pokeapi_data as _fetch_pokeapi_data_impl
+        return _fetch_pokeapi_data_impl(self)
 
     def _fetch_usage_data(self) -> None:
-        from src.ui.main_window_handlers import _fetch_usage_data as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _fetch_usage_data as _fetch_usage_data_impl
+        return _fetch_usage_data_impl(self)
 
     def _run_data_integrity_check(self) -> None:
-        from src.ui.main_window_handlers import _run_data_integrity_check as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _run_data_integrity_check as _run_data_integrity_check_impl
+        return _run_data_integrity_check_impl(self)
 
     @pyqtSlot(QPixmap)
     def _on_frame(self, pixmap: QPixmap) -> None:
@@ -342,148 +397,148 @@ class MainWindow(QMainWindow):
     # ── Camera control ────────────────────────────────────────────────
 
     def _refresh_cameras(self) -> None:
-        from src.ui.main_window_handlers import _refresh_cameras as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _refresh_cameras as _refresh_cameras_impl
+        return _refresh_cameras_impl(self)
 
     def _toggle_camera(self) -> None:
-        from src.ui.main_window_handlers import _toggle_camera as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _toggle_camera as _toggle_camera_impl
+        return _toggle_camera_impl(self)
 
     def _save_screenshot(self) -> None:
-        from src.ui.main_window_handlers import _save_screenshot as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _save_screenshot as _save_screenshot_impl
+        return _save_screenshot_impl(self)
 
     def _apply_splitter_layout(self) -> None:
-        from src.ui.main_window_ui import _apply_splitter_layout as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _apply_splitter_layout as _apply_splitter_layout_impl
+        return _apply_splitter_layout_impl(self)
 
     def _set_initial_window_size(self) -> None:
-        from src.ui.main_window_ui import _set_initial_window_size as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _set_initial_window_size as _set_initial_window_size_impl
+        return _set_initial_window_size_impl(self)
 
     def _on_damage_tab_visibility(self, index: int) -> None:
-        from src.ui.main_window_ui import _on_damage_tab_visibility as _impl
-        return _impl(self, index)
+        from src.ui.main_window_ui import _on_damage_tab_visibility as _on_damage_tab_visibility_impl
+        return _on_damage_tab_visibility_impl(self, index)
 
     def _sync_tab_switcher_buttons(self, index: int) -> None:
-        from src.ui.main_window_ui import _sync_tab_switcher_buttons as _impl
-        return _impl(self, index)
+        from src.ui.main_window_ui import _sync_tab_switcher_buttons as _sync_tab_switcher_buttons_impl
+        return _sync_tab_switcher_buttons_impl(self, index)
 
     def eventFilter(self, obj, event):
-        from src.ui.main_window_handlers import eventFilter as _impl
-        return _impl(self, obj, event)
+        from src.ui.main_window_handlers import eventFilter as eventFilter_impl
+        return eventFilter_impl(self, obj, event)
 
     def _show_usage_password_dialog(self) -> None:
-        from src.ui.main_window_ui import _show_usage_password_dialog as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _show_usage_password_dialog as _show_usage_password_dialog_impl
+        return _show_usage_password_dialog_impl(self)
 
     def _show_usage_fetch_dialog(self) -> None:
-        from src.ui.main_window_ui import _show_usage_fetch_dialog as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _show_usage_fetch_dialog as _show_usage_fetch_dialog_impl
+        return _show_usage_fetch_dialog_impl(self)
 
     def _fetch_usage_data_with_source(self, season: str, source: str) -> None:
-        from src.ui.main_window_handlers import _fetch_usage_data_with_source as _impl
-        return _impl(self, season, source)
+        from src.ui.main_window_handlers import _fetch_usage_data_with_source as _fetch_usage_data_with_source_impl
+        return _fetch_usage_data_with_source_impl(self, season, source)
 
     def _log(self, msg: str) -> None:
-        from src.ui.main_window_handlers import _log as _impl
-        return _impl(self, msg)
+        from src.ui.main_window_handlers import _log as _log_impl
+        return _log_impl(self, msg)
 
     def _on_bridge_payload_log(self, msg: str) -> None:
-        from src.ui.main_window_handlers import _on_bridge_payload_log as _impl
-        return _impl(self, msg)
+        from src.ui.main_window_handlers import _on_bridge_payload_log as _on_bridge_payload_log_impl
+        return _on_bridge_payload_log_impl(self, msg)
 
     def _export_log_to_txt(self) -> None:
-        from src.ui.main_window_handlers import _export_log_to_txt as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _export_log_to_txt as _export_log_to_txt_impl
+        return _export_log_to_txt_impl(self)
 
     def _init_battle_state(self) -> None:
-        from src.ui.main_window_handlers import _init_battle_state as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _init_battle_state as _init_battle_state_impl
+        return _init_battle_state_impl(self)
 
     def _ensure_party_slots(self) -> None:
-        from src.ui.main_window_handlers import _ensure_party_slots as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _ensure_party_slots as _ensure_party_slots_impl
+        return _ensure_party_slots_impl(self)
 
     def _sync_battle_state_to_panels(self) -> None:
-        from src.ui.main_window_handlers import _sync_battle_state_to_panels as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _sync_battle_state_to_panels as _sync_battle_state_to_panels_impl
+        return _sync_battle_state_to_panels_impl(self)
 
     def _on_party_slot_clicked(self, index: int, is_my: bool) -> None:
-        from src.ui.main_window_handlers import _on_party_slot_clicked as _impl
-        return _impl(self, index, is_my)
+        from src.ui.main_window_handlers import _on_party_slot_clicked as _on_party_slot_clicked_impl
+        return _on_party_slot_clicked_impl(self, index, is_my)
 
     def _on_my_party_panel_dropped(self, name_ja: str) -> None:
-        from src.ui.main_window_handlers import _on_my_party_panel_dropped as _impl
-        return _impl(self, name_ja)
+        from src.ui.main_window_handlers import _on_my_party_panel_dropped as _on_my_party_panel_dropped_impl
+        return _on_my_party_panel_dropped_impl(self, name_ja)
 
     def _try_add_to_my_party(self, name_ja: str, source: str = "click") -> None:
-        from src.ui.main_window_handlers import _try_add_to_my_party as _impl
-        return _impl(self, name_ja, source)
+        from src.ui.main_window_handlers import _try_add_to_my_party as _try_add_to_my_party_impl
+        return _try_add_to_my_party_impl(self, name_ja, source)
 
     def _on_registry_cell_left_click(self, name_ja: str) -> None:
-        from src.ui.main_window_handlers import _on_registry_cell_left_click as _impl
-        return _impl(self, name_ja)
+        from src.ui.main_window_handlers import _on_registry_cell_left_click as _on_registry_cell_left_click_impl
+        return _on_registry_cell_left_click_impl(self, name_ja)
 
     def _on_my_party_panel_cleared(self) -> None:
-        from src.ui.main_window_handlers import _on_my_party_panel_cleared as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _on_my_party_panel_cleared as _on_my_party_panel_cleared_impl
+        return _on_my_party_panel_cleared_impl(self)
 
     def _on_my_party_panel_context_menu(self, global_pos) -> None:
-        from src.ui.main_window_handlers import _on_my_party_panel_context_menu as _impl
-        return _impl(self, global_pos)
+        from src.ui.main_window_handlers import _on_my_party_panel_context_menu as _on_my_party_panel_context_menu_impl
+        return _on_my_party_panel_context_menu_impl(self, global_pos)
 
     def _on_party_slot_dropped(self, index: int, name_ja: str) -> None:
-        from src.ui.main_window_handlers import _on_party_slot_dropped as _impl
-        return _impl(self, index, name_ja)
+        from src.ui.main_window_handlers import _on_party_slot_dropped as _on_party_slot_dropped_impl
+        return _on_party_slot_dropped_impl(self, index, name_ja)
 
     def _on_party_slot_cleared(self, index: int) -> None:
-        from src.ui.main_window_handlers import _on_party_slot_cleared as _impl
-        return _impl(self, index)
+        from src.ui.main_window_handlers import _on_party_slot_cleared as _on_party_slot_cleared_impl
+        return _on_party_slot_cleared_impl(self, index)
 
     def _select_registered_pokemon(self, title: str, current_name: str = "") -> tuple[bool, PokemonInstance | None]:
-        from src.ui.main_window_handlers import _select_registered_pokemon as _impl
-        return _impl(self, title, current_name)
+        from src.ui.main_window_handlers import _select_registered_pokemon as _select_registered_pokemon_impl
+        return _select_registered_pokemon_impl(self, title, current_name)
 
     def _auto_detect_opponent_party(self) -> None:
-        from src.ui.main_window_handlers import _auto_detect_opponent_party as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _auto_detect_opponent_party as _auto_detect_opponent_party_impl
+        return _auto_detect_opponent_party_impl(self)
 
     def _on_auto_detect_toggled(self, checked: bool) -> None:
-        from src.ui.main_window_handlers import _on_auto_detect_toggled as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_handlers import _on_auto_detect_toggled as _on_auto_detect_toggled_impl
+        return _on_auto_detect_toggled_impl(self, checked)
 
     def _stop_opponent_party_auto_detect(self, show_message: bool, write_log: bool) -> None:
-        from src.ui.main_window_handlers import _stop_opponent_party_auto_detect as _impl
-        return _impl(self, show_message, write_log)
+        from src.ui.main_window_handlers import _stop_opponent_party_auto_detect as _stop_opponent_party_auto_detect_impl
+        return _stop_opponent_party_auto_detect_impl(self, show_message, write_log)
 
     def _refresh_auto_detect_button_style(self) -> None:
-        from src.ui.main_window_ui import _refresh_auto_detect_button_style as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _refresh_auto_detect_button_style as _refresh_auto_detect_button_style_impl
+        return _refresh_auto_detect_button_style_impl(self)
 
     def _poll_opponent_party_auto_detect(self) -> None:
-        from src.ui.main_window_handlers import _poll_opponent_party_auto_detect as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _poll_opponent_party_auto_detect as _poll_opponent_party_auto_detect_impl
+        return _poll_opponent_party_auto_detect_impl(self)
 
     def _dump_auto_detect_debug_frame(self, frame) -> None:
-        from src.ui.main_window_handlers import _dump_auto_detect_debug_frame as _impl
-        return _impl(self, frame)
+        from src.ui.main_window_handlers import _dump_auto_detect_debug_frame as _dump_auto_detect_debug_frame_impl
+        return _dump_auto_detect_debug_frame_impl(self, frame)
 
     def _toggle_live_battle_tracking(self, enabled: bool) -> None:
-        from src.ui.main_window_handlers import _toggle_live_battle_tracking as _impl
-        return _impl(self, enabled)
+        from src.ui.main_window_handlers import _toggle_live_battle_tracking as _toggle_live_battle_tracking_impl
+        return _toggle_live_battle_tracking_impl(self, enabled)
 
     def _stop_live_battle_tracking(self, show_message: bool, write_log: bool) -> None:
-        from src.ui.main_window_handlers import _stop_live_battle_tracking as _impl
-        return _impl(self, show_message, write_log)
+        from src.ui.main_window_handlers import _stop_live_battle_tracking as _stop_live_battle_tracking_impl
+        return _stop_live_battle_tracking_impl(self, show_message, write_log)
 
     def _poll_live_battle(self) -> None:
-        from src.ui.main_window_handlers import _poll_live_battle as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _poll_live_battle as _poll_live_battle_impl
+        return _poll_live_battle_impl(self)
 
     def _apply_live_battle_data(self, live_data: dict) -> tuple[bool, str]:
-        from src.ui.main_window_handlers import _apply_live_battle_data as _impl
-        return _impl(self, live_data)
+        from src.ui.main_window_handlers import _apply_live_battle_data as _apply_live_battle_data_impl
+        return _apply_live_battle_data_impl(self, live_data)
 
     @staticmethod
     def _party_member_by_name(
@@ -499,108 +554,108 @@ class MainWindow(QMainWindow):
         return None
 
     def _build_usage_template_pokemon(self, name_ja: str) -> PokemonInstance | None:
-        from src.ui.main_window_handlers import _build_usage_template_pokemon as _impl
-        return _impl(self, name_ja)
+        from src.ui.main_window_handlers import _build_usage_template_pokemon as _build_usage_template_pokemon_impl
+        return _build_usage_template_pokemon_impl(self, name_ja)
 
     def _read_box_and_register(self) -> None:
-        from src.ui.main_window_handlers import _read_box_and_register as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _read_box_and_register as _read_box_and_register_impl
+        return _read_box_and_register_impl(self)
 
     def _apply_box_ocr(self, data: dict) -> None:
-        from src.ui.main_window_handlers import _apply_box_ocr as _impl
-        return _impl(self, data)
+        from src.ui.main_window_handlers import _apply_box_ocr as _apply_box_ocr_impl
+        return _apply_box_ocr_impl(self, data)
 
     def _show_loading_overlay(self, message: str = "読み込み中...") -> None:
-        from src.ui.main_window_ui import _show_loading_overlay as _impl
-        return _impl(self, message)
+        from src.ui.main_window_ui import _show_loading_overlay as _show_loading_overlay_impl
+        return _show_loading_overlay_impl(self, message)
 
     def _hide_loading_overlay(self) -> None:
-        from src.ui.main_window_ui import _hide_loading_overlay as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _hide_loading_overlay as _hide_loading_overlay_impl
+        return _hide_loading_overlay_impl(self)
 
     def _start_box_read_thread(self, frame: object) -> None:
-        from src.ui.main_window_handlers import _start_box_read_thread as _impl
-        return _impl(self, frame)
+        from src.ui.main_window_handlers import _start_box_read_thread as _start_box_read_thread_impl
+        return _start_box_read_thread_impl(self, frame)
 
     def _refresh_registry_list(self) -> None:
-        from src.ui.main_window_handlers import _refresh_registry_list as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _refresh_registry_list as _refresh_registry_list_impl
+        return _refresh_registry_list_impl(self)
 
     def _open_edit_dialog(self, pokemon) -> None:
-        from src.ui.main_window_handlers import _open_edit_dialog as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _open_edit_dialog as _open_edit_dialog_impl
+        return _open_edit_dialog_impl(self, pokemon)
 
     def _open_register_input_dialog(self) -> None:
-        from src.ui.main_window_handlers import _open_register_input_dialog as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _open_register_input_dialog as _open_register_input_dialog_impl
+        return _open_register_input_dialog_impl(self)
 
     def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, str | None]:
-        from src.ui.main_window_handlers import _parse_pokemon_text_block as _impl
-        return _impl(self, text)
+        from src.ui.main_window_handlers import _parse_pokemon_text_block as _parse_pokemon_text_block_impl
+        return _parse_pokemon_text_block_impl(self, text)
 
     def _edit_selected_pokemon(self) -> None:
-        from src.ui.main_window_handlers import _edit_selected_pokemon as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _edit_selected_pokemon as _edit_selected_pokemon_impl
+        return _edit_selected_pokemon_impl(self)
 
     def _delete_selected_pokemon(self) -> None:
-        from src.ui.main_window_handlers import _delete_selected_pokemon as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _delete_selected_pokemon as _delete_selected_pokemon_impl
+        return _delete_selected_pokemon_impl(self)
 
     def _copy_selected_pokemon_info(self) -> None:
-        from src.ui.main_window_handlers import _copy_selected_pokemon_info as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _copy_selected_pokemon_info as _copy_selected_pokemon_info_impl
+        return _copy_selected_pokemon_info_impl(self)
 
     def _format_pokemon_export_text(self, pokemon: PokemonInstance) -> str:
-        from src.ui.main_window_handlers import _format_pokemon_export_text as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _format_pokemon_export_text as _format_pokemon_export_text_impl
+        return _format_pokemon_export_text_impl(self, pokemon)
 
     def _on_registry_context_menu(self, pos) -> None:
-        from src.ui.main_window_handlers import _on_registry_context_menu as _impl
-        return _impl(self, pos)
+        from src.ui.main_window_handlers import _on_registry_context_menu as _on_registry_context_menu_impl
+        return _on_registry_context_menu_impl(self, pos)
 
     def _on_registry_context_menu_for_cell(self, global_pos) -> None:
-        from src.ui.main_window_handlers import _on_registry_context_menu_for_cell as _impl
-        return _impl(self, global_pos)
+        from src.ui.main_window_handlers import _on_registry_context_menu_for_cell as _on_registry_context_menu_for_cell_impl
+        return _on_registry_context_menu_for_cell_impl(self, global_pos)
 
     def _on_damage_panel_atk_changed(self, pokemon: PokemonInstance | None) -> None:
-        from src.ui.main_window_handlers import _on_damage_panel_atk_changed as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _on_damage_panel_atk_changed as _on_damage_panel_atk_changed_impl
+        return _on_damage_panel_atk_changed_impl(self, pokemon)
 
     def _on_damage_panel_def_changed(self, pokemon: PokemonInstance | None) -> None:
-        from src.ui.main_window_handlers import _on_damage_panel_def_changed as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _on_damage_panel_def_changed as _on_damage_panel_def_changed_impl
+        return _on_damage_panel_def_changed_impl(self, pokemon)
 
     def _find_registered(self, name_ja: str) -> PokemonInstance | None:
-        from src.ui.main_window_handlers import _find_registered as _impl
-        return _impl(self, name_ja)
+        from src.ui.main_window_handlers import _find_registered as _find_registered_impl
+        return _find_registered_impl(self, name_ja)
 
     def _fill_species(self, pokemon: PokemonInstance) -> None:
-        from src.ui.main_window_handlers import _fill_species as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _fill_species as _fill_species_impl
+        return _fill_species_impl(self, pokemon)
 
     def _serialize_pokemon(self, pokemon: PokemonInstance | None) -> dict | None:
-        from src.ui.main_window_handlers import _serialize_pokemon as _impl
-        return _impl(self, pokemon)
+        from src.ui.main_window_handlers import _serialize_pokemon as _serialize_pokemon_impl
+        return _serialize_pokemon_impl(self, pokemon)
 
     def _deserialize_pokemon(self, payload: dict | None) -> PokemonInstance | None:
-        from src.ui.main_window_handlers import _deserialize_pokemon as _impl
-        return _impl(self, payload)
+        from src.ui.main_window_handlers import _deserialize_pokemon as _deserialize_pokemon_impl
+        return _deserialize_pokemon_impl(self, payload)
 
     def _load_party_presets(self) -> None:
-        from src.ui.main_window_handlers import _load_party_presets as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _load_party_presets as _load_party_presets_impl
+        return _load_party_presets_impl(self)
 
     def _apply_top_saved_party_on_startup(self) -> None:
-        from src.ui.main_window_handlers import _apply_top_saved_party_on_startup as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _apply_top_saved_party_on_startup as _apply_top_saved_party_on_startup_impl
+        return _apply_top_saved_party_on_startup_impl(self)
 
     def _refresh_party_presets_ui(self, selected_name: str = "") -> None:
-        from src.ui.main_window_ui import _refresh_party_presets_ui as _impl
-        return _impl(self, selected_name)
+        from src.ui.main_window_ui import _refresh_party_presets_ui as _refresh_party_presets_ui_impl
+        return _refresh_party_presets_ui_impl(self, selected_name)
 
     def _update_box_party_ui(self) -> None:
-        from src.ui.main_window_ui import _update_box_party_ui as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _update_box_party_ui as _update_box_party_ui_impl
+        return _update_box_party_ui_impl(self)
 
     @staticmethod
     def _active_index(party: list[PokemonInstance | None], active: PokemonInstance | None) -> int:
@@ -612,70 +667,70 @@ class MainWindow(QMainWindow):
         return -1
 
     def _set_auto_detect_enabled(self, enabled: bool) -> None:
-        from src.ui.main_window_ui import _set_auto_detect_enabled as _impl
-        return _impl(self, enabled)
+        from src.ui.main_window_ui import _set_auto_detect_enabled as _set_auto_detect_enabled_impl
+        return _set_auto_detect_enabled_impl(self, enabled)
 
     def _save_party_preset(self, to_top: bool = False) -> None:
-        from src.ui.main_window_handlers import _save_party_preset as _impl
-        return _impl(self, to_top)
+        from src.ui.main_window_handlers import _save_party_preset as _save_party_preset_impl
+        return _save_party_preset_impl(self, to_top)
 
     def _on_saved_party_panel_context_menu(self, index: int, global_pos) -> None:
-        from src.ui.main_window_handlers import _on_saved_party_panel_context_menu as _impl
-        return _impl(self, index, global_pos)
+        from src.ui.main_window_handlers import _on_saved_party_panel_context_menu as _on_saved_party_panel_context_menu_impl
+        return _on_saved_party_panel_context_menu_impl(self, index, global_pos)
 
     def _load_party_preset_at(self, index: int) -> None:
-        from src.ui.main_window_handlers import _load_party_preset_at as _impl
-        return _impl(self, index)
+        from src.ui.main_window_handlers import _load_party_preset_at as _load_party_preset_at_impl
+        return _load_party_preset_at_impl(self, index)
 
     def _delete_party_preset_at(self, index: int) -> None:
-        from src.ui.main_window_handlers import _delete_party_preset_at as _impl
-        return _impl(self, index)
+        from src.ui.main_window_handlers import _delete_party_preset_at as _delete_party_preset_at_impl
+        return _delete_party_preset_at_impl(self, index)
 
     def _reorder_party_preset(self, from_index: int, to_index: int) -> None:
-        from src.ui.main_window_handlers import _reorder_party_preset as _impl
-        return _impl(self, from_index, to_index)
+        from src.ui.main_window_handlers import _reorder_party_preset as _reorder_party_preset_impl
+        return _reorder_party_preset_impl(self, from_index, to_index)
 
     def _move_saved_party_to_top(self, index: int) -> None:
-        from src.ui.main_window_handlers import _move_saved_party_to_top as _impl
-        return _impl(self, index)
+        from src.ui.main_window_handlers import _move_saved_party_to_top as _move_saved_party_to_top_impl
+        return _move_saved_party_to_top_impl(self, index)
 
     def _reset_all_party(self) -> None:
-        from src.ui.main_window_handlers import _reset_all_party as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _reset_all_party as _reset_all_party_impl
+        return _reset_all_party_impl(self)
 
     def nativeEvent(self, event_type: bytes, message: object) -> tuple[bool, int]:
-        from src.ui.main_window_handlers import nativeEvent as _impl
-        return _impl(self, event_type, message)
+        from src.ui.main_window_handlers import nativeEvent as nativeEvent_impl
+        return nativeEvent_impl(self, event_type, message)
 
     def _toggle_topmost(self, checked: bool) -> None:
-        from src.ui.main_window_ui import _toggle_topmost as _impl
-        return _impl(self, checked)
+        from src.ui.main_window_ui import _toggle_topmost as _toggle_topmost_impl
+        return _toggle_topmost_impl(self, checked)
 
     def _refresh_data_status(self) -> None:
-        from src.ui.main_window_ui import _refresh_data_status as _impl
-        return _impl(self)
+        from src.ui.main_window_ui import _refresh_data_status as _refresh_data_status_impl
+        return _refresh_data_status_impl(self)
 
     def _settings_path(self) -> Path:
-        from src.ui.main_window_handlers import _settings_path as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _settings_path as _settings_path_impl
+        return _settings_path_impl(self)
 
     def _load_settings(self) -> dict:
-        from src.ui.main_window_handlers import _load_settings as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _load_settings as _load_settings_impl
+        return _load_settings_impl(self)
 
     def _save_settings(self, **kwargs) -> None:
-        from src.ui.main_window_handlers import _save_settings as _impl
-        return _impl(self, **kwargs)
+        from src.ui.main_window_handlers import _save_settings as _save_settings_impl
+        return _save_settings_impl(self, **kwargs)
 
     def _apply_saved_settings(self) -> None:
-        from src.ui.main_window_handlers import _apply_saved_settings as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _apply_saved_settings as _apply_saved_settings_impl
+        return _apply_saved_settings_impl(self)
 
     def _auto_connect_saved_camera(self) -> None:
-        from src.ui.main_window_handlers import _auto_connect_saved_camera as _impl
-        return _impl(self)
+        from src.ui.main_window_handlers import _auto_connect_saved_camera as _auto_connect_saved_camera_impl
+        return _auto_connect_saved_camera_impl(self)
 
     def closeEvent(self, event) -> None:
-        from src.ui.main_window_handlers import closeEvent as _impl
-        return _impl(self, event)
+        from src.ui.main_window_handlers import closeEvent as closeEvent_impl
+        return closeEvent_impl(self, event)
 

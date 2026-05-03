@@ -60,7 +60,7 @@ def _pokemon_header(pokemon) -> str:
         ev_spe=ev_spe,
     )
 
-    parts = [p for p in [item, ability, nature] if p]
+    parts = [part for part in [item, ability, nature] if part]
     header = "【{} @ {} / {}】".format(name, " / ".join(parts), stats) if parts else "【{}】".format(name)
     return header
 
@@ -132,7 +132,7 @@ class CopyDialog(QDialog):
         def _short(pokemon) -> str:
             if pokemon is None:
                 return "（未設定）"
-            parts = [p for p in [pokemon.item, pokemon.ability] if p]
+            parts = [part for part in [pokemon.item, pokemon.ability] if part]
             return "{} @ {}".format(pokemon.name_ja or "？", " / ".join(parts)) if parts else (pokemon.name_ja or "？")
 
         hdr = QLabel("<b>{}</b>  ⇔  <b>{}</b>".format(_short(atk), _short(def_)))

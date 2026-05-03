@@ -53,7 +53,7 @@ def make_dialog(parent: QWidget | None, **kwargs: Any) -> QDialog:
 
 
 def open_pokemon_edit_dialog(
-    pokemon: "PokemonInstance | None",
+    pokemon: PokemonInstance | None,
     parent: QWidget | None,
     *,
     save_to_db: bool = True,
