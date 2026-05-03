@@ -453,13 +453,13 @@ class MyBoxSelectDialog(QDialog):
         from src.ui.ui_utils import sprite_pixmap_or_zukan
 
         filtered: list[PokemonInstance] = []
-        for p in self._all_entries:
+        for entry in self._all_entries:
             if self._type_filters:
-                types = set(self._get_type_names(p))
+                types = set(self._get_type_names(entry))
                 if not self._type_filters.issubset(types):
                     continue
-            filtered.append(p)
-        filtered.sort(key=lambda p: (-(p.db_id or 0),))
+            filtered.append(entry)
+        filtered.sort(key=lambda entry: (-(entry.db_id or 0),))
 
         cols = 6
         cell_w = 112
@@ -468,19 +468,19 @@ class MyBoxSelectDialog(QDialog):
         for col in range(cols):
             self._grid_layout.setColumnStretch(col, 0)
         self._grid_layout.setColumnStretch(cols, 1)
-        for idx, p in enumerate(filtered):
+        for idx, entry in enumerate(filtered):
             ev_pairs = [
-                ("H", p.ev_hp // 8),
-                ("A", p.ev_attack // 8),
-                ("B", p.ev_defense // 8),
-                ("C", p.ev_sp_attack // 8),
-                ("D", p.ev_sp_defense // 8),
-                ("S", p.ev_speed // 8),
+                ("H", entry.ev_hp // 8),
+                ("A", entry.ev_attack // 8),
+                ("B", entry.ev_defense // 8),
+                ("C", entry.ev_sp_attack // 8),
+                ("D", entry.ev_sp_defense // 8),
+                ("S", entry.ev_speed // 8),
             ]
             ev_pairs = [(lbl, v) for lbl, v in ev_pairs if v > 0]
             ev_pairs.sort(key=lambda x: (-x[1], "HABCDS".find(x[0]) if x[0] in "HABCDS" else 9))
             top2_ev = " ".join("{}:{}".format(lbl, v) for lbl, v in ev_pairs[:2]) if ev_pairs else "無振り"
-            item_text = (p.item or "").strip() or "なし"
+            item_text = (entry.item or "").strip() or "なし"
 
             cell = QFrame()
             cell.setFrameShape(QFrame.StyledPanel)
@@ -499,11 +499,11 @@ class MyBoxSelectDialog(QDialog):
             sprite_lbl.setFixedSize(sprite_size, sprite_size)
             sprite_lbl.setAlignment(Qt.AlignCenter)
             sprite_lbl.setStyleSheet("border: none;")
-            pm = sprite_pixmap_or_zukan(p.name_ja, sprite_size, sprite_size, name_en=p.name_en or "")
+            pm = sprite_pixmap_or_zukan(entry.name_ja, sprite_size, sprite_size, name_en=entry.name_en or "")
             if pm:
                 sprite_lbl.setPixmap(pm)
             else:
-                sprite_lbl.setText(p.name_ja[:4] if p.name_ja else "?")
+                sprite_lbl.setText(entry.name_ja[:4] if entry.name_ja else "?")
                 sprite_lbl.setStyleSheet("color: #cdd6f4; font-size: 10px;")
             cell_layout.addWidget(sprite_lbl, 0, Qt.AlignHCenter)
 
@@ -519,13 +519,13 @@ class MyBoxSelectDialog(QDialog):
             ev_lbl.setStyleSheet("color: #a6e3a1; font-size: 16px; font-weight: bold; border: none;")
             cell_layout.addWidget(ev_lbl)
 
-            def _on_double_click(_event, poke=p):
+            def _on_double_click(_event, poke=entry):
                 self._selected_pokemon = poke
                 self.accept()
 
             cell.mouseDoubleClickEvent = _on_double_click
             cell.setContextMenuPolicy(Qt.CustomContextMenu)
-            def _on_ctx_menu(pos, poke=p, widget=cell):
+            def _on_ctx_menu(pos, poke=entry, widget=cell):
                 menu = QMenu(widget)
                 act_apply = menu.addAction("反映")
                 action = menu.exec_(widget.mapToGlobal(pos))

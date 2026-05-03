@@ -28,7 +28,7 @@ _HOLDABLE_ITEM_CATEGORIES = (
     "z-crystals",
 )
 _CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
-_TIMEOUT_SECONDS = 20
+_REQUEST_TIMEOUT = (5, 15)
 _SESSION = requests.Session()
 _SESSION.headers["User-Agent"] = APP_USER_AGENT
 
@@ -80,7 +80,7 @@ def _save_cached_map(item_map: dict[str, str]) -> None:
 
 def _get_json(url: str) -> dict:
     try:
-        response = _SESSION.get(url, timeout=_TIMEOUT_SECONDS)
+        response = _SESSION.get(url, timeout=_REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
         return data if isinstance(data, dict) else {}

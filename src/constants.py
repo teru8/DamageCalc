@@ -24,6 +24,11 @@ OPP_HP_ROI      = (1060, 72, 1250, 108)
 MY_NAME_ROI     = (125, 588, 375, 618)
 MY_HP_ROI       = (125, 618, 375, 652)
 
+# Battle HUD icon areas
+OPP_HUD_SPRITE_ROI   = (930, 8, 1068, 102)
+MY_HUD_SPRITE_ROI    = (0, 620, 128, 720)
+WATCH_COMMAND_ROI    = (1070, 260, 1275, 340)
+
 # Battle sprite area (opponent active Pokemon)
 BATTLE_OPP_POKEMON_ROI = (520, 110, 940, 430)
 

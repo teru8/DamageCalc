@@ -7,6 +7,7 @@ Result dict structure from winocr.recognize_pil_sync:
 """
 import hashlib
 import logging
+import os
 import unicodedata
 from collections import OrderedDict
 from typing import Any
@@ -34,7 +35,33 @@ class _LRUDict(OrderedDict):
         return value
 
 
-_OCR_RESULT_CACHE: _LRUDict = _LRUDict(64)
+_DEFAULT_OCR_CACHE_SIZE = 64
+
+
+def _resolve_ocr_cache_size() -> int:
+    raw_value = os.environ.get("OCR_CACHE_SIZE", "").strip()
+    if not raw_value:
+        return _DEFAULT_OCR_CACHE_SIZE
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        logging.warning(
+            "Invalid OCR_CACHE_SIZE=%r; using default %d",
+            raw_value,
+            _DEFAULT_OCR_CACHE_SIZE,
+        )
+        return _DEFAULT_OCR_CACHE_SIZE
+    if parsed <= 0:
+        logging.warning(
+            "Non-positive OCR_CACHE_SIZE=%d; using default %d",
+            parsed,
+            _DEFAULT_OCR_CACHE_SIZE,
+        )
+        return _DEFAULT_OCR_CACHE_SIZE
+    return parsed
+
+
+_OCR_RESULT_CACHE: _LRUDict = _LRUDict(_resolve_ocr_cache_size())
 
 
 def is_ready() -> bool:
@@ -121,7 +148,8 @@ def read_text(image: np.ndarray, allowlist: str | None = None) -> list[str]:
         _OCR_RESULT_CACHE[cache_key] = result
         return result
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logging.warning("read_text failed: %s", e, exc_info=True)
+        h, w = image.shape[:2] if image is not None and image.ndim >= 2 else (0, 0)
+        logging.warning("read_text failed (image=%dx%d allowlist=%r): %s", w, h, allowlist, e, exc_info=True)
         return []
 
 

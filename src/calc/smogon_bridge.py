@@ -345,7 +345,9 @@ class SmogonBridge:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
+                    import atexit
                     cls._instance = SmogonBridge()
+                    atexit.register(cls._instance.close)
         return cls._instance
 
     def __init__(self) -> None:
@@ -417,7 +419,11 @@ class SmogonBridge:
             ValueError,
         ) as e:
             import logging
-            logging.warning("SmogonBridge calc error: %s", e, exc_info=True)
+            logging.warning(
+                "SmogonBridge calc error (atk=%r def=%r move=%r): %s",
+                attacker_d.get("name"), defender_d.get("name"), move_d.get("name"),
+                e, exc_info=True,
+            )
             return (0, 0, True)
         is_error = bool(res.get("error"))
         return (max(0, res.get("min", 0)), max(0, res.get("max", 0)), is_error)

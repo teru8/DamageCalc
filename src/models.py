@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class MoveInfo:
+    """Represents a move's static battle metadata."""
     name_ja: str
     name_en: str = ""
     type_name: str = "normal"
@@ -17,6 +18,7 @@ class MoveInfo:
 
 @dataclass
 class SpeciesInfo:
+    """Represents a Pokemon species entry cached from external sources."""
     species_id: int
     name_ja: str
     name_en: str
@@ -33,6 +35,7 @@ class SpeciesInfo:
 
 @dataclass
 class PokemonInstance:
+    """Represents an individual Pokemon with battle and build state."""
     species_id: int = 0
     name_ja: str = ""
     usage_name: str = ""  # DB()。/FC,
@@ -79,11 +82,13 @@ class PokemonInstance:
 
     @property
     def is_registered(self) -> bool:
+        """Return True when this instance is persisted in registered_pokemon."""
         return self.db_id is not None
 
 
 @dataclass
 class DamageResult:
+    """Represents one move's damage range and derived KO flags."""
     move_name: str
     move_type: str
     category: str
@@ -98,6 +103,7 @@ class DamageResult:
 
 @dataclass
 class BattleState:
+    """Represents the current battle context shared across UI modules."""
     my_pokemon: PokemonInstance | None = None
     opponent_pokemon: PokemonInstance | None = None
     my_party: list[PokemonInstance | None] = field(default_factory=list)

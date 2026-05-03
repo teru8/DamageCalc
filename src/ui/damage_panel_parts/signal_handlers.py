@@ -1,14 +1,42 @@
 """Extracted methods from damage_panel.py."""
 from __future__ import annotations
 
+import copy
+from functools import partial
 
-def _bootstrap() -> None:
-    from src.ui import damage_panel as _dp
-    globals().update(_dp.__dict__)
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QAction, QMenu
+
+from src.models import PokemonInstance
+from src.ui.damage_panel_form_apply import apply_form as _apply_form_fn
+from src.ui.damage_panel_form_data import (
+    FORM_ABILITY_JA as _FORM_ABILITY_JA,
+    FORM_MISSING_MEGA_STATS as _FORM_MISSING_MEGA_STATS,
+    FORM_POKEAPI_EN as _FORM_POKEAPI_EN,
+)
+from src.ui.damage_panel_forms import (
+    FORM_NAME_TO_GROUP as _FORM_NAME_TO_GROUP,
+    normalize_form_name as _normalize_form_name_fn,
+)
+from src.ui.damage_panel_pickers import pick_ability as _pick_ability, pick_item as _pick_item
+from src.ui.ui_utils import open_pokemon_edit_dialog
+
+_normalize_form_name = partial(_normalize_form_name_fn, form_name_to_group=_FORM_NAME_TO_GROUP)
+
+
+def _apply_form(p: PokemonInstance, form_name: str, original_ability: str = "") -> PokemonInstance:
+    return _apply_form_fn(
+        pokemon=p,
+        form_name=form_name,
+        original_ability=original_ability,
+        form_name_to_group=_FORM_NAME_TO_GROUP,
+        form_pokeapi_en=_FORM_POKEAPI_EN,
+        form_missing_mega_stats=_FORM_MISSING_MEGA_STATS,
+        form_ability_ja=_FORM_ABILITY_JA,
+    )
+
 
 def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
-    _bootstrap()
-    from PyQt5.QtWidgets import QMenu, QAction
 
     party = self._my_party if side == "my" else self._opp_party
 
@@ -31,7 +59,6 @@ def _on_party_slot_context_menu(self, side: str, idx: int, global_pos) -> None:
 
 
 def _edit_party_slot(self, side: str, idx: int) -> None:
-    _bootstrap()
     party = self._my_party if side == "my" else self._opp_party
     if idx >= len(party) or party[idx] is None:
         return
@@ -59,7 +86,7 @@ def _edit_party_slot(self, side: str, idx: int) -> None:
         self._def_party_side = side
         self._def_party_idx = idx
         self._def_custom = copy.deepcopy(updated)
-        self._def_species_name = self._def_custom.name_ja
+        self._def_species_name = self._def_custom.name_ja or ""
         self._def_panel.set_pokemon(self._def_custom)
         self.defender_changed.emit(self._def_custom)
 
@@ -70,7 +97,6 @@ def _edit_party_slot(self, side: str, idx: int) -> None:
 
 
 def _save_party_slot_to_db(self, side: str, idx: int) -> None:
-    _bootstrap()
     from src.data import database as db
 
     party = self._my_party if side == "my" else self._opp_party
@@ -83,7 +109,6 @@ def _save_party_slot_to_db(self, side: str, idx: int) -> None:
 
 
 def _add_party_slot(self, side: str, idx: int) -> None:
-    _bootstrap()
     dlg = open_pokemon_edit_dialog(None, self, save_to_db=False)
     if not dlg.exec_():
         if dlg.box_select_requested():
@@ -104,21 +129,18 @@ def _add_party_slot(self, side: str, idx: int) -> None:
 
 
 def _on_atk_panel_changed(self) -> None:
-    _bootstrap()
     self._persist_party_member_edits()
     self._refresh_party_slots()
     self.recalculate()
 
 
 def _on_def_panel_changed(self) -> None:
-    _bootstrap()
     self._persist_party_member_edits()
     self._refresh_party_slots()
     self.recalculate()
 
 
 def _edit_attacker(self) -> None:
-    _bootstrap()
     dlg = open_pokemon_edit_dialog(self._atk, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
@@ -138,7 +160,6 @@ def _edit_attacker(self) -> None:
 
 
 def _new_attacker(self) -> None:
-    _bootstrap()
     dlg = open_pokemon_edit_dialog(None, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
@@ -154,7 +175,6 @@ def _new_attacker(self) -> None:
 
 
 def _clear_attacker(self) -> None:
-    _bootstrap()
     self._atk = None
     self._atk_party_side = None
     self._atk_party_idx = None
@@ -165,14 +185,13 @@ def _clear_attacker(self) -> None:
 
 
 def _change_attacker(self) -> None:
-    _bootstrap()
     from src.ui.pokemon_edit_dialog import MyBoxSelectDialog
     dlg = MyBoxSelectDialog("攻撃側PT", self)
     if not dlg.exec_():
         return
-    p = dlg.selected_pokemon()
-    if p:
-        self._atk = copy.deepcopy(p)
+    selected_pokemon = dlg.selected_pokemon()
+    if selected_pokemon:
+        self._atk = copy.deepcopy(selected_pokemon)
         self._atk_party_side = None
         self._atk_party_idx = None
         self._atk_panel.set_pokemon(self._atk)
@@ -182,7 +201,6 @@ def _change_attacker(self) -> None:
 
 
 def _edit_defender(self) -> None:
-    _bootstrap()
     dlg = open_pokemon_edit_dialog(self._def_custom, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
@@ -211,7 +229,6 @@ def _edit_defender(self) -> None:
 
 
 def _new_defender(self) -> None:
-    _bootstrap()
     dlg = open_pokemon_edit_dialog(None, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
@@ -232,7 +249,6 @@ def _new_defender(self) -> None:
 
 
 def _clear_defender(self) -> None:
-    _bootstrap()
     self._def_custom = None
     self._def_species_name = ""
     self._def_party_side = None
@@ -244,7 +260,6 @@ def _clear_defender(self) -> None:
 
 
 def _change_defender(self) -> None:
-    _bootstrap()
     from src.ui.pokemon_edit_dialog import MyBoxSelectDialog
     dlg = MyBoxSelectDialog("防御側PT", self)
     if not dlg.exec_():
@@ -266,7 +281,6 @@ def _change_defender(self) -> None:
 
 
 def _box_select_into_slot(self, side: str, idx: int) -> None:
-    _bootstrap()
     from src.ui.pokemon_edit_dialog import MyBoxSelectDialog
     dlg = MyBoxSelectDialog("自分PT{}番".format(idx + 1), self.window())
     if not dlg.exec_():
@@ -286,7 +300,6 @@ def _box_select_into_slot(self, side: str, idx: int) -> None:
 
 
 def _change_move(self, slot: int) -> None:
-    _bootstrap()
     if self._atk is None:
         return
     from src.ui.pokemon_edit_dialog import MoveSelectDialog
@@ -313,7 +326,6 @@ def _change_move(self, slot: int) -> None:
 
 
 def _change_opp_move(self, slot: int) -> None:
-    _bootstrap()
     if self._def_custom is None:
         return
     from src.ui.pokemon_edit_dialog import MoveSelectDialog
@@ -340,13 +352,12 @@ def _change_opp_move(self, slot: int) -> None:
 
 
 def _swap_atk_def(self) -> None:
-    _bootstrap()
     if self._def_custom is None:
         return
     old_atk = self._atk
     self._atk = copy.deepcopy(self._def_custom)
     self._def_custom = copy.deepcopy(old_atk) if old_atk else None
-    self._def_species_name = self._def_custom.name_ja if self._def_custom else ""
+    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
     self._party_source = "opp" if self._party_source == "my" else "my"
     self._refresh_bulk_rows_visibility()
     self._atk_panel.set_pokemon(self._atk)
@@ -360,7 +371,6 @@ def _swap_atk_def(self) -> None:
 
 
 def _reset_conditions(self) -> None:
-    _bootstrap()
     self._weather_grp.set_value("none")
     self._terrain_grp.set_value("none")
     for btn in (self._burn_btn, self._crit_btn, self._fairy_aura_btn,
@@ -407,7 +417,6 @@ def _reset_conditions(self) -> None:
 
 
 def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> None:
-    _bootstrap()
     self._atk = copy.deepcopy(pokemon)
     self._party_source = source
     self._refresh_bulk_rows_visibility()
@@ -417,15 +426,13 @@ def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> Non
 
 
 def _set_defender_from_party(self, pokemon: PokemonInstance) -> None:
-    _bootstrap()
     self._def_custom = copy.deepcopy(pokemon)
-    self._def_species_name = self._def_custom.name_ja if self._def_custom else ""
+    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
     self._def_panel.set_pokemon(self._def_custom)
     self.defender_changed.emit(self._def_custom)
 
 
 def _change_atk_ability(self) -> None:
-    _bootstrap()
     if not self._atk:
         return
     new_val = _pick_ability(self._atk, self)
@@ -440,7 +447,6 @@ def _change_atk_ability(self) -> None:
 
 
 def _change_atk_item(self) -> None:
-    _bootstrap()
     if not self._atk:
         return
     new_val = _pick_item(self._atk, self)
@@ -455,7 +461,6 @@ def _change_atk_item(self) -> None:
 
 
 def _change_def_ability(self) -> None:
-    _bootstrap()
     if not self._def_custom:
         return
     new_val = _pick_ability(self._def_custom, self)
@@ -470,7 +475,6 @@ def _change_def_ability(self) -> None:
 
 
 def _change_def_item(self) -> None:
-    _bootstrap()
     if not self._def_custom:
         return
     new_val = _pick_item(self._def_custom, self)
@@ -485,7 +489,6 @@ def _change_def_item(self) -> None:
 
 
 def _on_form_change_atk(self) -> None:
-    _bootstrap()
     from src.data.database import get_abilities_by_usage, get_species_by_name_ja
     from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
 
@@ -535,7 +538,6 @@ def _on_form_change_atk(self) -> None:
 
 
 def _on_form_change_def(self) -> None:
-    _bootstrap()
     from src.data.database import get_abilities_by_usage, get_species_by_name_ja
     from src.ui.damage_panel_ability import _pokeapi_ability_names_for_pokemon
 
@@ -575,7 +577,7 @@ def _on_form_change_def(self) -> None:
         self._def_form_cache[canon] = (next_name, original_ability)
         new_p = _apply_form(self._def_custom, next_name)
     self._def_custom = new_p
-    self._def_species_name = new_p.name_ja
+    self._def_species_name = new_p.name_ja or ""
     self._persist_party_member_edits()
     self._def_panel.set_pokemon(self._def_custom)
     self.defender_changed.emit(self._def_custom)
@@ -585,16 +587,15 @@ def _on_form_change_def(self) -> None:
 
 
 def _on_my_party_slot_clicked(self, idx: int) -> None:
-    _bootstrap()
     if idx >= len(self._my_party) or self._my_party[idx] is None:
         self._add_party_slot("my", idx)
         return
-    p = self._my_party[idx]
+    party_member = self._my_party[idx]
     if self._party_source == "my":
         self._atk_party_side = "my"
         self._atk_party_idx = idx
-        self._set_attacker_from_party(p, source="my")
-        norm = _normalize_form_name(p.name_ja)
+        self._set_attacker_from_party(party_member, source="my")
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
@@ -605,14 +606,14 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
     else:
         self._def_party_side = "my"
         self._def_party_idx = idx
-        self._set_defender_from_party(p)
-        norm = _normalize_form_name(p.name_ja)
+        self._set_defender_from_party(party_member)
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
             self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja
+            self._def_species_name = self._def_custom.name_ja or ""
             self._def_panel.set_pokemon(self._def_custom)
             self.defender_changed.emit(self._def_custom)
     self._refresh_party_slots()
@@ -620,16 +621,15 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
 
 
 def _on_opp_party_slot_clicked(self, idx: int) -> None:
-    _bootstrap()
     if idx >= len(self._opp_party) or self._opp_party[idx] is None:
         self._add_party_slot("opp", idx)
         return
-    p = self._opp_party[idx]
+    party_member = self._opp_party[idx]
     if self._party_source == "opp":
         self._atk_party_side = "opp"
         self._atk_party_idx = idx
-        self._set_attacker_from_party(p, source="opp")
-        norm = _normalize_form_name(p.name_ja)
+        self._set_attacker_from_party(party_member, source="opp")
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._atk_form_cache.get(canon)
         if cached:
@@ -640,14 +640,14 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
     else:
         self._def_party_side = "opp"
         self._def_party_idx = idx
-        self._set_defender_from_party(p)
-        norm = _normalize_form_name(p.name_ja)
+        self._set_defender_from_party(party_member)
+        norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
         cached = self._def_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
             self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja
+            self._def_species_name = self._def_custom.name_ja or ""
             self._def_panel.set_pokemon(self._def_custom)
             self.defender_changed.emit(self._def_custom)
     self._refresh_party_slots()
@@ -657,7 +657,6 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
 
 
 def _open_copy_dialog(self) -> None:
-    _bootstrap()
     from src.ui.damage_panel_copy_dialog import CopyDialog
     webhook_url = ""
     main_win = self.window()
@@ -671,7 +670,6 @@ def _open_copy_dialog(self) -> None:
 
 
 def _set_battle_format(self, mode: str) -> None:
-    _bootstrap()
     self._battle_format = mode
     is_double = mode == "double"
     if hasattr(self, "_helping_btn"):
@@ -687,7 +685,6 @@ def _set_battle_format(self, mode: str) -> None:
 
 
 def _toggle_details(self, checked: bool) -> None:
-    _bootstrap()
     self._detail_container.setVisible(checked)
     self._detail_toggle_btn.setText("詳細設定を隠す" if checked else "詳細設定を表示")
     if checked:
@@ -695,12 +692,10 @@ def _toggle_details(self, checked: bool) -> None:
 
 
 def _apply_bulk_rows_default(self) -> None:
-    _bootstrap()
     self._set_bulk_rows_visible(True, refresh=False)
 
 
 def _set_bulk_rows_visible(self, visible: bool, refresh: bool = True) -> None:
-    _bootstrap()
     self._show_bulk_rows = bool(visible)
     if hasattr(self, "_move_sections"):
         for sec in self._move_sections:
@@ -713,7 +708,6 @@ def _set_bulk_rows_visible(self, visible: bool, refresh: bool = True) -> None:
 
 
 def _on_bulk_toggle_clicked(self, checked: bool) -> None:
-    _bootstrap()
     self._set_bulk_rows_visible(bool(checked), refresh=True)
 
 

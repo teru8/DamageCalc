@@ -2,6 +2,7 @@ import re
 import sqlite3
 import json
 import logging
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -10,6 +11,7 @@ from src.constants import TYPE_EN_TO_JA, TYPE_JA_TO_EN
 
 DEFAULT_USAGE_SEASON = "M-1"
 _ACTIVE_USAGE_SEASON = DEFAULT_USAGE_SEASON
+_season_lock = threading.Lock()
 _TERA_EN_TO_JA: dict[str, str] = {
     **TYPE_EN_TO_JA,
     "stellar": "ステラ",
@@ -35,6 +37,7 @@ def _terastal_from_db_ja(terastal_type_db: str) -> str:
 
 
 def normalize_season_token(season: str | None) -> str:
+    """Normalize a season value to canonical uppercase token form."""
     text = str(season or "").strip().upper()
     if not text:
         return DEFAULT_USAGE_SEASON
@@ -43,17 +46,24 @@ def normalize_season_token(season: str | None) -> str:
 
 
 def get_active_usage_season() -> str:
-    return _ACTIVE_USAGE_SEASON
+    """Return the currently selected usage-data season token."""
+    with _season_lock:
+        return _ACTIVE_USAGE_SEASON
 
 
 def set_active_usage_season(season: str | None) -> str:
+    """Normalize and store the active usage-data season token."""
     global _ACTIVE_USAGE_SEASON
-    _ACTIVE_USAGE_SEASON = normalize_season_token(season)
-    return _ACTIVE_USAGE_SEASON
+    normalized = normalize_season_token(season)
+    with _season_lock:
+        _ACTIVE_USAGE_SEASON = normalized
+    return normalized
 
 
 def _season_or_active(season: str | None) -> str:
-    return normalize_season_token(season or _ACTIVE_USAGE_SEASON)
+    with _season_lock:
+        active = _ACTIVE_USAGE_SEASON
+    return normalize_season_token(season or active)
 
 
 def _db_path() -> Path:
@@ -63,6 +73,20 @@ def _db_path() -> Path:
 
 
 _write_generation: int = 0
+_generation_lock = threading.Lock()
+_TABLE_INFO_ALLOWED_TABLES: frozenset[str] = frozenset(
+    {
+        "pokemon_usage",
+        "usage_option",
+        "usage_ranking",
+        "usage_effort",
+        "species_cache",
+        "registered_pokemon",
+        "move_cache",
+        "species_move_cache",
+        "app_meta",
+    }
+)
 
 
 def normalize_species_name_ja(name_ja: str) -> str:
@@ -78,15 +102,18 @@ def get_write_generation() -> int:
 
     Callers can cache this value and compare on next use to detect stale data.
     """
-    return _write_generation
+    with _generation_lock:
+        return _write_generation
 
 
 def _bump_generation() -> None:
     global _write_generation
-    _write_generation += 1
+    with _generation_lock:
+        _write_generation += 1
 
 
 def get_connection() -> sqlite3.Connection:
+    """Create a SQLite connection configured to return sqlite3.Row."""
     conn = sqlite3.connect(str(_db_path()))
     conn.row_factory = sqlite3.Row
     return conn
@@ -94,6 +121,7 @@ def get_connection() -> sqlite3.Connection:
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
+    """Context manager that yields and then closes a database connection."""
     conn = get_connection()
     try:
         yield conn
@@ -102,6 +130,8 @@ def connection() -> Iterator[sqlite3.Connection]:
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    if table_name not in _TABLE_INFO_ALLOWED_TABLES:
+        raise ValueError("Unsupported table name for schema query: {}".format(table_name))
     rows = conn.execute("PRAGMA table_info({})".format(table_name)).fetchall()
     return [str(row["name"]) for row in rows]
 
@@ -229,6 +259,7 @@ def _migrate_legacy_usage_tables(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
+    """Initialize DB schema and run lightweight in-place migrations."""
     with connection() as conn:
         c = conn.cursor()
         c.executescript("""
@@ -351,7 +382,7 @@ def init_db() -> None:
     );
     """)
         _migrate_legacy_usage_tables(conn)
-        species_cols = [row["name"] for row in c.execute("PRAGMA table_info(species_cache)").fetchall()]
+        species_cols = _table_columns(conn, "species_cache")
         if "weight_kg" not in species_cols:
             c.execute("ALTER TABLE species_cache ADD COLUMN weight_kg REAL DEFAULT 0")
         c.execute(
@@ -361,7 +392,7 @@ def init_db() -> None:
             WHERE name_ja LIKE '%（%' OR name_ja LIKE '%）%'
             """
         )
-        pokemon_cols = [row["name"] for row in c.execute("PRAGMA table_info(registered_pokemon)").fetchall()]
+        pokemon_cols = _table_columns(conn, "registered_pokemon")
         if "usage_name" not in pokemon_cols:
             c.execute("ALTER TABLE registered_pokemon ADD COLUMN usage_name TEXT DEFAULT ''")
         if "terastal_type" not in pokemon_cols:
@@ -415,22 +446,24 @@ def init_db() -> None:
 
 # ── Species ──────────────────────────────────────────────────────────
 
-def upsert_species(s: SpeciesInfo) -> None:
+def upsert_species(species_info: SpeciesInfo) -> None:
+    """Insert or update one species cache row."""
     _bump_generation()
-    normalized_name = normalize_species_name_ja(s.name_ja)
+    normalized_name = normalize_species_name_ja(species_info.name_ja)
     with connection() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO species_cache
             (species_id, name_ja, name_en, type1, type2,
              base_hp, base_attack, base_defense, base_sp_attack, base_sp_defense, base_speed, weight_kg)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (s.species_id, normalized_name, s.name_en, s.type1, s.type2,
-              s.base_hp, s.base_attack, s.base_defense,
-              s.base_sp_attack, s.base_sp_defense, s.base_speed, float(s.weight_kg or 0)))
+        """, (species_info.species_id, normalized_name, species_info.name_en, species_info.type1, species_info.type2,
+              species_info.base_hp, species_info.base_attack, species_info.base_defense,
+              species_info.base_sp_attack, species_info.base_sp_defense, species_info.base_speed, float(species_info.weight_kg or 0)))
         conn.commit()
 
 
 def get_species_by_name_ja(name_ja: str) -> SpeciesInfo | None:
+    """Fetch one species by Japanese name (including normalized variant)."""
     normalized_name = normalize_species_name_ja(name_ja)
     with connection() as conn:
         row = conn.execute(
@@ -443,6 +476,7 @@ def get_species_by_name_ja(name_ja: str) -> SpeciesInfo | None:
 
 
 def get_species_by_id(species_id: int) -> SpeciesInfo | None:
+    """Fetch one species by numeric species id."""
     with connection() as conn:
         row = conn.execute(
             "SELECT * FROM species_cache WHERE species_id=?", (species_id,)
@@ -453,6 +487,7 @@ def get_species_by_id(species_id: int) -> SpeciesInfo | None:
 
 
 def has_species_learnset(species_id: int) -> bool:
+    """Return whether learnset rows exist for the given species id."""
     with connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM species_move_cache WHERE species_id=? LIMIT 1",
@@ -462,6 +497,7 @@ def has_species_learnset(species_id: int) -> bool:
 
 
 def replace_species_learnset(species_id: int, move_ids: list[int]) -> None:
+    """Replace a species learnset with the provided move-id set."""
     with connection() as conn:
         conn.execute("DELETE FROM species_move_cache WHERE species_id=?", (species_id,))
         if move_ids:
@@ -475,19 +511,21 @@ def replace_species_learnset(species_id: int, move_ids: list[int]) -> None:
 
 # ── Moves ─────────────────────────────────────────────────────────────
 
-def upsert_move(m: MoveInfo, move_id: int) -> None:
+def upsert_move(move_info: MoveInfo, move_id: int) -> None:
+    """Insert or update one move cache row."""
     _bump_generation()
     with connection() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO move_cache
             (move_id, name_ja, name_en, type_name, category, power, accuracy, pp, priority)
             VALUES (?,?,?,?,?,?,?,?,?)
-        """, (move_id, m.name_ja, m.name_en, m.type_name, m.category,
-              m.power, m.accuracy, m.pp, m.priority))
+        """, (move_id, move_info.name_ja, move_info.name_en, move_info.type_name, move_info.category,
+              move_info.power, move_info.accuracy, move_info.pp, move_info.priority))
         conn.commit()
 
 
 def get_move_by_name_ja(name_ja: str) -> MoveInfo | None:
+    """Fetch one move by Japanese name."""
     with connection() as conn:
         row = conn.execute(
             "SELECT * FROM move_cache WHERE name_ja=?", (name_ja,)
@@ -509,6 +547,7 @@ def get_move_by_name_ja(name_ja: str) -> MoveInfo | None:
 # ── Registered Pokemon ────────────────────────────────────────────────
 
 def save_pokemon(pokemon: PokemonInstance) -> int:
+    """Insert or update a registered Pokemon and return its database id."""
     import json
     def _to_db_ev(ev_value: int) -> int:
         # Champions points are handled as multiples of 8 in-app.
@@ -519,12 +558,12 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
         return max(0, value - 4)
 
     moves = (pokemon.moves + ["", "", "", ""])[:4]
-    ev_hp_db = _to_db_ev(pokemon.ev_hp)
-    ev_attack_db = _to_db_ev(pokemon.ev_attack)
-    ev_defense_db = _to_db_ev(pokemon.ev_defense)
-    ev_sp_attack_db = _to_db_ev(pokemon.ev_sp_attack)
-    ev_sp_defense_db = _to_db_ev(pokemon.ev_sp_defense)
-    ev_speed_db = _to_db_ev(pokemon.ev_speed)
+    ev_hp_persisted = _to_db_ev(pokemon.ev_hp)
+    ev_attack_persisted = _to_db_ev(pokemon.ev_attack)
+    ev_defense_persisted = _to_db_ev(pokemon.ev_defense)
+    ev_sp_attack_persisted = _to_db_ev(pokemon.ev_sp_attack)
+    ev_sp_defense_persisted = _to_db_ev(pokemon.ev_sp_defense)
+    ev_speed_persisted = _to_db_ev(pokemon.ev_speed)
     with connection() as conn:
         if pokemon.db_id:
             conn.execute("""
@@ -541,8 +580,8 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
                   json.dumps(pokemon.types), pokemon.nature, pokemon.ability, pokemon.item,
                   pokemon.hp, pokemon.attack, pokemon.defense,
                   pokemon.sp_attack, pokemon.sp_defense, pokemon.speed,
-                  ev_hp_db, ev_attack_db, ev_defense_db,
-                  ev_sp_attack_db, ev_sp_defense_db, ev_speed_db,
+                  ev_hp_persisted, ev_attack_persisted, ev_defense_persisted,
+                  ev_sp_attack_persisted, ev_sp_defense_persisted, ev_speed_persisted,
                   _terastal_to_db_ja(pokemon.terastal_type),
                   moves[0], moves[1], moves[2], moves[3],
                   pokemon.db_id))
@@ -561,8 +600,8 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
                   json.dumps(pokemon.types), pokemon.nature, pokemon.ability, pokemon.item,
                   pokemon.hp, pokemon.attack, pokemon.defense,
                   pokemon.sp_attack, pokemon.sp_defense, pokemon.speed,
-                  ev_hp_db, ev_attack_db, ev_defense_db,
-                  ev_sp_attack_db, ev_sp_defense_db, ev_speed_db,
+                   ev_hp_persisted, ev_attack_persisted, ev_defense_persisted,
+                   ev_sp_attack_persisted, ev_sp_defense_persisted, ev_speed_persisted,
                   _terastal_to_db_ja(pokemon.terastal_type),
                   moves[0], moves[1], moves[2], moves[3]))
             new_id = cur.lastrowid
@@ -571,6 +610,7 @@ def save_pokemon(pokemon: PokemonInstance) -> int:
 
 
 def load_all_pokemon() -> list[PokemonInstance]:
+    """Load all registered Pokemon ordered by most recently updated."""
     import json
     def _from_db_ev(ev_value: int) -> int:
         # Restore in-app representation from persisted (8x points - 4).
@@ -585,12 +625,16 @@ def load_all_pokemon() -> list[PokemonInstance]:
         ).fetchall()
     result = []
     for row in rows:
-        p = PokemonInstance(
+        try:
+            types = json.loads(row["types_json"] or "[]")
+        except json.JSONDecodeError:
+            types = []
+        pokemon = PokemonInstance(
             species_id=row["species_id"],
             name_ja=row["name_ja"],
             usage_name=row["usage_name"] or "",
             name_en=row["name_en"],
-            types=json.loads(row["types_json"] or "[]"),
+            types=types,
             nature=row["nature"],
             ability=row["ability"],
             item=row["item"],
@@ -601,15 +645,16 @@ def load_all_pokemon() -> list[PokemonInstance]:
             ev_defense=_from_db_ev(row["ev_defense"]), ev_sp_attack=_from_db_ev(row["ev_sp_attack"]),
             ev_sp_defense=_from_db_ev(row["ev_sp_defense"]), ev_speed=_from_db_ev(row["ev_speed"]),
             terastal_type=_terastal_from_db_ja(row["terastal_type"]),
-            moves=[m for m in [row["move1"], row["move2"],
-                                row["move3"], row["move4"]] if m],
+            moves=[move for move in [row["move1"], row["move2"],
+                                     row["move3"], row["move4"]] if move],
             db_id=row["id"],
         )
-        result.append(p)
+        result.append(pokemon)
     return result
 
 
 def delete_pokemon(db_id: int) -> None:
+    """Delete one registered Pokemon row by id."""
     with connection() as conn:
         conn.execute("DELETE FROM registered_pokemon WHERE id=?", (db_id,))
         conn.commit()
@@ -647,6 +692,7 @@ def save_usage_snapshot(
     effort_rows: list[tuple[str, int, int, int, int, int, int, int, float]] | None = None,
     season: str | None = None,
 ) -> None:
+    """Replace all usage snapshot tables for one season in a single transaction."""
     season_token = _season_or_active(season)
     if nature_rows is None:
         nature_rows = []
@@ -722,14 +768,16 @@ def save_usage_snapshot(
 
 
 def get_all_species_names_ja() -> list[str]:
+    """Return all Japanese species names sorted lexicographically."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT name_ja FROM species_cache ORDER BY name_ja"
         ).fetchall()
-    return [r["name_ja"] for r in rows]
+    return [row["name_ja"] for row in rows]
 
 
 def get_available_usage_seasons() -> list[str]:
+    """Return known usage seasons, always including DEFAULT_USAGE_SEASON."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT season FROM pokemon_usage WHERE season IS NOT NULL AND season != '' ORDER BY season DESC"
@@ -748,6 +796,7 @@ def get_available_usage_seasons() -> list[str]:
 
 
 def get_usage_pool_species_names(season: str | None = None) -> list[str]:
+    """Return ranked usage species first, then remaining species names."""
     season_token = _season_or_active(season)
     with connection() as conn:
         ranked_rows = conn.execute(
@@ -789,6 +838,7 @@ def get_species_names_by_usage(
     season: str | None = None,
     include_all_species: bool = True,
 ) -> list[str]:
+    """Return species names ordered by usage rank for the selected season."""
     season_token = _season_or_active(season)
     with connection() as conn:
         ranked_rows = conn.execute(
@@ -821,14 +871,16 @@ def get_species_names_by_usage(
 
 
 def get_all_species_name_entries() -> list[tuple[int, str, str]]:
+    """Return `(species_id, name_ja, name_en)` entries for all species."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT species_id, name_ja, name_en FROM species_cache ORDER BY species_id"
         ).fetchall()
-    return [(r["species_id"], r["name_ja"], r["name_en"]) for r in rows]
+    return [(row["species_id"], row["name_ja"], row["name_en"]) for row in rows]
 
 
 def get_all_species() -> list[SpeciesInfo]:
+    """Return all species cache rows as SpeciesInfo."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT * FROM species_cache ORDER BY species_id ASC"
@@ -837,6 +889,7 @@ def get_all_species() -> list[SpeciesInfo]:
 
 
 def get_species_usage_rank_map(season: str | None = None) -> dict[str, int]:
+    """Return a mapping from species name to usage rank."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute(
@@ -855,6 +908,7 @@ def get_species_usage_rank_map(season: str | None = None) -> dict[str, int]:
 
 
 def get_move_by_id(move_id: int) -> MoveInfo | None:
+    """Fetch one move from cache by numeric move id."""
     with connection() as conn:
         row = conn.execute(
             "SELECT * FROM move_cache WHERE move_id=?", (move_id,)
@@ -874,14 +928,16 @@ def get_move_by_id(move_id: int) -> MoveInfo | None:
 
 
 def get_all_move_names_ja() -> list[str]:
+    """Return all non-null Japanese move names."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT name_ja FROM move_cache WHERE name_ja IS NOT NULL ORDER BY name_ja"
         ).fetchall()
-    return [r["name_ja"] for r in rows]
+    return [row["name_ja"] for row in rows]
 
 
 def get_all_moves() -> list[MoveInfo]:
+    """Return all cached moves as MoveInfo objects."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT * FROM move_cache
@@ -904,6 +960,7 @@ def get_all_moves() -> list[MoveInfo]:
 
 
 def get_species_names_by_move(move_name_ja: str) -> list[str]:
+    """Return species names that can learn `move_name_ja`."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT DISTINCT s.name_ja
@@ -920,6 +977,7 @@ def get_species_names_by_ability_usage(
     ability_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return species names that use the given ability in usage data."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute("""
@@ -932,6 +990,7 @@ def get_species_names_by_ability_usage(
 
 
 def get_all_usage_ability_names(season: str | None = None) -> list[str]:
+    """Return distinct ability names from usage_option for one season."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute("""
@@ -944,6 +1003,7 @@ def get_all_usage_ability_names(season: str | None = None) -> list[str]:
 
 
 def get_moves_for_species(species_id: int) -> list[MoveInfo]:
+    """Return learned moves for one species id."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT m.*
@@ -978,12 +1038,12 @@ def _usage_name_variants(name: str) -> list[str]:
     """
     import re as _re
     seen: list[str] = []
-    for v in [
+    for variant in [
         name,
         name.replace("（", "(").replace("）", ")"),
     ]:
-        if v not in seen:
-            seen.append(v)
+        if variant not in seen:
+            seen.append(variant)
     base = _re.sub(r"\s*\((?:オス|メス)のすがた\)\s*$", "", seen[-1]).strip()
     if base and base not in seen:
         seen.append(base)
@@ -1004,7 +1064,7 @@ def get_moves_by_usage(
                 ORDER BY usage_rank ASC
             """, (season_token, name)).fetchall()
             if rows:
-                return [r["option_name_ja"] for r in rows]
+                return [row["option_name_ja"] for row in rows]
 
         for name in _usage_name_variants(pokemon_name_ja):
             rows = conn.execute("""
@@ -1013,7 +1073,7 @@ def get_moves_by_usage(
                 ORDER BY usage_rank ASC
             """, (season_token, name)).fetchall()
             if rows:
-                return [r["move_name_ja"] for r in rows]
+                return [row["move_name_ja"] for row in rows]
 
     return []
 
@@ -1022,6 +1082,7 @@ def get_abilities_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked ability options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1031,7 +1092,7 @@ def get_abilities_by_usage(
                 ORDER BY usage_rank ASC
             """, (season_token, name)).fetchall()
             if rows:
-                return [r["option_name_ja"] for r in rows]
+                return [row["option_name_ja"] for row in rows]
     return []
 
 
@@ -1039,6 +1100,7 @@ def get_items_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked held-item options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1048,7 +1110,7 @@ def get_items_by_usage(
                 ORDER BY usage_rank ASC
             """, (season_token, name)).fetchall()
             if rows:
-                return [r["option_name_ja"] for r in rows]
+                return [row["option_name_ja"] for row in rows]
     return []
 
 
@@ -1056,6 +1118,7 @@ def get_natures_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked nature options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1065,7 +1128,7 @@ def get_natures_by_usage(
                 ORDER BY usage_rank ASC
             """, (season_token, name)).fetchall()
             if rows:
-                return [r["option_name_ja"] for r in rows]
+                return [row["option_name_ja"] for row in rows]
     return []
 
 
@@ -1073,6 +1136,7 @@ def get_effort_spreads_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[tuple[int, int, int, int, int, int, float]]:
+    """Return ranked EV spreads by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1085,20 +1149,21 @@ def get_effort_spreads_by_usage(
             if rows:
                 return [
                     (
-                        int(r["hp_pt"]),
-                        int(r["attack_pt"]),
-                        int(r["defense_pt"]),
-                        int(r["sp_attack_pt"]),
-                        int(r["sp_defense_pt"]),
-                        int(r["speed_pt"]),
-                        float(r["usage_percent"]),
+                        int(row["hp_pt"]),
+                        int(row["attack_pt"]),
+                        int(row["defense_pt"]),
+                        int(row["sp_attack_pt"]),
+                        int(row["sp_defense_pt"]),
+                        int(row["speed_pt"]),
+                        float(row["usage_percent"]),
                     )
-                    for r in rows
+                    for row in rows
                 ]
     return []
 
 
 def get_local_data_status(season: str | None = None) -> dict[str, int]:
+    """Return aggregate local cache counts used by status UI."""
     season_token = _season_or_active(season)
     with connection() as conn:
         status = {
@@ -1146,53 +1211,53 @@ def export_usage_to_json(season: str | None = None) -> bool:
             data = {
                 "season": season_token,
                 "pokemon": [
-                    {"name_ja": r["pokemon_name_ja"], "rank": r["usage_rank"]}
-                    for r in conn.execute(
+                    {"name_ja": row["pokemon_name_ja"], "rank": row["usage_rank"]}
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, usage_rank FROM pokemon_usage WHERE season=? ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
                 ],
                 "moves": [
-                    {"pokemon_name_ja": r["pokemon_name_ja"], "name_ja": r["option_name_ja"], "rank": r["usage_rank"]}
-                    for r in conn.execute(
+                    {"pokemon_name_ja": row["pokemon_name_ja"], "name_ja": row["option_name_ja"], "rank": row["usage_rank"]}
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, option_name_ja, usage_rank FROM usage_option WHERE season=? AND category='move' ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
                 ],
                 "abilities": [
-                    {"pokemon_name_ja": r["pokemon_name_ja"], "name_ja": r["option_name_ja"], "rank": r["usage_rank"]}
-                    for r in conn.execute(
+                    {"pokemon_name_ja": row["pokemon_name_ja"], "name_ja": row["option_name_ja"], "rank": row["usage_rank"]}
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, option_name_ja, usage_rank FROM usage_option WHERE season=? AND category='ability' ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
                 ],
                 "items": [
-                    {"pokemon_name_ja": r["pokemon_name_ja"], "name_ja": r["option_name_ja"], "rank": r["usage_rank"]}
-                    for r in conn.execute(
+                    {"pokemon_name_ja": row["pokemon_name_ja"], "name_ja": row["option_name_ja"], "rank": row["usage_rank"]}
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, option_name_ja, usage_rank FROM usage_option WHERE season=? AND category='item' ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
                 ],
                 "natures": [
-                    {"pokemon_name_ja": r["pokemon_name_ja"], "name_ja": r["option_name_ja"], "rank": r["usage_rank"]}
-                    for r in conn.execute(
+                    {"pokemon_name_ja": row["pokemon_name_ja"], "name_ja": row["option_name_ja"], "rank": row["usage_rank"]}
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, option_name_ja, usage_rank FROM usage_option WHERE season=? AND category='nature' ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
                 ],
                 "efforts": [
                     {
-                        "pokemon_name_ja": r["pokemon_name_ja"],
-                        "rank": r["usage_rank"],
-                        "hp_pt": r["hp_pt"],
-                        "attack_pt": r["attack_pt"],
-                        "defense_pt": r["defense_pt"],
-                        "sp_attack_pt": r["sp_attack_pt"],
-                        "sp_defense_pt": r["sp_defense_pt"],
-                        "speed_pt": r["speed_pt"],
-                        "usage_percent": r["usage_percent"],
+                        "pokemon_name_ja": row["pokemon_name_ja"],
+                        "rank": row["usage_rank"],
+                        "hp_pt": row["hp_pt"],
+                        "attack_pt": row["attack_pt"],
+                        "defense_pt": row["defense_pt"],
+                        "sp_attack_pt": row["sp_attack_pt"],
+                        "sp_defense_pt": row["sp_defense_pt"],
+                        "speed_pt": row["speed_pt"],
+                        "usage_percent": row["usage_percent"],
                     }
-                    for r in conn.execute(
+                    for row in conn.execute(
                         "SELECT pokemon_name_ja, usage_rank, hp_pt, attack_pt, defense_pt, sp_attack_pt, sp_defense_pt, speed_pt, usage_percent FROM usage_effort WHERE season=? ORDER BY usage_rank",
                         (season_token,)
                     ).fetchall()
@@ -1223,24 +1288,24 @@ def import_usage_from_json(season: str | None = None) -> bool:
 
         season_token = data.get("season", _season_or_active(season))
 
-        pokemon_rows = [(r["name_ja"], r["rank"]) for r in data.get("pokemon", [])]
-        move_rows = [(r["pokemon_name_ja"], r["name_ja"], r["rank"]) for r in data.get("moves", [])]
-        ability_rows = [(r["pokemon_name_ja"], r["name_ja"], r["rank"]) for r in data.get("abilities", [])]
-        item_rows = [(r["pokemon_name_ja"], r["name_ja"], r["rank"]) for r in data.get("items", [])]
-        nature_rows = [(r["pokemon_name_ja"], r["name_ja"], r["rank"]) for r in data.get("natures", [])]
+        pokemon_rows = [(entry["name_ja"], entry["rank"]) for entry in data.get("pokemon", [])]
+        move_rows = [(entry["pokemon_name_ja"], entry["name_ja"], entry["rank"]) for entry in data.get("moves", [])]
+        ability_rows = [(entry["pokemon_name_ja"], entry["name_ja"], entry["rank"]) for entry in data.get("abilities", [])]
+        item_rows = [(entry["pokemon_name_ja"], entry["name_ja"], entry["rank"]) for entry in data.get("items", [])]
+        nature_rows = [(entry["pokemon_name_ja"], entry["name_ja"], entry["rank"]) for entry in data.get("natures", [])]
         effort_rows = [
             (
-                r["pokemon_name_ja"],
-                r["rank"],
-                r["hp_pt"],
-                r["attack_pt"],
-                r["defense_pt"],
-                r["sp_attack_pt"],
-                r["sp_defense_pt"],
-                r["speed_pt"],
-                r["usage_percent"],
+                entry["pokemon_name_ja"],
+                entry["rank"],
+                entry["hp_pt"],
+                entry["attack_pt"],
+                entry["defense_pt"],
+                entry["sp_attack_pt"],
+                entry["sp_defense_pt"],
+                entry["speed_pt"],
+                entry["usage_percent"],
             )
-            for r in data.get("efforts", [])
+            for entry in data.get("efforts", [])
         ]
 
         save_usage_snapshot(

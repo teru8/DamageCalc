@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QPainter
@@ -42,9 +41,9 @@ class ToggleBtn(QPushButton):
     def set_metrics(
         self,
         *,
-        font_size: Optional[int] = None,
-        pad_h: Optional[int] = None,
-        pad_v: Optional[int] = None,
+        font_size: int | None = None,
+        pad_h: int | None = None,
+        pad_v: int | None = None,
     ) -> None:
         if font_size is not None:
             self._font_size = int(font_size)
