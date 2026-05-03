@@ -1,20 +1,20 @@
 """Extracted methods from damage_panel.py."""
 from __future__ import annotations
 
+import copy
+import dataclasses
+import math
+
 from src.calc.calc_inputs import (
     AttackerCalcConfig,
     DefenderCalcConfig,
     DamageCalcInputs,
     FieldCalcConfig,
 )
-
-
-def _bootstrap() -> None:
-    from src.ui import damage_panel as _dp
-    globals().update(_dp.__dict__)
+from src.models import MoveInfo, PokemonInstance
+from src.ui.damage_panel_math import nature_mult_from_name as _nature_mult_from_name
 
 def recalculate(self) -> None:
-    _bootstrap()
     if not hasattr(self, "_move_sections"):
         return
     self._sync_attacker_ability_support_buttons()
@@ -35,7 +35,6 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
     This is the only function in the calc pipeline that touches PyQt5 widgets.
     Everything downstream can work purely from the returned dataclass.
     """
-    _bootstrap()
     from src.calc.calc_utils import is_grounded
 
     def _btn(name: str, default: bool = False) -> bool:
@@ -71,6 +70,11 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
             _btn("_flash_fire_boost_btn") or
             _btn("_analytic_btn")
         ),
+        stakeout_active=_btn("_stakeout_btn"),
+        flash_fire_active=_btn("_flash_fire_boost_btn"),
+        protosynthesis_active=_btn("_protosynthesis_btn"),
+        quark_drive_active=_btn("_quark_drive_btn"),
+        analytic_active=_btn("_analytic_btn"),
         allies_fainted=int(self._supreme_combo.currentData() or 0)
             if self._supreme_combo.isVisible() else 0,
         rivalry_state=str(self._rivalry_combo.currentData() or "none")
@@ -110,6 +114,7 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
         weather=self._weather_key(),
         terrain=self._terrain_key(),
         is_double=getattr(self, "_battle_format", "single") == "double",
+        is_crit=self._crit_btn.isChecked(),
         has_reflect=self._reflect_btn.isChecked(),
         has_light_screen=self._lightscreen_btn.isChecked(),
         helping=self._helping_btn.isChecked(),
@@ -144,7 +149,6 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
 
 
 def _calc_moves(self) -> None:
-    _bootstrap()
     from src.calc.calc_utils import (
         calc_stat, get_nature_mult,
         get_damage_modifier_notes, move_type_effectiveness,
@@ -155,8 +159,7 @@ def _calc_moves(self) -> None:
         SmogonBridge, pokemon_to_attacker_dict, defender_scenario_dict, attacker_scenario_dict,
         pokemon_to_defender_dict,
         move_to_dict as smogon_move_to_dict,
-        field_to_dict as smogon_field_to_dict,
-        ABILITY_JA_TO_EN, TYPE_TO_SMOGON,
+        TYPE_TO_SMOGON,
         smogon_mega_species,
         _ability_name_to_en,
     )
@@ -164,21 +167,23 @@ def _calc_moves(self) -> None:
     from src.data.item_dictionary import ITEM_FALLBACK_JA_TO_EN
     from src.data.database import get_move_by_name_ja
     from src.constants import BEST_DEF_NATURE_FOR, nature_ja_to_en
+    from src.calc.damage_calculator import DamageCalculator
 
+    inputs = self.collect_calc_inputs()
     atk = copy.copy(self._atk)
 
     # Apply attacker EV overrides for all stats
-    ev_pts_h_atk = self._atk_panel.ev_hp_pts()
-    ev_pts_a = self._atk_panel.ev_attack_pts()
-    ev_pts_b_atk = self._atk_panel.ev_defense_pts()
-    ev_pts_c = self._atk_panel.ev_sp_attack_pts()
-    ev_pts_d_atk = self._atk_panel.ev_sp_defense_pts()
-    ev_pts_s_atk = self._atk_panel.ev_speed_pts()
-    atk_nature = self._atk_panel.panel_nature()
-    atk_ac_rank = self._atk_panel.ac_rank()
-    atk_bd_rank = self._atk_panel.bd_rank()
+    ev_pts_h_atk = inputs.attacker.ev_hp
+    ev_pts_a = inputs.attacker.ev_attack
+    ev_pts_b_atk = inputs.attacker.ev_defense
+    ev_pts_c = inputs.attacker.ev_sp_attack
+    ev_pts_d_atk = inputs.attacker.ev_sp_defense
+    ev_pts_s_atk = inputs.attacker.ev_speed
+    atk_nature = inputs.attacker.nature
+    atk_ac_rank = inputs.attacker.ac_rank
+    atk_bd_rank = inputs.attacker.bd_rank
     rank = atk_ac_rank
-    tera = self._atk_panel.terastal_type()
+    tera = inputs.attacker.tera
 
     # Re-calc all stats from species if available
     species = self._resolve_species_info(atk, atk.name_ja)
@@ -202,16 +207,12 @@ def _calc_moves(self) -> None:
             atk.hp = atk.max_hp
     self._atk_panel.update_stat_display(atk)
 
-    if self._burn_btn.isChecked():
+    if inputs.attacker.is_burned:
         atk.status = "burn"
-    if self._toxic_boost_btn.isVisible() and self._toxic_boost_btn.isChecked():
+    if inputs.attacker.is_toxic_boosted:
         atk.status = "poison"
 
-    pinch_trigger = any(
-        btn.isVisible() and btn.isChecked() for btn in (
-            self._overgrow_btn, self._blaze_btn, self._torrent_btn, self._swarm_btn
-        )
-    )
+    pinch_trigger = inputs.attacker.is_pinch
     if pinch_trigger:
         hp_max = atk.max_hp if atk.max_hp > 0 else atk.hp
         if hp_max > 0:
@@ -226,90 +227,65 @@ def _calc_moves(self) -> None:
 
     # Defender scenarios
     def_types_override: list[str] = []
-    def_tera = self._def_panel.terastal_type() if hasattr(self, "_def_panel") else ""
+    def_tera = inputs.defender.tera
     if def_tera:
         def_types_override = [def_tera]
 
-    base_weather = self._weather_key()
-    terrain = self._terrain_key()
-    def _weather_for_attacker(weather_key: str, ability_name: str) -> str:
-        ability = (ability_name or "").strip()
-        # Mega Sol: always treat this attacker's move as under sun.
-        if ability in ("メガソーラー", "Mega Sol"):
-            return "sun"
-        # Orichalcum Pulse: creates sun only when no weather is active.
-        if weather_key == "none" and ability in ("ひひいろのこどう", "Orichalcum Pulse"):
-            return "sun"
-        return weather_key
-
-    atk_weather = _weather_for_attacker(base_weather, atk.ability)
-    opp_weather = _weather_for_attacker(
-        base_weather,
-        self._def_custom.ability if self._def_custom else "",
+    _calc = DamageCalculator(inputs)
+    runtime = _calc.build_runtime_context(
+        attacker_ability=atk.ability,
+        defender_ability=self._def_custom.ability if self._def_custom else "",
     )
-    if terrain == "none" and atk.ability in ("ハドロンエンジン", "Hadron Engine"):
-        terrain = "electric"
-    is_crit = self._crit_btn.isChecked()
-    helping = self._helping_btn.isChecked()
-    steel_spirit = self._steel_spirit_btn.isChecked()
-    charged = self._charge_btn.isChecked()
-    opp_helping = self._opp_helping_btn.isChecked()
-    opp_steel_spirit = self._opp_steel_spirit_btn.isChecked()
-    opp_charged = self._opp_charge_btn.isChecked()
-    reflect = self._reflect_btn.isChecked()
-    lightscreen = self._lightscreen_btn.isChecked()
-    fairy_aura = self._fairy_aura_btn.isChecked() or self._opp_fairy_aura_btn.isChecked()
-    dark_aura = self._dark_aura_btn.isChecked() or self._opp_dark_aura_btn.isChecked()
-    self_reflect = self._self_reflect_btn.isChecked()
-    self_lightscreen = self._self_lightscreen_btn.isChecked()
-    friend_guard = self._friend_guard_btn.isChecked()
-    self_friend_guard = self._self_friend_guard_btn.isChecked()
-    tailwind = self._tailwind_btn.isChecked()
-    self_tailwind = self._self_tailwind_btn.isChecked()
-    gravity = self._gravity_btn.isChecked()
-    def_ac_rank = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
-    def_bd_rank = self._def_panel.bd_rank() if hasattr(self, "_def_panel") else 0
-    def_rank = def_bd_rank
-    hp_percent = self._def_panel.current_hp_percent() if hasattr(self, "_def_panel") else 100
-    def_use_sp = self._def_panel.use_sp_defense() if hasattr(self, "_def_panel") else False
-    def_ev_pts_h = self._def_panel.ev_hp_pts() if hasattr(self, "_def_panel") else 0
-    def_ev_pts_a = self._def_panel.ev_attack_pts() if hasattr(self, "_def_panel") else 0
-    def_ev_pts_b = self._def_panel.ev_defense_pts() if hasattr(self, "_def_panel") else 0
-    def_ev_pts_c = self._def_panel.ev_sp_attack_pts() if hasattr(self, "_def_panel") else 0
-    def_ev_pts_d = self._def_panel.ev_sp_defense_pts() if hasattr(self, "_def_panel") else 0
-    def_ev_pts_s = self._def_panel.ev_speed_pts() if hasattr(self, "_def_panel") else 0
-    def_nature = self._def_panel.panel_nature() if hasattr(self, "_def_panel") else "まじめ"
-    is_double = getattr(self, "_battle_format", "single") == "double"
-    parental_bond = bool(atk.ability == "おやこあい")
-    stakeout_active = self._stakeout_btn.isVisible() and self._stakeout_btn.isChecked()
-    flash_fire_active = self._flash_fire_boost_btn.isVisible() and self._flash_fire_boost_btn.isChecked()
-    protosynthesis_active = self._protosynthesis_btn.isVisible() and self._protosynthesis_btn.isChecked()
-    quark_drive_active = self._quark_drive_btn.isVisible() and self._quark_drive_btn.isChecked()
-    analytic_active = self._analytic_btn.isVisible() and self._analytic_btn.isChecked()
-    flare_boost_active = self._flare_boost_btn.isVisible() and self._flare_boost_btn.isChecked()
-    guts_active = self._guts_btn.isVisible() and self._guts_btn.isChecked()
+    atk_weather = runtime.atk_weather
+    opp_weather = runtime.opp_weather
+    terrain = runtime.terrain
+    is_crit = runtime.is_crit
+    helping = runtime.helping
+    steel_spirit = runtime.steel_spirit
+    charged = runtime.charged
+    opp_helping = runtime.opp_helping
+    opp_steel_spirit = runtime.opp_steel_spirit
+    opp_charged = runtime.opp_charged
+    reflect = runtime.reflect
+    lightscreen = runtime.lightscreen
+    fairy_aura = runtime.fairy_aura
+    dark_aura = runtime.dark_aura
+    self_reflect = runtime.self_reflect
+    self_lightscreen = runtime.self_lightscreen
+    friend_guard = runtime.friend_guard
+    self_friend_guard = runtime.self_friend_guard
+    tailwind = runtime.tailwind
+    self_tailwind = runtime.self_tailwind
+    gravity = runtime.gravity
+    def_ac_rank = runtime.def_ac_rank
+    def_bd_rank = runtime.def_bd_rank
+    def_rank = runtime.def_rank
+    hp_percent = runtime.hp_percent
+    def_use_sp = runtime.def_use_sp
+    def_ev_pts_h = runtime.def_ev_pts_h
+    def_ev_pts_a = runtime.def_ev_pts_a
+    def_ev_pts_b = runtime.def_ev_pts_b
+    def_ev_pts_c = runtime.def_ev_pts_c
+    def_ev_pts_d = runtime.def_ev_pts_d
+    def_ev_pts_s = runtime.def_ev_pts_s
+    def_nature = runtime.def_nature
+    is_double = runtime.is_double
+    stakeout_active = runtime.stakeout_active
+    flash_fire_active = runtime.flash_fire_active
+    protosynthesis_active = runtime.protosynthesis_active
+    quark_drive_active = runtime.quark_drive_active
+    analytic_active = runtime.analytic_active
+    flare_boost_active = inputs.attacker.flare_boost_active
+    guts_active = inputs.attacker.guts_active
     if flare_boost_active:
         atk.status = "burn"
     if guts_active and not atk.status:
         atk.status = "par"
-    ability_on = (
-        (atk.ability in ("はりこみ", "Stakeout") and stakeout_active) or
-        (atk.ability in ("もらいび", "Flash Fire") and flash_fire_active) or
-        (atk.ability in ("アナライズ", "Analytic") and analytic_active)
-    )
-    allies_fainted = int(self._supreme_combo.currentData() or 0) if self._supreme_combo.isVisible() else 0
-    rivalry_state = str(self._rivalry_combo.currentData() or "none") if self._rivalry_combo.isVisible() else "none"
-    attacker_gender = ""
-    defender_gender = ""
-    if rivalry_state == "same":
-        attacker_gender = "M"
-        defender_gender = "M"
-    elif rivalry_state == "opposite":
-        attacker_gender = "M"
-        defender_gender = "F"
-    elif self._rivalry_combo.isVisible():
-        attacker_gender = "N"
-        defender_gender = "N"
+    ability_on = runtime.ability_on
+    allies_fainted = runtime.allies_fainted
+    rivalry_state = runtime.rivalry_state
+    attacker_gender = runtime.attacker_gender
+    defender_gender = runtime.defender_gender
 
     shared = dict(
         weather=atk_weather, terrain=terrain, is_critical=is_crit,
@@ -336,66 +312,8 @@ def _calc_moves(self) -> None:
 
     # ── smogon bridge: build attacker dict and field dict once ────────
     _bridge = SmogonBridge.get()
-    _atk_d = pokemon_to_attacker_dict(
-        atk,
-        ev_override={"hp": ev_pts_h_atk * 8, "atk": ev_pts_a * 8, "def": ev_pts_b_atk * 8,
-                     "spa": ev_pts_c * 8, "spd": ev_pts_d_atk * 8, "spe": ev_pts_s_atk * 8},
-        atk_rank=atk_ac_rank,
-        terastal_type=tera,
-        allies_fainted=allies_fainted,
-        gender=attacker_gender,
-        ability_on=ability_on,
-        apply_both=True,
-    )
-    _atk_d["nature"] = nature_ja_to_en(atk_nature)
-    _atk_boosts = _atk_d.setdefault("boosts", {})
-    if atk_bd_rank != 0:
-        _atk_boosts["def"] = atk_bd_rank
-        _atk_boosts["spd"] = atk_bd_rank
-    if (atk.ability in ("こだいかっせい", "Protosynthesis") and protosynthesis_active and atk_weather != "sun") or (
-        atk.ability in ("クォークチャージ", "Quark Drive") and quark_drive_active and terrain != "electric"
-    ):
-        # Force QP active without replacing held item: explicit boostedStat triggers isQPActive().
-        stat_pairs = [
-            ("atk", int(atk.attack or 0)),
-            ("def", int(atk.defense or 0)),
-            ("spa", int(atk.sp_attack or 0)),
-            ("spd", int(atk.sp_defense or 0)),
-            ("spe", int(atk.speed or 0)),
-        ]
-        best = "atk"
-        best_val = stat_pairs[0][1]
-        for key, value in stat_pairs[1:]:
-            if value > best_val:
-                best = key
-                best_val = value
-        _atk_d["boostedStat"] = best
-    if parental_bond and ABILITY_JA_TO_EN.get(atk.ability, "") != "Parental Bond":
-        _atk_d["ability"] = "Parental Bond"
-    _field_d = smogon_field_to_dict(
-        atk_weather,
-        terrain,
-        reflect,
-        lightscreen,
-        helping,
-        fairy_aura,
-        dark_aura,
-        friend_guard=friend_guard,
-        tailwind=tailwind,
-        gravity=gravity,
-    )
-    _field_d_rev = smogon_field_to_dict(
-        opp_weather,
-        terrain,
-        self_reflect,
-        self_lightscreen,
-        opp_helping,
-        fairy_aura,
-        dark_aura,
-        friend_guard=self_friend_guard,
-        tailwind=self_tailwind,
-        gravity=gravity,
-    )
+    _atk_d = _calc.build_attacker_dict(atk, runtime)
+    _field_d, _field_d_rev = _calc.build_field_dicts(runtime)
 
     slot_to_move: dict[int, tuple[str, MoveInfo | None]] = {}
     for slot in range(4):
@@ -490,48 +408,11 @@ def _calc_moves(self) -> None:
 
         # ── smogon bridge: build move dict ────────────────────────────
         hits = sec.hit_count()
-        bridge_forced_type = ""
-        bridge_bp_multiplier = 1.0
-        if (
-            atk.ability in ("ドラゴンスキン", "Dragonize")
-            and pre_resolve_type == "normal"
-            and resolved_type == "dragon"
-        ):
-            bridge_forced_type = "dragon"
-            bridge_bp_multiplier = 1.2
-        weather_ball_active_type = (
-            resolved_type
-            if effective_move is not None
-            and normalize_move_name(effective_move.name_ja) == normalize_move_name("ウェザーボール")
-            and resolved_type != "normal"
-            else ""
+        _mv_d = _calc.build_move_dict(
+            effective_move, atk, pre_resolve_type, resolved_type,
+            is_crit, hits, pow_override, charged,
         )
-        if weather_ball_active_type:
-            # Smogon Weather Ball ,
-            # type/basePower override 。
-            _smogon_type = TYPE_TO_SMOGON.get(weather_ball_active_type, "Normal")
-            _wb_overrides: dict = {
-                "basePower": 100,
-                "type": _smogon_type,
-                "category": "Special",
-            }
-            _mv_d = {"name": "Tackle", "isCrit": is_crit, "overrides": _wb_overrides}
-        else:
-            _mv_d = smogon_move_to_dict(
-                effective_move,
-                is_crit=is_crit,
-                hits=hits if hits > 1 else 0,
-                bp_override=pow_override,
-                charged=charged,
-                forced_type=bridge_forced_type,
-                bp_multiplier=bridge_bp_multiplier,
-            )
-        _atk_d_for_move = _atk_d
-        if effective_move.name_ja == "からげんき" and pow_override > 0:
-            # 「 140」, 。
-            # , A status 。
-            _atk_d_for_move = dict(_atk_d)
-            _atk_d_for_move["status"] = ""
+        _atk_d_for_move = _calc.adjust_attacker_dict_for_move(_atk_d, effective_move, pow_override)
 
         # ── defender meta for smogon dicts ───────────────────────────
         _raw_species_en = (opp_species.name_en if opp_species

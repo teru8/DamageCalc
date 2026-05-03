@@ -1,13 +1,24 @@
 """Extracted methods from damage_panel.py."""
 from __future__ import annotations
 
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QAbstractItemView, QComboBox, QFrame, QHBoxLayout,
+    QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+)
 
-def _bootstrap() -> None:
-    from src.ui import damage_panel as _dp
-    globals().update(_dp.__dict__)
+from src.ui.damage_panel_cards import AttackerCard as _AttackerCard
+from src.ui.damage_panel_cards import DefenderCard as _DefenderCard
+from src.ui.damage_panel_move_section import MoveSection as _MoveSection
+from src.ui.damage_panel_panels import _AttackerPanel, _DefenderPanel
+from src.ui.damage_panel_party import PartySlot as _PartySlot
+from src.ui.damage_panel_ui_helpers import row_label as _row_label
+from src.ui.damage_panel_ui_helpers import sep as _sep
+from src.ui.damage_panel_widgets import RadioGroup as _RadioGroup
+from src.ui.damage_panel_widgets import ToggleBtn as _ToggleBtn
+
 
 def _build_ui(self) -> None:
-    _bootstrap()
     root = QHBoxLayout(self)
     root.setContentsMargins(0, 0, 0, 0)
     root.setSpacing(0)
@@ -31,7 +42,6 @@ def _build_ui(self) -> None:
 
 
 def _build_side_panel(self) -> None:
-    _bootstrap()
     """Build attacker/defender detail controls + battle conditions as a standalone widget."""
     sp_scroll = QScrollArea()
     sp_scroll.setWidgetResizable(True)
@@ -499,7 +509,6 @@ def _build_side_panel(self) -> None:
 
 
 def _build_content(self) -> None:
-    _bootstrap()
     cl = self._content_layout
 
     # ── Party selection rows (top) ────────────────────────────────

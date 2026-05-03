@@ -1,7 +1,141 @@
 """Extracted methods from main_window.py."""
 from __future__ import annotations
 
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+import copy
+import ctypes
+import json
+import re
+import sys
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+
+import cv2
+from PyQt5.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QEvent
+from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtWidgets import (
+    QAction, QApplication, QFileDialog, QFrame, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
+    QPushButton, QVBoxLayout, QWidget,
+)
+
+from src.constants import TYPE_EN_TO_JA, TYPE_JA_TO_EN
+from src.data import database as db
+from src.models import BattleState, PokemonInstance
+from src.recognition import (
+    live_battle_reader,
+    opponent_party_auto_trigger,
+    opponent_party_reader,
+    text_matcher,
+)
+from src.ui.main_window_panels import _DraggableCell
+from src.ui.pokemon_edit_dialog import ChipButton, TypeIconButton
+from src.ui.ui_utils import open_pokemon_edit_dialog
+
+
+_SAMPLE_PARTY_TEXT = """\
+ガブリアス @ きあいのタスキ
+テラスタイプ: ノーマル
+特性: さめはだ
+性格: ようき
+185(12)-182(252)-115-90-105-169(252)
+じしん / げきりん / がんせきふうじ / どくづき
+アシレーヌ @ オボンのみ
+テラスタイプ: ノーマル
+特性: げきりゅう
+性格: ひかえめ
+187(252)-84-94-195(252)-136-82(12)
+ムーンフォース / うたかたのアリア / アクアジェット / クイックターン
+リザードン @ リザードナイトＹ
+テラスタイプ: ノーマル
+特性: もうか
+性格: おくびょう
+155(12)-93-98-161(252)-105-167(252)
+ソーラービーム / ニトロチャージ / かえんほうしゃ / フレアドライブ
+アーマーガア @ たべのこし
+テラスタイプ: ノーマル
+特性: プレッシャー
+性格: わんぱく
+205(252)-107-172(252)-65-105-89(12)
+ボディプレス / とんぼがえり / アイアンヘッド / ブレイブバード
+ブリジュラス @ たべのこし
+テラスタイプ: ノーマル
+特性: じきゅうりょく
+性格: ひかえめ
+167(12)-112-150-194(252)-85-137(252)
+ラスターカノン / りゅうせいぐん / １０まんボルト / はどうだん
+カバルドン @ オボンのみ
+テラスタイプ: ノーマル
+特性: すなおこし
+性格: わんぱく
+215(252)-132-151-79-124(252)-69(12)
+じしん / がんせきふうじ / こおりのキバ / じわれ
+"""
+
+
+def _parse_sample_party() -> list[PokemonInstance]:
+    """コード内埋め込みのサンプルパーティを解析して PokemonInstance リストを返す。"""
+    text = _SAMPLE_PARTY_TEXT
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if "@" in line and current:
+            blocks.append(current)
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        blocks.append(current)
+    result: list[PokemonInstance] = []
+    stat_re = re.compile(r"(\d+)(?:\((\d+)\))?")
+    for block_lines in blocks:
+        if len(block_lines) < 6:
+            continue
+        head = block_lines[0].split("@")
+        name_ja = head[0].strip()
+        item = head[1].strip() if len(head) > 1 else ""
+        tera_ja = block_lines[1].split(":")[-1].strip() if ":" in block_lines[1] else ""
+        tera_en = TYPE_JA_TO_EN.get(tera_ja, "")
+        ability = block_lines[2].split(":")[-1].strip() if ":" in block_lines[2] else ""
+        nature = block_lines[3].split(":")[-1].strip() if ":" in block_lines[3] else "まじめ"
+        parts = block_lines[4].split("-")
+        stats: list[int] = []
+        evs: list[int] = []
+        for stat_part in parts[:6]:
+            stat_match = stat_re.match(stat_part.strip())
+            if stat_match:
+                stats.append(int(stat_match.group(1)))
+                evs.append(int(stat_match.group(2)) if stat_match.group(2) else 0)
+            else:
+                stats.append(0)
+                evs.append(0)
+        while len(stats) < 6:
+            stats.append(0)
+            evs.append(0)
+        moves = [move_name.strip() for move_name in block_lines[5].split("/")][:4]
+        species = db.get_species_by_name_ja(name_ja)
+        pokemon_instance = PokemonInstance(
+            species_id=species.species_id if species else 0,
+            name_ja=name_ja,
+            name_en=species.name_en if species else "",
+            types=[species.type1] + ([species.type2] if species and species.type2 else []) if species else [],
+            weight_kg=species.weight_kg if species else 0.0,
+            nature=nature,
+            ability=ability,
+            item=item,
+            hp=stats[0], attack=stats[1], defense=stats[2],
+            sp_attack=stats[3], sp_defense=stats[4], speed=stats[5],
+            ev_hp=evs[0], ev_attack=evs[1], ev_defense=evs[2],
+            ev_sp_attack=evs[3], ev_sp_defense=evs[4], ev_speed=evs[5],
+            moves=moves,
+            terastal_type=tera_en,
+        )
+        result.append(pokemon_instance)
+    return result
 
 
 def _safe_disconnect(worker: QThread | None, *signals) -> None:
@@ -20,47 +154,23 @@ def _safe_disconnect(worker: QThread | None, *signals) -> None:
 
 
 def _disconnect_damage_panel_signals(self) -> None:
-    try:
-        self._damage_panel.attacker_changed.disconnect()
-        self._damage_panel.defender_changed.disconnect()
-        self._damage_panel.registry_maybe_changed.disconnect()
-        self._damage_panel.bridge_payload_logged.disconnect()
-    except RuntimeError:
-        pass
+    self._cleanup_manager.disconnect_damage_panel_signals(self)
 
 
 def _stop_and_disconnect_timers(self) -> None:
-    self._live_battle_timer.stop()
-    self._live_battle_timer.timeout.disconnect()
-    self._opp_auto_detect_timer.stop()
-    self._opp_auto_detect_timer.timeout.disconnect()
+    self._cleanup_manager.stop_and_disconnect_timers(self)
 
 
 def _cleanup_runtime_resources(self) -> None:
-    _stop_and_disconnect_timers(self)
-    _disconnect_damage_panel_signals(self)
-    self._stop_live_battle_tracking(show_message=False, write_log=False)
-    self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
-    _stop_video_thread_if_present(self)
+    self._cleanup_manager.cleanup_runtime_resources(self)
 
 
 def _stop_video_thread_if_present(self, wait_timeout_ms: int = 3000) -> None:
     """Stop and clear current video thread if present."""
-    if self._video_thread is None:
-        self._camera_state.mark_inactive()
-        return
-    self._video_thread.stop()
-    self._video_thread.wait(wait_timeout_ms)
-    self._video_thread = None
-    self._camera_state.mark_inactive()
+    self._cleanup_manager.stop_video_thread_if_present(self, wait_timeout_ms=wait_timeout_ms)
 
-
-def _bootstrap() -> None:
-    from src.ui import main_window as _mw
-    globals().update(_mw.__dict__)
 
 def _current_usage_season(self) -> str:
-    _bootstrap()
     if self._option_season_combo:
         text = self._option_season_combo.currentText()
         if text and text.strip():
@@ -70,7 +180,6 @@ def _current_usage_season(self) -> str:
 
 
 def _on_usage_season_changed(self, text: str) -> None:
-    _bootstrap()
     season = db.normalize_season_token(text)
     if not season:
         return
@@ -85,7 +194,6 @@ def _on_usage_season_changed(self, text: str) -> None:
 
 
 def _toggle_damage_tera_option(self, checked: bool) -> None:
-    _bootstrap()
     self._damage_tera_visible = bool(checked)
     self._damage_panel.set_terastal_controls_visible(self._damage_tera_visible)
     self._save_settings(damage_show_terastal=self._damage_tera_visible)
@@ -93,27 +201,23 @@ def _toggle_damage_tera_option(self, checked: bool) -> None:
 
 
 def _toggle_damage_bulk_option(self, checked: bool) -> None:
-    _bootstrap()
     self._damage_panel._set_bulk_rows_visible(bool(checked))
     self._save_settings(damage_show_bulk=bool(checked))
 
 
 
 def _toggle_damage_double_option(self, checked: bool) -> None:
-    _bootstrap()
     self._damage_panel._set_battle_format("double" if checked else "single")
     self._save_settings(damage_battle_double=bool(checked))
 
 
 
 def _toggle_detailed_log_option(self, checked: bool) -> None:
-    _bootstrap()
     self._detailed_log_enabled = bool(checked)
     self._save_settings(detailed_log_enabled=self._detailed_log_enabled)
 
 
 def _on_webhook_url_changed(self) -> None:
-    _bootstrap()
     if not hasattr(self, "_webhook_url_edit") or self._webhook_url_edit is None:
         return
     url = self._webhook_url_edit.text().strip()
@@ -124,7 +228,6 @@ def _on_webhook_url_changed(self) -> None:
 
 
 def _start_background_tasks(self) -> None:
-    _bootstrap()
     self._start_ocr_init_thread()
 
     settings = self._load_settings()
@@ -144,7 +247,6 @@ def _start_background_tasks(self) -> None:
 
 
 def _apply_sample_party(self) -> None:
-    _bootstrap()
     party = _parse_sample_party()
     if not party:
         return
@@ -161,130 +263,34 @@ def _apply_sample_party(self) -> None:
 
 
 def _fetch_pokeapi_data(self) -> None:
-    _bootstrap()
-    if self._api_loader and self._api_loader.isRunning():
-        return
-    _safe_disconnect(self._api_loader, self._api_loader.progress, self._api_loader.finished)
-    self._api_loader = PokeApiLoader()
-    self._api_loader.progress.connect(self._on_api_progress)
-    self._api_loader.finished.connect(self._on_api_done)
-    self._set_fetch_buttons_enabled(False)
-    self._status_bar.showMessage("PokeAPIデータ取得を開始")
-    self._log("PokeAPIデータ取得を開始")
-    self._api_loader.start()
+    self._data_fetch_manager.start_pokeapi_fetch(self, _safe_disconnect)
 
 
 
 def _fetch_usage_data(self) -> None:
-    _bootstrap()
     season = self._current_usage_season()
-    scraper_cls, usage_sources, usage_default, import_error = self._get_usage_scraper_symbols()
-    if scraper_cls is None:
-        QMessageBox.information(
-            self,
-            "使用率取得は利用不可",
-            "usage_scraper の読み込みに失敗したため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
-        )
-        return
-    source = self._option_source_combo.currentData() if self._option_source_combo else usage_default
-    db.set_active_usage_season(season)
-    status = db.get_local_data_status(season)
-    if status["species_count"] == 0 or status["move_count"] == 0:
-        QMessageBox.information(
-            self,
-            "データ不足",
-            "先に PokeAPI データを取得してください。",
-        )
-        return
-    if self._scraper and self._scraper.isRunning():
-        return
-    _safe_disconnect(self._scraper, self._scraper.progress, self._scraper.finished)
-    self._scraper = scraper_cls(season=season, source=source)
-    self._scraper.progress.connect(self._on_usage_progress)
-    self._scraper.finished.connect(self._on_scraper_done)
-    self._set_fetch_buttons_enabled(False)
-    source_label = usage_sources.get(source, source)
-    self._status_bar.showMessage("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
-    self._log("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
-    self._scraper.start()
+    self._data_fetch_manager.start_usage_fetch(self, season, _safe_disconnect)
 
 
 
 def _refresh_cameras(self) -> None:
-    _bootstrap()
-    self._cam_combo.clear()
-    cameras = VideoThread.list_cameras()
-    for idx, name in cameras:
-        self._cam_combo.addItem(name, idx)
-    if not cameras:
-        self._cam_combo.addItem("カメラなし", -1)
+    self._camera_manager.refresh_cameras(self)
 
 
 
 def _toggle_camera(self) -> None:
-    _bootstrap()
-    # 二重クリック防止: 処理中はボタンを無効化し、終了時に必ず再有効化する
-    self._connect_btn.setEnabled(False)
-    try:
-        if self._camera_state.active and self._video_thread and self._video_thread.isRunning():
-            self._stop_live_battle_tracking(show_message=False, write_log=False)
-            self._stop_opponent_party_auto_detect(show_message=False, write_log=False)
-            _stop_video_thread_if_present(self)
-            self._connect_btn.setText("接続")
-            self._preview_lbl.setText("カメラ未接続")
-            self._log("カメラ切断")
-            return
-
-        # 参照は残っているが停止済みの thread を確実にクリーンアップ
-        if self._video_thread is not None:
-            _stop_video_thread_if_present(self)
-
-        idx = self._cam_combo.currentData()
-        if idx is None or idx < 0:
-            return
-
-        self._video_thread = VideoThread(idx)
-        self._video_thread.frame_ready.connect(self._on_frame)
-        self._video_thread.start()
-        self._camera_state.mark_active()
-        self._connect_btn.setText("切断")
-        self._log("カメラ接続: インデックス {}".format(idx))
-        self._save_settings(last_camera_index=idx)
-    finally:
-        self._connect_btn.setEnabled(True)
+    self._camera_manager.toggle_camera(self, _stop_video_thread_if_present)
 
 
 
 def _save_screenshot(self) -> None:
-    _bootstrap()
-    if not self._video_thread or not self._video_thread.isRunning():
-        QMessageBox.information(self, "情報", "カメラを接続してください")
-        return
-
-    frame = self._video_thread.get_last_frame()
-    if frame is None or frame.size == 0:
-        QMessageBox.information(self, "情報", "保存できるフレームがありません")
-        return
-
-    captures_dir = Path.cwd() / "captures"
-    captures_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = "{}.png".format(ts)
-    out_path = captures_dir / filename
-
-    if not cv2.imwrite(str(out_path), frame):
-        QMessageBox.warning(self, "エラー", "スクリーンショット保存に失敗しました")
-        return
-
-    self._status_bar.showMessage("保存: {}".format(out_path.name), 5000)
-    self._log("スクリーンショット保存: {}".format(out_path))
+    self._camera_manager.save_screenshot(self)
 
 # ── Size / position ───────────────────────────────────────────────
 
 
 
 def eventFilter(self, obj, event):
-    _bootstrap()
     from PyQt5.QtCore import QEvent
     from PyQt5.QtGui import QMouseEvent
     if obj == self._fetch_usage_btn and event.type() == QEvent.MouseButtonDblClick:
@@ -301,39 +307,11 @@ def eventFilter(self, obj, event):
 
 
 def _fetch_usage_data_with_source(self, season: str, source: str) -> None:
-    _bootstrap()
-    scraper_cls, usage_sources, _, import_error = self._get_usage_scraper_symbols()
-    if scraper_cls is None:
-        QMessageBox.information(
-            self,
-            "使用率取得は利用不可",
-            "usage_scraper の読み込みに失敗したため、この環境では使用率取得を実行できません。\n\n{}".format(import_error or ""),
-        )
-        return
-    status = db.get_local_data_status(season)
-    if status["species_count"] == 0 or status["move_count"] == 0:
-        QMessageBox.information(
-            self,
-            "データ不足",
-            "先に PokeAPI データを取得してください。",
-        )
-        return
-    if self._scraper and self._scraper.isRunning():
-        return
-    _safe_disconnect(self._scraper, self._scraper.progress, self._scraper.finished)
-    self._scraper = scraper_cls(season=season, source=source)
-    self._scraper.progress.connect(self._on_usage_progress)
-    self._scraper.finished.connect(self._on_scraper_done)
-    self._set_fetch_buttons_enabled(False)
-    source_label = usage_sources.get(source, source)
-    self._status_bar.showMessage("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
-    self._log("使用率データ取得を開始 [{}] [{}]".format(season, source_label))
-    self._scraper.start()
+    self._data_fetch_manager.start_usage_fetch(self, season, _safe_disconnect, source=source)
 
 
 
 def _log(self, msg: str) -> None:
-    _bootstrap()
     ts = datetime.now().strftime("%H:%M:%S")
     log_text = "[{}] {}".format(ts, msg)
     if self._log_edit:
@@ -346,7 +324,6 @@ def _log(self, msg: str) -> None:
 
 
 def _on_bridge_payload_log(self, msg: str) -> None:
-    _bootstrap()
     if not self._detailed_log_enabled:
         return
     self._log(msg)
@@ -354,7 +331,6 @@ def _on_bridge_payload_log(self, msg: str) -> None:
 
 
 def _export_log_to_txt(self) -> None:
-    _bootstrap()
     if not self._log_edit:
         return
     text = self._log_edit.toPlainText().strip()
@@ -386,7 +362,6 @@ def _export_log_to_txt(self) -> None:
 
 
 def _init_battle_state(self) -> None:
-    _bootstrap()
     self._battle_state = BattleState(
         my_party=[None] * 6,
         opponent_party=[None] * 6,
@@ -395,14 +370,12 @@ def _init_battle_state(self) -> None:
 
 
 def _ensure_party_slots(self) -> None:
-    _bootstrap()
     self._battle_state.my_party = (self._battle_state.my_party + [None] * 6)[:6]
     self._battle_state.opponent_party = (self._battle_state.opponent_party + [None] * 6)[:6]
 
 
 
 def _sync_battle_state_to_panels(self) -> None:
-    _bootstrap()
     self._ensure_party_slots()
     self._update_box_party_ui()
     self._syncing_battle_state_to_panels = True
@@ -422,7 +395,6 @@ def _sync_battle_state_to_panels(self) -> None:
 
 
 def _on_party_slot_clicked(self, index: int, is_my: bool) -> None:
-    _bootstrap()
     self._ensure_party_slots()
     current_member = self._battle_state.my_party[index] if is_my else self._battle_state.opponent_party[index]
     accepted, selected = self._select_registered_pokemon(
@@ -452,13 +424,11 @@ def _on_party_slot_clicked(self, index: int, is_my: bool) -> None:
 
 
 def _on_my_party_panel_dropped(self, name_ja: str) -> None:
-    _bootstrap()
     self._try_add_to_my_party(name_ja, source="D&D")
 
 
 
 def _try_add_to_my_party(self, name_ja: str, source: str = "click") -> None:
-    _bootstrap()
     self._ensure_party_slots()
     pokemon = next((registered for registered in self._registered_pokemon if registered and registered.name_ja == name_ja), None)
     if pokemon is None:
@@ -483,13 +453,11 @@ def _try_add_to_my_party(self, name_ja: str, source: str = "click") -> None:
 
 
 def _on_registry_cell_left_click(self, name_ja: str) -> None:
-    _bootstrap()
     self._try_add_to_my_party(name_ja, source="左クリック")
 
 
 
 def _on_my_party_panel_cleared(self) -> None:
-    _bootstrap()
     self._battle_state.my_party = [None] * 6
     self._battle_state.my_pokemon = None
     self._sync_battle_state_to_panels()
@@ -497,7 +465,6 @@ def _on_my_party_panel_cleared(self) -> None:
 
 
 def _on_my_party_panel_context_menu(self, global_pos) -> None:
-    _bootstrap()
     menu = QMenu(self)
     act_clear = QAction("削除", menu)
     act_clear.triggered.connect(self._on_my_party_panel_cleared)
@@ -510,7 +477,6 @@ def _on_my_party_panel_context_menu(self, global_pos) -> None:
 
 
 def _on_party_slot_dropped(self, index: int, name_ja: str) -> None:
-    _bootstrap()
     self._ensure_party_slots()
     pokemon = next((registered for registered in self._registered_pokemon if registered and registered.name_ja == name_ja), None)
     if pokemon is None:
@@ -530,7 +496,6 @@ def _on_party_slot_dropped(self, index: int, name_ja: str) -> None:
 
 
 def _on_party_slot_cleared(self, index: int) -> None:
-    _bootstrap()
     self._ensure_party_slots()
     previous = self._battle_state.my_party[index]
     self._battle_state.my_party[index] = None
@@ -543,7 +508,6 @@ def _on_party_slot_cleared(self, index: int) -> None:
 
 
 def _select_registered_pokemon(self, title: str, current_name: str = "") -> tuple[bool, PokemonInstance | None]:
-    _bootstrap()
     self._refresh_registry_list()
     if not self._registered_pokemon:
         QMessageBox.information(self, "情報", "登録済みポケモンがありません。")
@@ -762,7 +726,6 @@ def _select_registered_pokemon(self, title: str, current_name: str = "") -> tupl
 
 
 def _auto_detect_opponent_party(self) -> None:
-    _bootstrap()
     if not self._video_thread or not self._video_thread.isRunning():
         QMessageBox.information(self, "情報", "カメラを接続してください")
         return
@@ -818,7 +781,6 @@ def _auto_detect_opponent_party(self) -> None:
 
 
 def _on_auto_detect_toggled(self, checked: bool) -> None:
-    _bootstrap()
     checked = bool(checked)
     if checked:
         if not self._video_thread or not self._video_thread.isRunning():
@@ -839,7 +801,6 @@ def _on_auto_detect_toggled(self, checked: bool) -> None:
 
 
 def _stop_opponent_party_auto_detect(self, show_message: bool, write_log: bool) -> None:
-    _bootstrap()
     was_active = self._opp_auto_detect_timer.isActive()
     self._opp_auto_detect_timer.stop()
     self._auto_detect_pending = False
@@ -856,7 +817,6 @@ def _stop_opponent_party_auto_detect(self, show_message: bool, write_log: bool) 
 
 
 def _poll_opponent_party_auto_detect(self) -> None:
-    _bootstrap()
     if self._auto_detect_pending:
         return
     if time.monotonic() < self._auto_detect_cooldown_until:
@@ -892,7 +852,6 @@ def _poll_opponent_party_auto_detect(self) -> None:
 
 
 def _dump_auto_detect_debug_frame(self, frame) -> None:
-    _bootstrap()
     now = time.monotonic()
     if now - self._auto_detect_debug_dump_last < 2.0:
         return
@@ -941,7 +900,6 @@ def _dump_auto_detect_debug_frame(self, frame) -> None:
 
 
 def _toggle_live_battle_tracking(self, enabled: bool) -> None:
-    _bootstrap()
     enabled = bool(enabled)
     if enabled:
         if not self._video_thread or not self._video_thread.isRunning():
@@ -959,7 +917,6 @@ def _toggle_live_battle_tracking(self, enabled: bool) -> None:
 
 
 def _stop_live_battle_tracking(self, show_message: bool, write_log: bool) -> None:
-    _bootstrap()
     was_active = self._live_battle_timer.isActive()
     self._live_battle_timer.stop()
     if was_active and show_message:
@@ -970,7 +927,6 @@ def _stop_live_battle_tracking(self, show_message: bool, write_log: bool) -> Non
 
 
 def _poll_live_battle(self) -> None:
-    _bootstrap()
     if not self._video_thread or not self._video_thread.isRunning():
         self._stop_live_battle_tracking(show_message=True, write_log=True)
         return
@@ -1005,7 +961,6 @@ def _poll_live_battle(self) -> None:
 
 
 def _apply_live_battle_data(self, live_data: dict) -> tuple[bool, str]:
-    _bootstrap()
     changed = False
     self._ensure_party_slots()
 
@@ -1105,7 +1060,6 @@ def _apply_live_battle_data(self, live_data: dict) -> tuple[bool, str]:
 
 
 def _build_usage_template_pokemon(self, name_ja: str) -> PokemonInstance | None:
-    _bootstrap()
     matched = text_matcher.match_species_name(name_ja)
     if not matched:
         return None
@@ -1162,7 +1116,6 @@ def _build_usage_template_pokemon(self, name_ja: str) -> PokemonInstance | None:
 
 
 def _read_box_and_register(self) -> None:
-    _bootstrap()
     if not self._video_thread or not self._video_thread.isRunning():
         QMessageBox.information(self, "情報", "カメラを接続してください")
         return
@@ -1176,7 +1129,6 @@ def _read_box_and_register(self) -> None:
 
 
 def _apply_box_ocr(self, data: dict) -> None:
-    _bootstrap()
     pokemon = data.get("pokemon")
     if not pokemon or not pokemon.name_ja:
         return
@@ -1210,7 +1162,6 @@ class _BoxReadWorker(QObject):
 
 
 def _start_box_read_thread(self, frame: object) -> None:
-    _bootstrap()
     self._show_loading_overlay("ボックス読み込み中...")
     worker = MainWindow._BoxReadWorker(frame)
     thread = QThread(self)
@@ -1271,7 +1222,6 @@ def _start_box_read_thread(self, frame: object) -> None:
 
 
 def _refresh_registry_list(self) -> None:
-    _bootstrap()
     self._registered_pokemon = db.load_all_pokemon()
     type_filter: set[str] = getattr(self, "_box_type_filter", set())
     filtered = [
@@ -1380,7 +1330,6 @@ def _refresh_registry_list(self) -> None:
 
 
 def _open_edit_dialog(self, pokemon) -> None:
-    _bootstrap()
     base_name = pokemon.name_ja if pokemon else ""
     dlg = open_pokemon_edit_dialog(pokemon, self)
     if dlg.exec_():
@@ -1402,7 +1351,6 @@ def _open_edit_dialog(self, pokemon) -> None:
 
 
 def _open_register_input_dialog(self) -> None:
-    _bootstrap()
     from src.ui.ui_utils import make_dialog
     dlg = make_dialog(self)
     dlg.setWindowTitle("新規登録")
@@ -1462,7 +1410,6 @@ def _open_register_input_dialog(self) -> None:
 
 
 def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, str | None]:
-    _bootstrap()
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     if len(lines) < 6:
         return None, "行数が不足しています（最低6行）。"
@@ -1542,7 +1489,6 @@ def _parse_pokemon_text_block(self, text: str) -> tuple[PokemonInstance | None, 
 
 
 def _edit_selected_pokemon(self) -> None:
-    _bootstrap()
     p = getattr(self, "_reg_selected_pokemon", None)
     if not p:
         return
@@ -1551,7 +1497,6 @@ def _edit_selected_pokemon(self) -> None:
 
 
 def _delete_selected_pokemon(self) -> None:
-    _bootstrap()
     p = getattr(self, "_reg_selected_pokemon", None)
     if p and p.db_id:
         db.delete_pokemon(p.db_id)
@@ -1561,7 +1506,6 @@ def _delete_selected_pokemon(self) -> None:
 
 
 def _copy_selected_pokemon_info(self) -> None:
-    _bootstrap()
     p = getattr(self, "_reg_selected_pokemon", None)
     if not p:
         return
@@ -1572,7 +1516,6 @@ def _copy_selected_pokemon_info(self) -> None:
 
 
 def _format_pokemon_export_text(self, pokemon: PokemonInstance) -> str:
-    _bootstrap()
     tera_ja_map: dict[str, str] = {**TYPE_EN_TO_JA, "stellar": "ステラ"}
     terastal_type_ja = tera_ja_map.get((pokemon.terastal_type or "").strip(), "ノーマル")
     item_text = (pokemon.item or "").strip() or "もちものなし"
@@ -1610,13 +1553,11 @@ def _format_pokemon_export_text(self, pokemon: PokemonInstance) -> str:
 
 
 def _on_registry_context_menu(self, pos) -> None:
-    _bootstrap()
     pass
 
 
 
 def _on_registry_context_menu_for_cell(self, global_pos) -> None:
-    _bootstrap()
     menu = QMenu(self)
     act_edit = QAction("編集", menu)
     act_delete = QAction("削除", menu)
@@ -1632,7 +1573,6 @@ def _on_registry_context_menu_for_cell(self, global_pos) -> None:
 
 
 def _on_damage_panel_atk_changed(self, pokemon: PokemonInstance | None) -> None:
-    _bootstrap()
     if self._syncing_battle_state_to_panels:
         return
     if hasattr(self._damage_panel, "get_my_party_snapshot"):
@@ -1651,7 +1591,6 @@ def _on_damage_panel_atk_changed(self, pokemon: PokemonInstance | None) -> None:
 
 
 def _on_damage_panel_def_changed(self, pokemon: PokemonInstance | None) -> None:
-    _bootstrap()
     if self._syncing_battle_state_to_panels:
         return
     if hasattr(self._damage_panel, "get_my_party_snapshot"):
@@ -1672,7 +1611,6 @@ def _on_damage_panel_def_changed(self, pokemon: PokemonInstance | None) -> None:
 
 
 def _find_registered(self, name_ja: str) -> PokemonInstance | None:
-    _bootstrap()
     target = text_matcher.normalize_ocr_text(text_matcher.match_species_name(name_ja))
     if not target:
         return None
@@ -1684,7 +1622,6 @@ def _find_registered(self, name_ja: str) -> PokemonInstance | None:
 
 
 def _fill_species(self, pokemon: PokemonInstance) -> None:
-    _bootstrap()
     matched_name = text_matcher.match_species_name(pokemon.name_ja)
     if not matched_name:
         return
@@ -1702,7 +1639,6 @@ def _fill_species(self, pokemon: PokemonInstance) -> None:
 
 
 def _serialize_pokemon(self, pokemon: PokemonInstance | None) -> dict | None:
-    _bootstrap()
     if not pokemon:
         return None
     return {
@@ -1745,7 +1681,6 @@ def _serialize_pokemon(self, pokemon: PokemonInstance | None) -> dict | None:
 
 
 def _deserialize_pokemon(self, payload: dict | None) -> PokemonInstance | None:
-    _bootstrap()
     if not isinstance(payload, dict):
         return None
     pokemon = PokemonInstance()
@@ -1759,7 +1694,6 @@ def _deserialize_pokemon(self, payload: dict | None) -> PokemonInstance | None:
 
 
 def _load_party_presets(self) -> None:
-    _bootstrap()
     settings = self._load_settings()
     raw_list = settings.get("battle_party_presets_v2", [])
     if isinstance(raw_list, list):
@@ -1784,7 +1718,6 @@ def _load_party_presets(self) -> None:
 
 
 def _apply_top_saved_party_on_startup(self) -> None:
-    _bootstrap()
     if not self._party_presets:
         return
     preset = self._party_presets[0]
@@ -1799,7 +1732,6 @@ def _apply_top_saved_party_on_startup(self) -> None:
 
 
 def _save_party_preset(self, to_top: bool = False) -> None:
-    _bootstrap()
     self._ensure_party_slots()
     entry = {
         "my_party": [self._serialize_pokemon(member) for member in self._battle_state.my_party],
@@ -1819,7 +1751,6 @@ def _save_party_preset(self, to_top: bool = False) -> None:
 
 
 def _on_saved_party_panel_context_menu(self, index: int, global_pos) -> None:
-    _bootstrap()
     menu = QMenu(self)
     act_delete = QAction("削除", menu)
     act_delete.triggered.connect(lambda: self._delete_party_preset_at(index))
@@ -1829,7 +1760,6 @@ def _on_saved_party_panel_context_menu(self, index: int, global_pos) -> None:
 
 
 def _load_party_preset_at(self, index: int) -> None:
-    _bootstrap()
     if index < 0 or index >= len(self._party_presets):
         return
     preset = self._party_presets[index]
@@ -1846,7 +1776,6 @@ def _load_party_preset_at(self, index: int) -> None:
 
 
 def _delete_party_preset_at(self, index: int) -> None:
-    _bootstrap()
     if index < 0 or index >= len(self._party_presets):
         return
     del self._party_presets[index]
@@ -1858,7 +1787,6 @@ def _delete_party_preset_at(self, index: int) -> None:
 
 
 def _reorder_party_preset(self, from_index: int, to_index: int) -> None:
-    _bootstrap()
     if from_index == to_index:
         return
     if from_index < 0 or to_index < 0:
@@ -1875,7 +1803,6 @@ def _reorder_party_preset(self, from_index: int, to_index: int) -> None:
 
 
 def _move_saved_party_to_top(self, index: int) -> None:
-    _bootstrap()
     if index <= 0 or index >= len(self._party_presets):
         return
     item = self._party_presets.pop(index)
@@ -1896,7 +1823,6 @@ def _select_active_my_party_member(
 
 
 def _reset_all_party(self) -> None:
-    _bootstrap()
     if QMessageBox.question(
         self,
         "パーティ全リセット",
@@ -1916,7 +1842,6 @@ def _reset_all_party(self) -> None:
 
 
 def nativeEvent(self, event_type: bytes, message: object) -> tuple[bool, int]:
-    _bootstrap()
     if sys.platform == "win32":
         import ctypes.wintypes
         msg = ctypes.wintypes.MSG.from_address(int(message))
@@ -1932,42 +1857,23 @@ def nativeEvent(self, event_type: bytes, message: object) -> tuple[bool, int]:
 
 
 def _settings_path(self) -> Path:
-    _bootstrap()
-    return Path.home() / ".pokemon_damage_calc" / "settings.json"
+    return self._settings_store.path
 
 
 
 def _load_settings(self) -> dict:
-    _bootstrap()
-    try:
-        p = self._settings_path()
-        if p.exists():
-            return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        pass
-    return {}
+    return self._settings_store.load()
 
 
 
 def _save_settings(self, **kwargs) -> None:
-    _bootstrap()
     try:
-        p = self._settings_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        current: dict = {}
-        if p.exists():
-            try:
-                current = json.loads(p.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError, TypeError, ValueError):
-                pass
-        current.update(kwargs)
-        p.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._settings_store.save(**kwargs)
     except OSError as exc:
         self._log("[WARN] 設定保存失敗: {}".format(exc))
 
 
 def _run_data_integrity_check(self) -> None:
-    _bootstrap()
     season = self._current_usage_season()
     db.set_active_usage_season(season)
     result = db.check_usage_data_integrity(season)
@@ -2000,7 +1906,6 @@ def _run_data_integrity_check(self) -> None:
 
 
 def _apply_saved_settings(self) -> None:
-    _bootstrap()
     settings = self._load_settings()
     season = db.normalize_season_token(settings.get("usage_season", db.DEFAULT_USAGE_SEASON))
     db.set_active_usage_season(season)
@@ -2041,7 +1946,6 @@ def _apply_saved_settings(self) -> None:
 
 
 def _auto_connect_saved_camera(self) -> None:
-    _bootstrap()
     settings = self._load_settings()
     last_idx = settings.get("last_camera_index")
     if last_idx is None:
@@ -2056,7 +1960,6 @@ def _auto_connect_saved_camera(self) -> None:
 
 
 def closeEvent(self, event) -> None:
-    _bootstrap()
     _cleanup_runtime_resources(self)
     event.accept()
 

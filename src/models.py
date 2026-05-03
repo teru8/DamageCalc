@@ -82,6 +82,7 @@ class PokemonInstance:
 
     @property
     def is_registered(self) -> bool:
+        """Return True when this instance is persisted in registered_pokemon."""
         return self.db_id is not None
 
 

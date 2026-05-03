@@ -137,6 +137,7 @@ def canonical_display_name(name_ja: str) -> str:
 
 def normalize_form_name(name_ja: str, form_name_to_group: dict[str, list[str]]) -> str:
     """Return canonical form key for name_ja, resolving spacing variants."""
+    name_ja = (name_ja or "").strip()
     if name_ja in form_name_to_group:
         return name_ja
     spaced = re.sub(r"(?<!\s)\(", " (", name_ja or "")

@@ -32,6 +32,11 @@ class AttackerCalcConfig:
     flare_boost_active: bool = False
     guts_active: bool = False
     ability_on: bool = False
+    stakeout_active: bool = False
+    flash_fire_active: bool = False
+    protosynthesis_active: bool = False
+    quark_drive_active: bool = False
+    analytic_active: bool = False
     allies_fainted: int = 0
     rivalry_state: str = "none"
     # HP-guard ability intact state
@@ -71,6 +76,7 @@ class FieldCalcConfig:
     weather: str = "none"
     terrain: str = "none"
     is_double: bool = False
+    is_crit: bool = False
     # Attacker-side screens / boosts
     has_reflect: bool = False
     has_light_screen: bool = False

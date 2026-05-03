@@ -37,6 +37,7 @@ def _terastal_from_db_ja(terastal_type_db: str) -> str:
 
 
 def normalize_season_token(season: str | None) -> str:
+    """Normalize a season value to canonical uppercase token form."""
     text = str(season or "").strip().upper()
     if not text:
         return DEFAULT_USAGE_SEASON
@@ -112,6 +113,7 @@ def _bump_generation() -> None:
 
 
 def get_connection() -> sqlite3.Connection:
+    """Create a SQLite connection configured to return sqlite3.Row."""
     conn = sqlite3.connect(str(_db_path()))
     conn.row_factory = sqlite3.Row
     return conn
@@ -119,6 +121,7 @@ def get_connection() -> sqlite3.Connection:
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
+    """Context manager that yields and then closes a database connection."""
     conn = get_connection()
     try:
         yield conn
@@ -379,7 +382,7 @@ def init_db() -> None:
     );
     """)
         _migrate_legacy_usage_tables(conn)
-        species_cols = [row["name"] for row in c.execute("PRAGMA table_info(species_cache)").fetchall()]
+        species_cols = _table_columns(conn, "species_cache")
         if "weight_kg" not in species_cols:
             c.execute("ALTER TABLE species_cache ADD COLUMN weight_kg REAL DEFAULT 0")
         c.execute(
@@ -389,7 +392,7 @@ def init_db() -> None:
             WHERE name_ja LIKE '%（%' OR name_ja LIKE '%）%'
             """
         )
-        pokemon_cols = [row["name"] for row in c.execute("PRAGMA table_info(registered_pokemon)").fetchall()]
+        pokemon_cols = _table_columns(conn, "registered_pokemon")
         if "usage_name" not in pokemon_cols:
             c.execute("ALTER TABLE registered_pokemon ADD COLUMN usage_name TEXT DEFAULT ''")
         if "terastal_type" not in pokemon_cols:
@@ -651,6 +654,7 @@ def load_all_pokemon() -> list[PokemonInstance]:
 
 
 def delete_pokemon(db_id: int) -> None:
+    """Delete one registered Pokemon row by id."""
     with connection() as conn:
         conn.execute("DELETE FROM registered_pokemon WHERE id=?", (db_id,))
         conn.commit()
@@ -688,6 +692,7 @@ def save_usage_snapshot(
     effort_rows: list[tuple[str, int, int, int, int, int, int, int, float]] | None = None,
     season: str | None = None,
 ) -> None:
+    """Replace all usage snapshot tables for one season in a single transaction."""
     season_token = _season_or_active(season)
     if nature_rows is None:
         nature_rows = []
@@ -763,6 +768,7 @@ def save_usage_snapshot(
 
 
 def get_all_species_names_ja() -> list[str]:
+    """Return all Japanese species names sorted lexicographically."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT name_ja FROM species_cache ORDER BY name_ja"
@@ -771,6 +777,7 @@ def get_all_species_names_ja() -> list[str]:
 
 
 def get_available_usage_seasons() -> list[str]:
+    """Return known usage seasons, always including DEFAULT_USAGE_SEASON."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT season FROM pokemon_usage WHERE season IS NOT NULL AND season != '' ORDER BY season DESC"
@@ -789,6 +796,7 @@ def get_available_usage_seasons() -> list[str]:
 
 
 def get_usage_pool_species_names(season: str | None = None) -> list[str]:
+    """Return ranked usage species first, then remaining species names."""
     season_token = _season_or_active(season)
     with connection() as conn:
         ranked_rows = conn.execute(
@@ -830,6 +838,7 @@ def get_species_names_by_usage(
     season: str | None = None,
     include_all_species: bool = True,
 ) -> list[str]:
+    """Return species names ordered by usage rank for the selected season."""
     season_token = _season_or_active(season)
     with connection() as conn:
         ranked_rows = conn.execute(
@@ -862,6 +871,7 @@ def get_species_names_by_usage(
 
 
 def get_all_species_name_entries() -> list[tuple[int, str, str]]:
+    """Return `(species_id, name_ja, name_en)` entries for all species."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT species_id, name_ja, name_en FROM species_cache ORDER BY species_id"
@@ -870,6 +880,7 @@ def get_all_species_name_entries() -> list[tuple[int, str, str]]:
 
 
 def get_all_species() -> list[SpeciesInfo]:
+    """Return all species cache rows as SpeciesInfo."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT * FROM species_cache ORDER BY species_id ASC"
@@ -878,6 +889,7 @@ def get_all_species() -> list[SpeciesInfo]:
 
 
 def get_species_usage_rank_map(season: str | None = None) -> dict[str, int]:
+    """Return a mapping from species name to usage rank."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute(
@@ -896,6 +908,7 @@ def get_species_usage_rank_map(season: str | None = None) -> dict[str, int]:
 
 
 def get_move_by_id(move_id: int) -> MoveInfo | None:
+    """Fetch one move from cache by numeric move id."""
     with connection() as conn:
         row = conn.execute(
             "SELECT * FROM move_cache WHERE move_id=?", (move_id,)
@@ -915,6 +928,7 @@ def get_move_by_id(move_id: int) -> MoveInfo | None:
 
 
 def get_all_move_names_ja() -> list[str]:
+    """Return all non-null Japanese move names."""
     with connection() as conn:
         rows = conn.execute(
             "SELECT name_ja FROM move_cache WHERE name_ja IS NOT NULL ORDER BY name_ja"
@@ -923,6 +937,7 @@ def get_all_move_names_ja() -> list[str]:
 
 
 def get_all_moves() -> list[MoveInfo]:
+    """Return all cached moves as MoveInfo objects."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT * FROM move_cache
@@ -945,6 +960,7 @@ def get_all_moves() -> list[MoveInfo]:
 
 
 def get_species_names_by_move(move_name_ja: str) -> list[str]:
+    """Return species names that can learn `move_name_ja`."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT DISTINCT s.name_ja
@@ -961,6 +977,7 @@ def get_species_names_by_ability_usage(
     ability_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return species names that use the given ability in usage data."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute("""
@@ -973,6 +990,7 @@ def get_species_names_by_ability_usage(
 
 
 def get_all_usage_ability_names(season: str | None = None) -> list[str]:
+    """Return distinct ability names from usage_option for one season."""
     season_token = _season_or_active(season)
     with connection() as conn:
         rows = conn.execute("""
@@ -985,6 +1003,7 @@ def get_all_usage_ability_names(season: str | None = None) -> list[str]:
 
 
 def get_moves_for_species(species_id: int) -> list[MoveInfo]:
+    """Return learned moves for one species id."""
     with connection() as conn:
         rows = conn.execute("""
             SELECT m.*
@@ -1063,6 +1082,7 @@ def get_abilities_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked ability options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1080,6 +1100,7 @@ def get_items_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked held-item options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1097,6 +1118,7 @@ def get_natures_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[str]:
+    """Return ranked nature options by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1114,6 +1136,7 @@ def get_effort_spreads_by_usage(
     pokemon_name_ja: str,
     season: str | None = None,
 ) -> list[tuple[int, int, int, int, int, int, float]]:
+    """Return ranked EV spreads by usage for one Pokemon."""
     season_token = _season_or_active(season)
     with connection() as conn:
         for name in _usage_name_variants(pokemon_name_ja):
@@ -1140,6 +1163,7 @@ def get_effort_spreads_by_usage(
 
 
 def get_local_data_status(season: str | None = None) -> dict[str, int]:
+    """Return aggregate local cache counts used by status UI."""
     season_token = _season_or_active(season)
     with connection() as conn:
         status = {
