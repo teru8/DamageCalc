@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 import math
 
 from src.calc.calc_inputs import (
