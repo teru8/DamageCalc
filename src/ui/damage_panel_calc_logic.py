@@ -1,6 +1,13 @@
 """Extracted methods from damage_panel.py."""
 from __future__ import annotations
 
+from src.calc.calc_inputs import (
+    AttackerCalcConfig,
+    DefenderCalcConfig,
+    DamageCalcInputs,
+    FieldCalcConfig,
+)
+
 
 def _bootstrap() -> None:
     from src.ui import damage_panel as _dp
@@ -20,6 +27,120 @@ def recalculate(self) -> None:
         return
     self._refresh_defender_card()
     self._calc_moves()
+
+
+def collect_calc_inputs(self) -> DamageCalcInputs:
+    """Read all widget states and return a UI-agnostic DamageCalcInputs.
+
+    This is the only function in the calc pipeline that touches PyQt5 widgets.
+    Everything downstream can work purely from the returned dataclass.
+    """
+    _bootstrap()
+    from src.calc.calc_utils import is_grounded
+
+    def _btn(name: str, default: bool = False) -> bool:
+        btn = getattr(self, name, None)
+        if btn is None:
+            return default
+        return bool(btn.isVisible() and btn.isChecked())
+
+    atk = self._atk
+
+    # ── attacker ─────────────────────────────────────────────────────────
+    atk_config = AttackerCalcConfig(
+        pokemon=atk,
+        ev_hp=self._atk_panel.ev_hp_pts(),
+        ev_attack=self._atk_panel.ev_attack_pts(),
+        ev_defense=self._atk_panel.ev_defense_pts(),
+        ev_sp_attack=self._atk_panel.ev_sp_attack_pts(),
+        ev_sp_defense=self._atk_panel.ev_sp_defense_pts(),
+        ev_speed=self._atk_panel.ev_speed_pts(),
+        nature=self._atk_panel.panel_nature(),
+        ac_rank=self._atk_panel.ac_rank(),
+        bd_rank=self._atk_panel.bd_rank(),
+        tera=self._atk_panel.terastal_type(),
+        is_burned=self._burn_btn.isChecked(),
+        is_toxic_boosted=_btn("_toxic_boost_btn"),
+        is_pinch=any(_btn(n) for n in (
+            "_overgrow_btn", "_blaze_btn", "_torrent_btn", "_swarm_btn"
+        )),
+        flare_boost_active=_btn("_flare_boost_btn"),
+        guts_active=_btn("_guts_btn"),
+        ability_on=(
+            _btn("_stakeout_btn") or
+            _btn("_flash_fire_boost_btn") or
+            _btn("_analytic_btn")
+        ),
+        allies_fainted=int(self._supreme_combo.currentData() or 0)
+            if self._supreme_combo.isVisible() else 0,
+        rivalry_state=str(self._rivalry_combo.currentData() or "none")
+            if self._rivalry_combo.isVisible() else "none",
+        multiscale_intact=_btn("_atk_multiscale_btn", default=True),
+        shadow_shield_intact=_btn("_atk_shadow_shield_btn", default=True),
+        tera_shell_intact=_btn("_atk_tera_shell_btn", default=True),
+    )
+
+    # ── defender ─────────────────────────────────────────────────────────
+    has_def = hasattr(self, "_def_panel")
+    def_config = DefenderCalcConfig(
+        pokemon=self._def_custom,
+        species_name=self._def_species_name or "",
+        ev_hp=self._def_panel.ev_hp_pts() if has_def else 0,
+        ev_attack=self._def_panel.ev_attack_pts() if has_def else 0,
+        ev_defense=self._def_panel.ev_defense_pts() if has_def else 0,
+        ev_sp_attack=self._def_panel.ev_sp_attack_pts() if has_def else 0,
+        ev_sp_defense=self._def_panel.ev_sp_defense_pts() if has_def else 0,
+        ev_speed=self._def_panel.ev_speed_pts() if has_def else 0,
+        nature=self._def_panel.panel_nature() if has_def else "まじめ",
+        ac_rank=self._def_panel.ac_rank() if has_def else 0,
+        bd_rank=self._def_panel.bd_rank() if has_def else 0,
+        hp_percent=self._def_panel.current_hp_percent() if has_def else 100.0,
+        use_sp_defense=self._def_panel.use_sp_defense() if has_def else False,
+        tera=self._def_panel.terastal_type() if has_def else "",
+        multiscale_intact=_btn("_opp_multiscale_btn", default=True),
+        shadow_shield_intact=_btn("_opp_shadow_shield_btn", default=True),
+        tera_shell_intact=_btn("_opp_tera_shell_btn", default=True),
+        disguise_intact=(
+            has_def and self._def_panel.disguise_intact()
+        ),
+    )
+
+    # ── field ─────────────────────────────────────────────────────────────
+    field_config = FieldCalcConfig(
+        weather=self._weather_key(),
+        terrain=self._terrain_key(),
+        is_double=getattr(self, "_battle_format", "single") == "double",
+        has_reflect=self._reflect_btn.isChecked(),
+        has_light_screen=self._lightscreen_btn.isChecked(),
+        helping=self._helping_btn.isChecked(),
+        steel_spirit=self._steel_spirit_btn.isChecked(),
+        charged=self._charge_btn.isChecked(),
+        friend_guard=self._friend_guard_btn.isChecked(),
+        tailwind=self._tailwind_btn.isChecked(),
+        fairy_aura=(
+            self._fairy_aura_btn.isChecked() or
+            self._opp_fairy_aura_btn.isChecked()
+        ),
+        dark_aura=(
+            self._dark_aura_btn.isChecked() or
+            self._opp_dark_aura_btn.isChecked()
+        ),
+        gravity=self._gravity_btn.isChecked(),
+        opp_helping=self._opp_helping_btn.isChecked(),
+        opp_steel_spirit=self._opp_steel_spirit_btn.isChecked(),
+        opp_charged=self._opp_charge_btn.isChecked(),
+        self_reflect=self._self_reflect_btn.isChecked(),
+        self_light_screen=self._self_lightscreen_btn.isChecked(),
+        self_friend_guard=self._self_friend_guard_btn.isChecked(),
+        self_tailwind=self._self_tailwind_btn.isChecked(),
+    )
+
+    return DamageCalcInputs(
+        attacker=atk_config,
+        defender=def_config,
+        field=field_config,
+        show_bulk_rows=self._show_bulk_rows,
+    )
 
 
 def _calc_moves(self) -> None:

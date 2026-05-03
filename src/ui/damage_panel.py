@@ -467,6 +467,10 @@ class DamagePanel(QWidget):
         from src.ui.damage_panel_species import resolve_species
         return resolve_species(pokemon, fallback_name_ja)
 
+    def collect_calc_inputs(self):
+        from src.ui.damage_panel_calc_logic import collect_calc_inputs as _impl
+        return _impl(self)
+
     def _calc_moves(self) -> None:
         from src.ui.damage_panel_calc_logic import _calc_moves as _impl
         return _impl(self)
