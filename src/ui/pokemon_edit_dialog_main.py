@@ -835,12 +835,16 @@ class PokemonEditDialog(QDialog):
                 self._update_ev_toggle_label(key)
 
         move_candidates = usage_moves
-        non_status_candidates: list[str] = []
+        non_status: list[str] = []
+        status_moves: list[str] = []
         for move_name in move_candidates:
             move_info = db.get_move_by_name_ja(move_name)
             if move_info and move_info.category != "status":
-                non_status_candidates.append(move_name)
-        self._selected_moves = (non_status_candidates + ["", "", "", ""])[:4]
+                non_status.append(move_name)
+            else:
+                status_moves.append(move_name)
+        combined = (non_status + status_moves + ["", "", "", ""])[:4]
+        self._selected_moves = combined
         self._refresh_move_buttons()
 
         self._recalculate_stats_from_species()
