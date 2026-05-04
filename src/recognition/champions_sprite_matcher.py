@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 import time
@@ -8,6 +9,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
+
+_logger = logging.getLogger(__name__)
 
 import cv2
 import numpy as np
@@ -304,6 +307,9 @@ def download_catalog(
     species_cache: dict[int, tuple[str, str]] = {
         s.species_id: (s.name_ja, s.name_en) for s in all_species
     }
+    species_cache_by_name_en: dict[str, str] = {
+        s.name_en: s.name_ja for s in all_species if s.name_en
+    }
     existing_entries = load_manifest().get("entries") or []
     merged: dict[tuple[int, str, bool, str], dict] = {}
     for row in existing_entries:
@@ -346,6 +352,7 @@ def download_catalog(
             if species_id not in species_cache:
                 continue
             name_ja, name_en = species_cache[species_id]
+            name_ja = species_cache_by_name_en.get(name_en, name_ja)
 
             if not image_url:
                 title_text, image_url = _full_image_url(file_page_url)
@@ -535,7 +542,7 @@ def _query_features(sprite: np.ndarray) -> dict | None:
         sprite = cv2.cvtColor(sprite, cv2.COLOR_GRAY2BGR)
 
     mask = _query_mask(sprite)
-    if float(mask.mean()) < 0.03:
+    if float(mask.mean()) < 0.01:
         return None
 
     gray = cv2.cvtColor(sprite, cv2.COLOR_BGR2GRAY)
@@ -635,7 +642,7 @@ def _score_reference_by_color_fill(query: dict, ref_rgb: np.ndarray, ref_alpha: 
                     mean_delta = float(delta[focus_mask > 0].mean())
                     color_score = max(0.0, 1.0 - mean_delta / _COLOR_DELTA_NORM)
                     corr = _masked_corrcoef(q_patch_gray, ref_gray, focus_mask)
-                    score = color_score * 0.80 + corr * 0.20
+                    score = color_score * 0.20 + corr * 0.80
                     if score > best_score:
                         best_score = score
 
@@ -758,12 +765,23 @@ def match_sprite(
         key=lambda x: x["score"],
         reverse=True,
     )
+    if _logger.isEnabledFor(logging.DEBUG):
+        debug_all = sorted(
+            [_to_result(k, v) for k, v in color_scores.items() if v > 0.0],
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+    if _logger.isEnabledFor(logging.DEBUG) and debug_all:
+        top5 = debug_all[:5]
+        lines = ", ".join(
+            f"{r['name_ja']}({r['form'] or 'base'})={'shiny' if r['is_shiny'] else 'n'}:{r['score']:.3f}"
+            for r in top5
+        )
+        _logger.debug("[color_fill] %s", lines)
+
     if color_results:
         top_color = float(color_results[0]["score"])
-        second_color = float(color_results[1]["score"]) if len(color_results) >= 2 else 0.0
-        if top_color >= _COLOR_PRIMARY_ACCEPT and (
-            len(color_results) == 1 or (top_color - second_color) >= _COLOR_PRIMARY_MARGIN
-        ):
+        if top_color >= _COLOR_PRIMARY_ACCEPT:
             return color_results[:max(1, int(top_k))]
 
     # Stage 2 fallback: shape/edge-aware matching.
@@ -783,4 +801,12 @@ def match_sprite(
         key=lambda x: x["score"],
         reverse=True,
     )
+    if _logger.isEnabledFor(logging.DEBUG) and results:
+        top5 = results[:5]
+        lines = ", ".join(
+            f"{r['name_ja']}({r['form'] or 'base'})={'shiny' if r['is_shiny'] else 'n'}:{r['score']:.3f}"
+            for r in top5
+        )
+        _logger.debug("[shape_fallback] %s", lines)
+
     return results[:max(1, int(top_k))]

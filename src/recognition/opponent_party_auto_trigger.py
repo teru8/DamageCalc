@@ -91,6 +91,23 @@ def _load_template(template_path: str) -> np.ndarray | None:
     return tmpl
 
 
+def has_all_slot_types(frame_bgr: np.ndarray) -> bool:
+    """Return True if all 6 opponent slots have at least one type icon detected."""
+    from src.recognition.opponent_party_reader import _OPP_SLOT_ROIS, _crop, _detect_type_groups  # noqa: PLC0415
+    if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
+        return False
+    import cv2  # noqa: PLC0415
+    h, w = frame_bgr.shape[:2]
+    if (h, w) != (720, 1280):
+        frame_bgr = cv2.resize(frame_bgr, (1280, 720))
+    for index, roi in enumerate(_OPP_SLOT_ROIS):
+        slot = _crop(frame_bgr, roi)
+        type_groups = _detect_type_groups(slot, slot_index=index)
+        if not type_groups:
+            return False
+    return True
+
+
 def should_trigger_auto_detect(frame_bgr: np.ndarray) -> bool:
     matched, _ = evaluate_auto_detect(frame_bgr)
     return matched
@@ -145,4 +162,6 @@ def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, f
         ))
         if score_ccorr >= _MATCH_THRESHOLD or score_sqdiff <= _SQDIFF_THRESHOLD:
             matched = True
+        else:
+            matched = False
     return matched, scores

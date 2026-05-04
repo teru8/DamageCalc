@@ -1,3 +1,4 @@
+import logging
 import sys
 import os
 import threading
@@ -5,6 +6,12 @@ import traceback
 import ctypes
 from datetime import datetime
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 APP_NAME = "DamageCalc"
 APP_VERSION = "0.2.1-alpha"
