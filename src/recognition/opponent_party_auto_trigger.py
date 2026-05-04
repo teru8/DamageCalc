@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 
 _MATCH_THRESHOLD = 0.85
-_SQDIFF_THRESHOLD = 0.15
 _BASE_FRAME_W = 1280
 _BASE_FRAME_H = 720
 _TEMPLATE_SPECS: list[tuple[tuple[int, int, int, int], str]] = [
@@ -114,14 +113,14 @@ def should_trigger_auto_detect(frame_bgr: np.ndarray) -> bool:
 
 
 def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, float, str]]]:
-    """Return (matched, [(template_name, score, reason), ...]). score is CCORR."""
+    """Return (matched, [(template_name, score, reason), ...]). score is TM_CCOEFF_NORMED."""
     if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
         return False, []
     h, w = frame_bgr.shape[:2]
     sx = float(w) / float(_BASE_FRAME_W)
     sy = float(h) / float(_BASE_FRAME_H)
     scores: list[tuple[str, float, str]] = []
-    matched = False
+    all_matched = True
     for (x1, y1, x2, y2), template_path in _TEMPLATE_SPECS:
         # 1280x720 。。
         rx1 = int(round(x1 * sx))
@@ -130,38 +129,41 @@ def evaluate_auto_detect(frame_bgr: np.ndarray) -> tuple[bool, list[tuple[str, f
         ry2 = int(round(y2 * sy))
         if rx1 < 0 or ry1 < 0 or rx2 > w or ry2 > h or rx2 <= rx1 or ry2 <= ry1:
             scores.append((Path(template_path).name, -1.0, "out_of_bounds"))
+            all_matched = False
             continue
         crop = frame_bgr[ry1:ry2, rx1:rx2]
         tmpl = _load_template(template_path)
         if tmpl is None:
             scores.append((Path(template_path).name, -1.0, "template_missing"))
+            all_matched = False
             continue
         if crop.shape[0] != tmpl.shape[0] or crop.shape[1] != tmpl.shape[1]:
             try:
                 cmp_img = cv2.resize(crop, (tmpl.shape[1], tmpl.shape[0]), interpolation=cv2.INTER_LINEAR)
             except cv2.error:
                 scores.append((Path(template_path).name, -1.0, "resize_error"))
+                all_matched = False
                 continue
         else:
             cmp_img = crop
         try:
             cmp_gray = cv2.cvtColor(cmp_img, cv2.COLOR_BGR2GRAY)
             tmpl_gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
-            score_ccorr = float(cv2.matchTemplate(cmp_gray, tmpl_gray, cv2.TM_CCORR_NORMED)[0, 0])
-            score_sqdiff = float(cv2.matchTemplate(cmp_gray, tmpl_gray, cv2.TM_SQDIFF_NORMED)[0, 0])
+            score = float(cv2.matchTemplate(cmp_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)[0, 0])
         except cv2.error:
             scores.append((Path(template_path).name, -1.0, "match_error"))
+            all_matched = False
             continue
-        if not np.isfinite(score_ccorr) or not np.isfinite(score_sqdiff):
+        if not np.isfinite(score):
             scores.append((Path(template_path).name, -1.0, "nan_score"))
+            all_matched = False
             continue
         scores.append((
             Path(template_path).name,
-            score_ccorr,
-            "ok(ccorr={:.3f},sqdiff={:.3f})".format(score_ccorr, score_sqdiff),
+            score,
+            "ok(ccoeff={:.3f})".format(score),
         ))
-        if score_ccorr >= _MATCH_THRESHOLD or score_sqdiff <= _SQDIFF_THRESHOLD:
-            matched = True
-        else:
-            matched = False
+        if score < _MATCH_THRESHOLD:
+            all_matched = False
+    matched = all_matched and len(scores) == len(_TEMPLATE_SPECS)
     return matched, scores
