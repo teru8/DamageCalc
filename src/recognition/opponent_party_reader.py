@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -8,6 +9,8 @@ import numpy as np
 
 from src.data import database as db
 from src.recognition import champions_sprite_matcher
+
+_logger = logging.getLogger(__name__)
 
 # Opponent party rows on 1280x720 battle party screen.
 _OPP_SLOT_ROIS = [
@@ -113,16 +116,6 @@ def _rel_crop(frame: np.ndarray, rel_roi: tuple[int, int, int, int]) -> np.ndarr
     return _crop(frame, rel_roi)
 
 
-def _slot_occupied(slot: np.ndarray) -> bool:
-    sprite = _rel_crop(slot, _SPRITE_REL_ROI)
-    if sprite.size == 0:
-        return False
-    gray = cv2.cvtColor(sprite, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(sprite, cv2.COLOR_BGR2HSV)
-    std = float(gray.std())
-    sat_mean = float(hsv[:, :, 1].mean())
-    return std >= 9.0 or sat_mean >= 30.0
-
 
 def _normalize_type_name(raw: str) -> str:
     name = (raw or "").strip().casefold()
@@ -158,29 +151,6 @@ def _load_type_templates() -> dict[str, list[np.ndarray]]:
     return templates
 
 
-def _icon_symbol_mask(icon_bgr: np.ndarray) -> np.ndarray:
-    if icon_bgr is None or icon_bgr.size == 0:
-        return np.zeros((0, 0), dtype=np.uint8)
-    hsv = cv2.cvtColor(icon_bgr, cv2.COLOR_BGR2HSV)
-    sat = hsv[:, :, 1].astype(np.float32)
-    val = hsv[:, :, 2].astype(np.float32)
-    mask = ((sat < 96.0) & (val > 140.0)).astype(np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8), iterations=1)
-    return mask
-
-
-def _dice_score(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
-    if mask_a.size == 0 or mask_b.size == 0 or mask_a.shape != mask_b.shape:
-        return 0.0
-    a = mask_a > 0
-    b = mask_b > 0
-    den = float(a.sum() + b.sum())
-    if den <= 0:
-        return 0.0
-    inter = float((a & b).sum())
-    return float((2.0 * inter) / den)
-
-
 def _icon_template_score(query_icon: np.ndarray, template_icon: np.ndarray) -> float:
     query = cv2.resize(query_icon, (_TYPE_TEMPLATE_SIZE, _TYPE_TEMPLATE_SIZE), interpolation=cv2.INTER_AREA)
     template = cv2.resize(template_icon, (_TYPE_TEMPLATE_SIZE, _TYPE_TEMPLATE_SIZE), interpolation=cv2.INTER_AREA)
@@ -196,15 +166,10 @@ def _icon_template_score(query_icon: np.ndarray, template_icon: np.ndarray) -> f
 
     q_gray = cv2.cvtColor(query, cv2.COLOR_BGR2GRAY)
     t_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-    q_edge = (cv2.Canny(q_gray, 60, 140) > 0).astype(np.uint8)
-    t_edge = (cv2.Canny(t_gray, 60, 140) > 0).astype(np.uint8)
-    edge_score = _dice_score(q_edge, t_edge)
-
-    symbol_score = _dice_score(_icon_symbol_mask(query), _icon_symbol_mask(template))
     corr = float(cv2.matchTemplate(q_gray, t_gray, cv2.TM_CCOEFF_NORMED)[0][0])
     corr = max(0.0, min(1.0, (corr + 1.0) * 0.5))
 
-    return color_score * 0.50 + edge_score * 0.28 + symbol_score * 0.14 + corr * 0.08
+    return color_score * 0.70 + corr * 0.30
 
 
 def _rank_icon_types(icon: np.ndarray, top_k: int = 6) -> list[tuple[str, float]]:
@@ -237,7 +202,7 @@ def _rank_icon_types(icon: np.ndarray, top_k: int = 6) -> list[tuple[str, float]
     return ranked[:max(1, int(top_k))]
 
 
-def _detect_type_groups(slot: np.ndarray) -> list[list[str]]:
+def _detect_type_groups(slot: np.ndarray, slot_index: int = -1) -> list[list[str]]:
     ranked_icons: list[tuple[int, float, list[str]]] = []
     for icon_index, rel_roi in enumerate(_TYPE_ICON_REL_ROIS):
         icon = _rel_crop(slot, rel_roi)
@@ -250,14 +215,17 @@ def _detect_type_groups(slot: np.ndarray) -> list[list[str]]:
         second_score = float(ranked[1][1]) if len(ranked) >= 2 else 0.0
         min_score = 0.24 if icon_index == 0 else 0.30
         if best_score < min_score:
+            _logger.debug("[type_icon] slot=%d icon=%d REJECTED best=%.3f < min=%.2f", slot_index, icon_index, best_score, min_score)
             continue
         # Guard against unstable top-1 predictions at low confidence.
         if best_score < 0.42 and (best_score - second_score) < 0.07:
+            _logger.debug("[type_icon] slot=%d icon=%d REJECTED low_margin best=%.3f margin=%.3f", slot_index, icon_index, best_score, best_score - second_score)
             continue
         cutoff = max(0.16, best_score - 0.12)
         group = [name for name, score in ranked if float(score) >= cutoff][:4]
         if not group:
             continue
+        _logger.debug("[type_icon] slot=%d icon=%d ACCEPTED best=%.3f group=%s", slot_index, icon_index, best_score, group)
         ranked_icons.append((icon_index, best_score, group))
 
     if len(ranked_icons) >= 2:
@@ -273,85 +241,33 @@ def _detect_type_groups(slot: np.ndarray) -> list[list[str]]:
     return [group for _, _, group in ranked_icons]
 
 
-def _species_matches_type_groups(type_groups: list[list[str]], type1: str, type2: str) -> bool:
-    if not type_groups:
-        return True
-    own = {type1, type2}
-    own.discard("")
-    if not own:
-        return False
-    return any(bool(own.intersection(group)) for group in type_groups)
-
-
-def _species_matches_all_type_groups(type_groups: list[list[str]], type1: str, type2: str) -> bool:
-    if not type_groups:
-        return True
-    own = {type1, type2}
-    own.discard("")
-    if not own:
-        return False
-    for group in type_groups:
-        if not own.intersection(group):
-            return False
-    return True
-
-
-def _species_matches_primary_types(primary_types: list[str], type1: str, type2: str) -> bool:
-    if not primary_types:
-        return True
-    own = {type1, type2}
-    own.discard("")
-    return all(pt in own for pt in primary_types)
-
-
-def _species_matches_any_primary(primary_types: list[str], type1: str, type2: str) -> bool:
-    if not primary_types:
-        return True
-    own = {type1, type2}
-    own.discard("")
-    return any(pt in own for pt in primary_types)
-
-
-def _type_filtered_species_names(
-    type_groups: list[list[str]],
+def _type_exact_species_names(
+    primary_types: list[str],
     season_species: list,
+    sprite_names: set[str],
 ) -> list[str]:
-    if not type_groups:
+    """Return name_ja list where the species has a sprite AND exactly matches the detected types."""
+    if not primary_types:
         return []
-    primary_types = [group[0] for group in type_groups if group and group[0]]
-
-    strict_primary = [
-        s for s in season_species
-        if _species_matches_primary_types(primary_types, s.type1, s.type2)
-    ]
-    strict_hit = [
-        s for s in season_species
-        if _species_matches_all_type_groups(type_groups, s.type1, s.type2)
-    ]
-    relaxed_primary = [
-        s for s in season_species
-        if _species_matches_any_primary(primary_types, s.type1, s.type2)
-    ]
-    relaxed_hit = [
-        s for s in season_species
-        if _species_matches_type_groups(type_groups, s.type1, s.type2)
-    ]
-    candidates = strict_primary or strict_hit or relaxed_primary or relaxed_hit
-    if not candidates:
-        return []
+    target = set(primary_types)
     seen_ids: set[int] = set()
     seen_names: set[str] = set()
     names: list[str] = []
-    for species in sorted(candidates, key=lambda s: (s.species_id, s.name_ja)):
+    for species in sorted(season_species, key=lambda s: (s.species_id, s.name_ja)):
+        name = str(species.name_ja or "").strip()
+        if not name or name not in sprite_names:
+            continue
+        own = {species.type1, species.type2}
+        own.discard("")
+        if own != target:
+            continue
         if species.species_id in seen_ids:
             continue
         seen_ids.add(species.species_id)
-        name = str(species.name_ja or "").strip()
-        if not name or name in seen_names:
+        if name in seen_names:
             continue
         seen_names.add(name)
         names.append(name)
-
     return names
 
 
@@ -418,19 +334,6 @@ def _slot_result(
     }
 
 
-def has_first_slot_type(frame: np.ndarray) -> bool:
-    if frame is None or frame.size == 0:
-        return False
-    if frame.shape[:2] != (720, 1280):
-        frame = cv2.resize(frame, (1280, 720))
-
-    slot = _crop(frame, _OPP_SLOT_ROIS[0])
-    if slot.size == 0 or not _slot_occupied(slot):
-        return False
-
-    type_groups = _detect_type_groups(slot)
-    return bool(type_groups and any(group for group in type_groups))
-
 
 def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[dict]:
     if frame is None or frame.size == 0:
@@ -444,46 +347,30 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
 
     all_species = db.get_all_species()
     season_species = [s for s in all_species if s.name_ja in pool_set] if pool_set else []
-    broad_candidates = season_pool if season_pool else [str(s.name_ja or "").strip() for s in all_species]
-    broad_candidates = [name for name in broad_candidates if name]
+
+    sprite_names: set[str] = set(champions_sprite_matcher._refs_by_name().keys())
 
     results: list[dict] = []
     for index, roi in enumerate(_OPP_SLOT_ROIS):
         slot = _crop(frame, roi)
-        if slot.size == 0 or not _slot_occupied(slot):
-            results.append(
-                _slot_result(
-                    index=index,
-                    occupied=False,
-                    primary_types=[],
-                    type_groups=[],
-                    picked_name="",
-                    picked_form="",
-                    picked_shiny=False,
-                    species_candidates=[],
-                    confidence=0.0,
-                )
-            )
-            continue
 
-        type_groups = _detect_type_groups(slot)
+        type_groups = _detect_type_groups(slot, slot_index=index)
         primary_types = [group[0] for group in type_groups if group]
-        typed_candidates = _type_filtered_species_names(type_groups, season_species)
-        if typed_candidates:
-            candidate_names = typed_candidates
-        elif type_groups:
-            candidate_names = []
+        candidate_names = _type_exact_species_names(primary_types, season_species, sprite_names)
+        _logger.debug("[candidates] slot=%d types=%s → %s", index, primary_types, candidate_names)
+        if len(candidate_names) == 1:
+            picked_name, picked_form, picked_shiny, ranked_candidates, confidence = candidate_names[0], "", False, candidate_names, 1.0
+            _logger.debug("[decided] slot=%d → %s (single candidate)", index, picked_name)
         else:
-            candidate_names = broad_candidates
-        picked_name, picked_form, picked_shiny, ranked_candidates, confidence = _match_species_by_sprite(
-            slot,
-            candidate_names,
-        )
+            picked_name, picked_form, picked_shiny, ranked_candidates, confidence = _match_species_by_sprite(
+                slot,
+                candidate_names,
+            )
 
         results.append(
             _slot_result(
                 index=index,
-                occupied=True,
+                occupied=True,  # opponent always has 6 Pokémon
                 primary_types=primary_types,
                 type_groups=type_groups,
                 picked_name=picked_name,

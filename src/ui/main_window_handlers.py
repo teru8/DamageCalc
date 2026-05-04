@@ -828,7 +828,7 @@ def _poll_opponent_party_auto_detect(self) -> None:
         return
     self._dump_auto_detect_debug_frame(frame)
     matched, scores = opponent_party_auto_trigger.evaluate_auto_detect(frame)
-    has_first_type = opponent_party_reader.has_first_slot_type(frame) if matched else False
+    all_types = opponent_party_auto_trigger.has_all_slot_types(frame) if matched else False
     now = time.monotonic()
     if self._detailed_log_enabled and now - self._auto_detect_score_log_last >= 1.0:
         self._auto_detect_score_log_last = now
@@ -837,12 +837,12 @@ def _poll_opponent_party_auto_detect(self) -> None:
             for name, score, reason in scores
         ) or "score=N/A"
         self._log(
-            "相手PT自動検出スコア: {} (閾値 ccorr>=0.850 or sqdiff<=0.150, 追加条件: 1体目タイプ検出={})".format(
+            "相手PT自動検出スコア: {} (閾値 ccorr>=0.850 and sqdiff<=0.150, 追加条件: 全6スロットタイプ検出={})".format(
                 score_text,
-                "OK" if has_first_type else "NG",
+                "OK" if all_types else "NG",
             )
         )
-    if not matched or not has_first_type:
+    if not matched or not all_types:
         return
     self._auto_detect_pending = True
     self._auto_detect_cooldown_until = time.monotonic() + 120.0
