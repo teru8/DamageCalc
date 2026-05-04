@@ -67,14 +67,11 @@ class _LRUDict(OrderedDict):
         if len(self) > self._maxsize:
             self.popitem(last=False)
 
-    def __getitem__(self, key: Any) -> Any:
-        value = super().__getitem__(key)
-        self.move_to_end(key)
-        return value
-
     def get(self, key: Any, default: Any = None) -> Any:
         if key in self:
-            return self[key]
+            value = super().__getitem__(key)
+            self.move_to_end(key)
+            return value
         return default
 
 
@@ -450,7 +447,10 @@ def _refs_by_name() -> dict[str, list[dict]]:
 
 
 def _load_ref_image(path: str) -> tuple[np.ndarray, np.ndarray] | None:
-    cached = _REF_IMAGE_CACHE.get(path)
+    try:
+        cached = _REF_IMAGE_CACHE.get(path)
+    except KeyError:
+        cached = None
     if cached is not None:
         return cached
 
@@ -471,8 +471,12 @@ def _load_ref_image(path: str) -> tuple[np.ndarray, np.ndarray] | None:
     y1, y2 = int(ys.min()), int(ys.max()) + 1
     rgb = image[y1:y2, x1:x2, :3]
     a = alpha[y1:y2, x1:x2]
-    _REF_IMAGE_CACHE[path] = (rgb, a)
-    return _REF_IMAGE_CACHE[path]
+    parsed = (rgb, a)
+    try:
+        _REF_IMAGE_CACHE[path] = parsed
+        return _REF_IMAGE_CACHE.get(path, parsed)
+    except KeyError:
+        return parsed
 
 
 def _largest_component(mask: np.ndarray) -> np.ndarray:
