@@ -725,14 +725,15 @@ def _select_registered_pokemon(self, title: str, current_name: str = "") -> tupl
 
 
 
-def _auto_detect_opponent_party(self) -> None:
+def _auto_detect_opponent_party(self) -> int:
+    """相手PT検出を実行し、名前が確定したポケモン数を返す。"""
     if not self._video_thread or not self._video_thread.isRunning():
         QMessageBox.information(self, "情報", "カメラを接続してください")
-        return
+        return 0
     frame = self._video_thread.get_last_frame()
     if frame is None or frame.size == 0:
         QMessageBox.information(self, "情報", "フレームを取得できませんでした")
-        return
+        return 0
     # Freeze the frame at button-press time and keep using this snapshot.
     frame = frame.copy()
     season = self._current_usage_season()
@@ -744,10 +745,11 @@ def _auto_detect_opponent_party(self) -> None:
             "使用率データ不足",
             "選択中シーズン [{}] の使用率データがありません。\n先に「使用率取得」を実行してください。".format(season),
         )
-        return
+        return 0
 
     self._set_auto_detect_enabled(False)
     self._show_loading_overlay("相手PT検出中...")
+    detected_count = 0
     try:
         slot_results = opponent_party_reader.detect_opponent_party(frame, season=season)
         detected_party: list[PokemonInstance | None] = []
@@ -763,6 +765,7 @@ def _auto_detect_opponent_party(self) -> None:
             pokemon = self._build_usage_template_pokemon(name) if name else None
             detected_party.append(pokemon)
             if pokemon:
+                detected_count += 1
                 summary.append("{}: {} [{}]".format(slot["slot_index"] + 1, pokemon.name_ja, type_text))
             else:
                 summary.append("{}: --- [{}]".format(slot["slot_index"] + 1, type_text))
@@ -777,6 +780,7 @@ def _auto_detect_opponent_party(self) -> None:
     finally:
         self._hide_loading_overlay()
         self._set_auto_detect_enabled(True)
+    return detected_count
 
 
 
@@ -804,6 +808,7 @@ def _stop_opponent_party_auto_detect(self, show_message: bool, write_log: bool) 
     was_active = self._opp_auto_detect_timer.isActive()
     self._opp_auto_detect_timer.stop()
     self._auto_detect_pending = False
+    self._auto_detect_cooldown_until = 0.0
     if self._auto_detect_btn and self._auto_detect_btn.isChecked():
         self._auto_detect_btn.blockSignals(True)
         self._auto_detect_btn.setChecked(False)
@@ -845,11 +850,12 @@ def _poll_opponent_party_auto_detect(self) -> None:
     if not matched or not all_types:
         return
     self._auto_detect_pending = True
-    self._auto_detect_cooldown_until = time.monotonic() + 120.0
 
     def _run_detect() -> None:
         try:
-            self._auto_detect_opponent_party()
+            detected_count = self._auto_detect_opponent_party()
+            if detected_count >= 3:
+                self._auto_detect_cooldown_until = time.monotonic() + 120.0
         finally:
             self._auto_detect_pending = False
 
