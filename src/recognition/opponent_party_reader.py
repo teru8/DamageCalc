@@ -247,8 +247,12 @@ def _detect_type_groups(slot: np.ndarray) -> list[list[str]]:
         if not ranked:
             continue
         best_score = float(ranked[0][1])
+        second_score = float(ranked[1][1]) if len(ranked) >= 2 else 0.0
         min_score = 0.24 if icon_index == 0 else 0.30
         if best_score < min_score:
+            continue
+        # Guard against unstable top-1 predictions at low confidence.
+        if best_score < 0.42 and (best_score - second_score) < 0.07:
             continue
         cutoff = max(0.16, best_score - 0.12)
         group = [name for name, score in ranked if float(score) >= cutoff][:4]
@@ -381,9 +385,11 @@ def _match_species_by_sprite(
     margin = top_score - second_score
 
     # Keep thresholds permissive, but avoid low-confidence ties.
-    if top_score < 0.27:
+    if top_score < 0.23:
         return "", "", False, ordered_names, top_score
     if top_score < 0.50 and margin < 0.020:
+        return "", "", False, ordered_names, top_score
+    if top_score < 0.30 and margin < 0.060:
         return "", "", False, ordered_names, top_score
     return top_name, top_form, top_shiny, ordered_names, top_score
 
@@ -412,6 +418,20 @@ def _slot_result(
     }
 
 
+def has_first_slot_type(frame: np.ndarray) -> bool:
+    if frame is None or frame.size == 0:
+        return False
+    if frame.shape[:2] != (720, 1280):
+        frame = cv2.resize(frame, (1280, 720))
+
+    slot = _crop(frame, _OPP_SLOT_ROIS[0])
+    if slot.size == 0 or not _slot_occupied(slot):
+        return False
+
+    type_groups = _detect_type_groups(slot)
+    return bool(type_groups and any(group for group in type_groups))
+
+
 def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[dict]:
     if frame is None or frame.size == 0:
         return []
@@ -424,6 +444,8 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
 
     all_species = db.get_all_species()
     season_species = [s for s in all_species if s.name_ja in pool_set] if pool_set else []
+    broad_candidates = season_pool if season_pool else [str(s.name_ja or "").strip() for s in all_species]
+    broad_candidates = [name for name in broad_candidates if name]
 
     results: list[dict] = []
     for index, roi in enumerate(_OPP_SLOT_ROIS):
@@ -446,7 +468,13 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
 
         type_groups = _detect_type_groups(slot)
         primary_types = [group[0] for group in type_groups if group]
-        candidate_names = _type_filtered_species_names(type_groups, season_species)
+        typed_candidates = _type_filtered_species_names(type_groups, season_species)
+        if typed_candidates:
+            candidate_names = typed_candidates
+        elif type_groups:
+            candidate_names = []
+        else:
+            candidate_names = broad_candidates
         picked_name, picked_form, picked_shiny, ranked_candidates, confidence = _match_species_by_sprite(
             slot,
             candidate_names,
