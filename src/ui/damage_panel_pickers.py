@@ -46,6 +46,10 @@ def pick_ability(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
     usage_name = pokemon.usage_name or pokemon.name_ja
     species_abilities = _pokeapi_ability_names_for_pokemon(pokemon.name_en) if pokemon.name_en else []
     usage_abilities = db.get_abilities_by_usage(usage_name) if usage_name else []
+    if not usage_abilities and pokemon.species_id:
+        base = db.get_species_by_id(pokemon.species_id)
+        if base and base.name_ja != usage_name:
+            usage_abilities = db.get_abilities_by_usage(base.name_ja)
     ranked = _unique(species_abilities + usage_abilities)
     items, sep = _build_ranked_options(ranked, all_abilities)
     return show_pick_dialog("特性を選択", items, sep, pokemon.ability or "", parent)
@@ -61,5 +65,9 @@ def pick_item(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
     completer_items = sorted(_unique(list(ITEMS_JA) + get_item_names()))
     usage_name = pokemon.usage_name or pokemon.name_ja
     ranked = _unique(db.get_items_by_usage(usage_name) if usage_name else [])
+    if not ranked and pokemon.species_id:
+        base = db.get_species_by_id(pokemon.species_id)
+        if base and base.name_ja != usage_name:
+            ranked = _unique(db.get_items_by_usage(base.name_ja))
     items, sep = _build_ranked_options(ranked, list_items)
     return show_pick_dialog("持ち物を選択", items, sep, pokemon.item or "", parent, completer_items=completer_items)

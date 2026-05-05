@@ -613,6 +613,11 @@ class PokemonEditDialog(QDialog):
         option = self._current_form_option()
         if option:
             name = option.usage_name
+            # メガ等フォーム固有名に使用率データがなければベース種族名にフォールバック
+            if (name and name != option.species_lookup_name
+                    and not db.get_items_by_usage(name)
+                    and not db.get_abilities_by_usage(name)):
+                name = option.species_lookup_name
         else:
             name = self._resolve_species_lookup_name(display_name)
         # Normalize full-width parens to half-width (pokedb_tokyo uses half-width)
@@ -1115,6 +1120,9 @@ class PokemonEditDialog(QDialog):
         effective_species = self._effective_species_for_calc() or species
 
         pokemon = self._pokemon or PokemonInstance()
+        # フォームが変わった場合（原種→メガ等）は別エントリとしてINSERTする
+        if pokemon.db_id and pokemon.name_ja != display_name:
+            pokemon.db_id = None
         pokemon.species_id = species.species_id
         pokemon.name_ja = display_name
         pokemon.usage_name = form_option.usage_name if form_option else species.name_ja
