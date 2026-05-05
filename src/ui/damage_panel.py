@@ -510,11 +510,19 @@ class DamagePanel(QWidget):
     def _refresh_party_slots(self) -> None:
         if not hasattr(self, "_my_party_slots"):
             return
+        def _canon(name: str) -> str:
+            norm = _normalize_form_name(name)
+            return (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
+
+        def _cached_form(cache: dict, name_canon: str) -> str:
+            cached = cache.get(name_canon)
+            return (cached[0] if isinstance(cached, tuple) else cached) if cached else ""
+
         my_is_attacker = (self._party_source == "my")
         atk_name = (self._atk.name_ja or "") if self._atk else ""
         def_name = (self._def_custom.name_ja or "") if self._def_custom else ""
-        atk_canon = (_FORM_NAME_TO_GROUP.get(atk_name) or [atk_name])[0] if atk_name else ""
-        def_canon = (_FORM_NAME_TO_GROUP.get(def_name) or [def_name])[0] if def_name else ""
+        atk_canon = _canon(atk_name) if atk_name else ""
+        def_canon = _canon(def_name) if def_name else ""
         atk_current = atk_name
         def_current = def_name
         atk_idx_known = self._atk_party_side is not None and self._atk_party_idx is not None
@@ -524,7 +532,7 @@ class DamagePanel(QWidget):
         for i, slot in enumerate(self._my_party_slots):
             if i < len(self._my_party) and self._my_party[i]:
                 name = self._my_party[i].name_ja or ""
-                name_canon = (_FORM_NAME_TO_GROUP.get(name) or [name])[0]
+                name_canon = _canon(name)
                 if atk_idx_known:
                     is_atk = my_is_attacker and self._atk_party_side == "my" and self._atk_party_idx == i
                 else:
@@ -534,18 +542,17 @@ class DamagePanel(QWidget):
                 else:
                     is_def = not my_is_attacker and name_canon == def_canon
                 if not is_atk and not is_def:
-                    cached = my_cache.get(name_canon)
-                    cached_form = (cached[0] if isinstance(cached, tuple) else cached) if cached else None
+                    form = _cached_form(my_cache, name_canon)
                 else:
-                    cached_form = None
-                sprite = (atk_current if is_atk else def_current if is_def else cached_form or "") or name
+                    form = ""
+                sprite = (atk_current if is_atk else def_current if is_def else form) or name
                 slot.set_name(name, attack_active=is_atk, defense_active=is_def, sprite_name=sprite)
             else:
                 slot.set_name("")
         for i, slot in enumerate(self._opp_party_slots):
             if i < len(self._opp_party) and self._opp_party[i]:
                 name = self._opp_party[i].name_ja or ""
-                name_canon = (_FORM_NAME_TO_GROUP.get(name) or [name])[0]
+                name_canon = _canon(name)
                 if atk_idx_known:
                     is_atk = not my_is_attacker and self._atk_party_side == "opp" and self._atk_party_idx == i
                 else:
@@ -555,11 +562,10 @@ class DamagePanel(QWidget):
                 else:
                     is_def = my_is_attacker and name_canon == def_canon
                 if not is_atk and not is_def:
-                    cached = opp_cache.get(name_canon)
-                    cached_form = (cached[0] if isinstance(cached, tuple) else cached) if cached else None
+                    form = _cached_form(opp_cache, name_canon)
                 else:
-                    cached_form = None
-                sprite = (atk_current if is_atk else def_current if is_def else cached_form or "") or name
+                    form = ""
+                sprite = (atk_current if is_atk else def_current if is_def else form) or name
                 slot.set_name(name, attack_active=is_atk, defense_active=is_def, sprite_name=sprite)
             else:
                 slot.set_name("")
