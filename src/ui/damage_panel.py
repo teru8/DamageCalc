@@ -519,6 +519,8 @@ class DamagePanel(QWidget):
         def_current = def_name
         atk_idx_known = self._atk_party_side is not None and self._atk_party_idx is not None
         def_idx_known = self._def_party_side is not None and self._def_party_idx is not None
+        my_cache = self._atk_form_cache if my_is_attacker else self._def_form_cache
+        opp_cache = self._def_form_cache if my_is_attacker else self._atk_form_cache
         for i, slot in enumerate(self._my_party_slots):
             if i < len(self._my_party) and self._my_party[i]:
                 name = self._my_party[i].name_ja or ""
@@ -531,7 +533,12 @@ class DamagePanel(QWidget):
                     is_def = not my_is_attacker and self._def_party_side == "my" and self._def_party_idx == i
                 else:
                     is_def = not my_is_attacker and name_canon == def_canon
-                sprite = (atk_current if is_atk else def_current if is_def else "") or name
+                if not is_atk and not is_def:
+                    cached = my_cache.get(name_canon)
+                    cached_form = (cached[0] if isinstance(cached, tuple) else cached) if cached else None
+                else:
+                    cached_form = None
+                sprite = (atk_current if is_atk else def_current if is_def else cached_form or "") or name
                 slot.set_name(name, attack_active=is_atk, defense_active=is_def, sprite_name=sprite)
             else:
                 slot.set_name("")
@@ -547,7 +554,12 @@ class DamagePanel(QWidget):
                     is_def = my_is_attacker and self._def_party_side == "opp" and self._def_party_idx == i
                 else:
                     is_def = my_is_attacker and name_canon == def_canon
-                sprite = (atk_current if is_atk else def_current if is_def else "") or name
+                if not is_atk and not is_def:
+                    cached = opp_cache.get(name_canon)
+                    cached_form = (cached[0] if isinstance(cached, tuple) else cached) if cached else None
+                else:
+                    cached_form = None
+                sprite = (atk_current if is_atk else def_current if is_def else cached_form or "") or name
                 slot.set_name(name, attack_active=is_atk, defense_active=is_def, sprite_name=sprite)
             else:
                 slot.set_name("")
