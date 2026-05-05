@@ -8,6 +8,7 @@ Result dict structure from winocr.recognize_pil_sync:
 import hashlib
 import logging
 import os
+import threading
 import unicodedata
 from collections import OrderedDict
 from typing import Any
@@ -17,22 +18,30 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 
 class _LRUDict(OrderedDict):
-    """OrderedDict with a maximum size; evicts the least-recently-used entry."""
+    """OrderedDict with a maximum size; evicts the least-recently-used entry. Thread-safe."""
 
     def __init__(self, maxsize: int) -> None:
         super().__init__()
         self._maxsize = maxsize
+        self._lock = threading.RLock()
 
     def __setitem__(self, key: Any, value: Any) -> None:
-        super().__setitem__(key, value)
-        self.move_to_end(key)
-        if len(self) > self._maxsize:
-            self.popitem(last=False)
+        with self._lock:
+            super().__setitem__(key, value)
+            self.move_to_end(key)
+            if len(self) > self._maxsize:
+                oldest = next(iter(self))
+                super().__delitem__(oldest)
 
     def __getitem__(self, key: Any) -> Any:
-        value = super().__getitem__(key)
-        self.move_to_end(key)
-        return value
+        with self._lock:
+            value = super().__getitem__(key)
+            self.move_to_end(key)
+            return value
+
+    def __contains__(self, key: object) -> bool:
+        with self._lock:
+            return super().__contains__(key)
 
 
 _DEFAULT_OCR_CACHE_SIZE = 64

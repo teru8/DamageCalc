@@ -284,7 +284,7 @@ class DamageCalculator:
         return move_to_dict(
             effective_move,
             is_crit=is_crit,
-            hits=hits if hits > 1 else 0,
+            hits=hits,
             bp_override=pow_override,
             charged=charged,
             forced_type=bridge_forced_type,
@@ -348,7 +348,7 @@ class DamageCalculator:
         return move_to_dict(
             opp_effective_move,
             is_crit=is_crit,
-            hits=hits if hits > 1 else 0,
+            hits=hits,
             bp_override=pow_override,
             forced_type=forced_type,
             bp_multiplier=skin_bp_mult,

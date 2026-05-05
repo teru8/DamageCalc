@@ -500,8 +500,8 @@ def _query_mask(sprite: np.ndarray) -> np.ndarray:
     work = sprite.copy()
     flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
     # Slightly looser border flood-fill to remove red UI gradients.
-    lo = (14, 34, 34)
-    up = (14, 34, 34)
+    lo = (8, 8, 8)
+    up = (8, 8, 8)
 
     for x in range(0, w, 4):
         for y in (0, h - 1):
@@ -537,12 +537,15 @@ def _query_mask(sprite: np.ndarray) -> np.ndarray:
 
 def _query_features(sprite: np.ndarray) -> dict | None:
     if sprite is None or sprite.size == 0:
+        _logger.debug("[query_features] sprite is None or empty")
         return None
     if sprite.ndim == 2:
         sprite = cv2.cvtColor(sprite, cv2.COLOR_GRAY2BGR)
 
     mask = _query_mask(sprite)
-    if float(mask.mean()) < 0.01:
+    mean_val = float(mask.mean())
+    if mean_val < 0.01:
+        _logger.debug("[query_features] mask too sparse (mean=%.4f) — flood fill ate the sprite", mean_val)
         return None
 
     gray = cv2.cvtColor(sprite, cv2.COLOR_BGR2GRAY)
@@ -557,6 +560,7 @@ def _query_features(sprite: np.ndarray) -> dict | None:
         "lab": lab,
         "height": int(sprite.shape[0]),
         "width": int(sprite.shape[1]),
+        "geom": _geom_features(mask),
     }
 
 
@@ -592,11 +596,42 @@ def _masked_corrcoef(gray_a: np.ndarray, gray_b: np.ndarray, mask: np.ndarray) -
     return (corr + 1.0) * 0.5
 
 
+def _geom_features(mask: np.ndarray) -> tuple[float, float, float]:
+    """Return (cy_norm, aspect_ratio, fill_ratio) from a binary mask.
+
+    cy_norm   : vertical centroid normalized to [0,1] (0=top, 1=bottom)
+    aspect_ratio : width/height of bounding rect (wider > 1)
+    fill_ratio   : foreground pixels / bounding-rect area
+    """
+    ys, xs = np.where(mask > 0)
+    if len(ys) == 0:
+        return 0.5, 1.0, 0.0
+    h, w = mask.shape[:2]
+    cy = float(ys.mean()) / max(1, h - 1)
+    y0, y1 = int(ys.min()), int(ys.max())
+    x0, x1 = int(xs.min()), int(xs.max())
+    bbox_h = max(1, y1 - y0 + 1)
+    bbox_w = max(1, x1 - x0 + 1)
+    aspect = bbox_w / bbox_h
+    fill = float(len(ys)) / (bbox_h * bbox_w)
+    return cy, aspect, fill
+
+
+def _geom_similarity(qa: tuple[float, float, float], qb: tuple[float, float, float]) -> float:
+    """Similarity in [0,1] between two geom feature tuples."""
+    cy_diff = abs(qa[0] - qb[0])          # 0–1
+    asp_diff = abs(qa[1] - qb[1]) / 3.0   # normalise; >3 is extreme
+    fill_diff = abs(qa[2] - qb[2])        # 0–1
+    dist = cy_diff * 0.4 + asp_diff * 0.4 + fill_diff * 0.2
+    return max(0.0, 1.0 - dist)
+
+
 def _score_reference_by_color_fill(query: dict, ref_rgb: np.ndarray, ref_alpha: np.ndarray) -> float:
     h = int(query["height"])
     w = int(query["width"])
     qlab = query["lab"]
     qgray = query["gray"]
+    q_geom: tuple[float, float, float] = query.get("geom", (0.5, 1.0, 0.5))
     best_score = 0.0
 
     for scale in _COLOR_MATCH_SCALES:
@@ -637,12 +672,14 @@ def _score_reference_by_color_fill(query: dict, ref_rgb: np.ndarray, ref_alpha: 
                 q_patch_lab = qlab[oy:oy + target_h, ox:ox + target_w]
                 q_patch_gray = qgray[oy:oy + target_h, ox:ox + target_w]
 
+                ref_geom = _geom_features((resized_alpha > 24).astype(np.uint8))
+                geom_sim = _geom_similarity(q_geom, ref_geom)
                 for ref_lab, ref_gray in prepared_refs:
                     delta = np.abs(q_patch_lab - ref_lab)
                     mean_delta = float(delta[focus_mask > 0].mean())
                     color_score = max(0.0, 1.0 - mean_delta / _COLOR_DELTA_NORM)
                     corr = _masked_corrcoef(q_patch_gray, ref_gray, focus_mask)
-                    score = color_score * 0.20 + corr * 0.80
+                    score = color_score * 0.05 + corr * 0.65 + geom_sim * 0.30
                     if score > best_score:
                         best_score = score
 
@@ -735,6 +772,7 @@ def match_sprite(
 
     query = _query_features(sprite)
     if not query:
+        _logger.debug("[match_sprite] query_features returned empty (bad sprite crop?) candidates=%s", candidate_names)
         return []
 
     def _ref_key(name_ja: str, ref: dict) -> tuple[str, str, bool]:
@@ -760,6 +798,8 @@ def match_sprite(
             if score > color_scores.get(key, 0.0):
                 color_scores[key] = score
 
+    if not color_scores:
+        _logger.debug("[match_sprite] no refs found for candidates=%s", candidate_names)
     color_results = sorted(
         [_to_result(k, v) for k, v in color_scores.items() if v > 0.16],
         key=lambda x: x["score"],
@@ -771,6 +811,11 @@ def match_sprite(
             key=lambda x: x["score"],
             reverse=True,
         )
+        if debug_all and not color_results:
+            _logger.debug(
+                "[color_fill] all below threshold(0.16): %s",
+                ", ".join(f"{r['name_ja']}:{r['score']:.3f}" for r in debug_all[:5]),
+            )
     if _logger.isEnabledFor(logging.DEBUG) and debug_all:
         top5 = debug_all[:5]
         lines = ", ".join(
@@ -801,6 +846,16 @@ def match_sprite(
         key=lambda x: x["score"],
         reverse=True,
     )
+    if _logger.isEnabledFor(logging.DEBUG) and shape_scores and not results:
+        debug_shape = sorted(
+            [_to_result(k, v) for k, v in shape_scores.items() if v > 0.0],
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+        _logger.debug(
+            "[shape_fallback] all below threshold(0.10): %s",
+            ", ".join(f"{r['name_ja']}:{r['score']:.3f}" for r in debug_shape[:5]),
+        )
     if _logger.isEnabledFor(logging.DEBUG) and results:
         top5 = results[:5]
         lines = ", ".join(
