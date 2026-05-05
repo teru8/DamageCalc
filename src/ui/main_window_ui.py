@@ -363,7 +363,7 @@ def _build_box_side_panel(self) -> QWidget:
     self._box_my_save_btn = QPushButton("保\n存")
     self._box_my_save_btn.setFixedWidth(41)
     self._box_my_save_btn.setFixedHeight(self._box_my_panel.minimumHeight())
-    self._box_my_save_btn.clicked.connect(self._save_party_preset)
+    self._box_my_save_btn.clicked.connect(lambda: self._save_party_preset(to_top=True))
     party_row.addWidget(self._box_my_save_btn)
     party_layout.addLayout(party_row)
     layout.addWidget(party_box)
