@@ -213,7 +213,7 @@ def _detect_type_groups(slot: np.ndarray, slot_index: int = -1) -> list[list[str
             continue
         best_score = float(ranked[0][1])
         second_score = float(ranked[1][1]) if len(ranked) >= 2 else 0.0
-        min_score = 0.24 if icon_index == 0 else 0.30
+        min_score = 0.50
         if best_score < min_score:
             _logger.debug("[type_icon] slot=%d icon=%d REJECTED best=%.3f < min=%.2f", slot_index, icon_index, best_score, min_score)
             continue
@@ -289,6 +289,7 @@ def _match_species_by_sprite(
         top_k=min(10, len(candidate_names)),
     )
     if not ranked:
+        _logger.debug("[sprite_match] no ranked results for candidates=%s", candidate_names)
         return "", "", False, [], 0.0
 
     top = ranked[0]

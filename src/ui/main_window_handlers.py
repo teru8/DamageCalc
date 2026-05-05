@@ -859,7 +859,7 @@ def _poll_opponent_party_auto_detect(self) -> None:
         finally:
             self._auto_detect_pending = False
 
-    QTimer.singleShot(100, _run_detect)
+    QTimer.singleShot(500, _run_detect)
 
 
 
