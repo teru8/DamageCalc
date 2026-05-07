@@ -114,6 +114,7 @@ _COLOR_MATCH_DX = (-4, 0, 4)
 _COLOR_MATCH_DY = (-10, -6, -2, 2)
 _COLOR_PRIMARY_ACCEPT = 0.57
 _COLOR_PRIMARY_MARGIN = 0.018
+_COLOR_PRIMARY_SPECIES_MARGIN = 0.070
 
 
 def _cache_dirs() -> None:
@@ -786,6 +787,17 @@ def match_sprite(
             "score": float(min(score, 1.0)),
         }
 
+    def _species_best_scores(results: list[dict]) -> list[tuple[str, float]]:
+        best_by_species: dict[str, float] = {}
+        for row in results:
+            name_ja = str(row.get("name_ja") or "")
+            if not name_ja:
+                continue
+            score = float(row.get("score") or 0.0)
+            if score > best_by_species.get(name_ja, 0.0):
+                best_by_species[name_ja] = score
+        return sorted(best_by_species.items(), key=lambda item: item[1], reverse=True)
+
     # Stage 1: color-fill matching — score each (name_ja, form, is_shiny) entry.
     color_scores: dict[tuple[str, str, bool], float] = {}
     for name_ja in candidate_names:
@@ -825,7 +837,17 @@ def match_sprite(
 
     if color_results:
         top_color = float(color_results[0]["score"])
-        if top_color >= _COLOR_PRIMARY_ACCEPT:
+        top2_color = float(color_results[1]["score"]) if len(color_results) >= 2 else 0.0
+        color_margin = top_color - top2_color
+        species_scores = _species_best_scores(color_results)
+        top_species_score = float(species_scores[0][1]) if species_scores else 0.0
+        second_species_score = float(species_scores[1][1]) if len(species_scores) >= 2 else 0.0
+        species_margin = top_species_score - second_species_score
+        if (
+            top_color >= _COLOR_PRIMARY_ACCEPT
+            and color_margin >= _COLOR_PRIMARY_MARGIN
+            and species_margin >= _COLOR_PRIMARY_SPECIES_MARGIN
+        ):
             return color_results[:max(1, int(top_k))]
 
     # Stage 2 fallback: shape/edge-aware matching.

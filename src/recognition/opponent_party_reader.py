@@ -319,13 +319,27 @@ def _match_species_by_sprite(
     second_score = float(ranked[1]["score"]) if len(ranked) >= 2 else 0.0
     margin = top_score - second_score
 
+    def _fallback_by_usage(names: list[str]) -> str:
+        usage_ranks = db.get_species_usage_rank_map()
+        best_name = ""
+        best_rank = 10**9
+        for name in names:
+            rank = int(usage_ranks.get(name, 10**9))
+            if rank < best_rank:
+                best_rank = rank
+                best_name = name
+        return best_name or (names[0] if names else "")
+
     # Keep thresholds permissive, but avoid low-confidence ties.
     if top_score < 0.23:
-        return "", "", False, ordered_names, top_score
+        fallback_name = _fallback_by_usage(ordered_names or candidate_names)
+        return fallback_name, "", False, ordered_names, top_score
     if top_score < 0.50 and margin < 0.020:
-        return "", "", False, ordered_names, top_score
+        fallback_name = _fallback_by_usage(ordered_names or candidate_names)
+        return fallback_name, "", False, ordered_names, top_score
     if top_score < 0.30 and margin < 0.060:
-        return "", "", False, ordered_names, top_score
+        fallback_name = _fallback_by_usage(ordered_names or candidate_names)
+        return fallback_name, "", False, ordered_names, top_score
     return top_name, top_form, top_shiny, ordered_names, top_score
 
 
