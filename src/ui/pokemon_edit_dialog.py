@@ -570,22 +570,35 @@ _MEGA_EXCLUDED_FROM_BASE: set[str] = {
     "フラエッテ",
 }
 
+# Base names whose form picker must not include specific counterpart names.
+# Example: Eternal Floette should not list the regular Floette base as a sibling option.
+_FORM_COUNTERPART_EXCLUDED_FROM_BASE: dict[str, set[str]] = {
+    "フラエッテ (えいえんのはな)": {"フラエッテ"},
+    "フラエッテ(えいえんのはな)": {"フラエッテ"},
+}
+
 
 def _is_same_species_form_option(base_name: str, entry: zukan_client.ZukanPokemonEntry) -> bool:
+    normalized_base_name = (base_name or "").strip().replace("（", "(").replace("）", ")")
+    entry_name = (entry.name_ja or "").strip().replace("（", "(").replace("）", ")")
+    excluded_counterparts = _FORM_COUNTERPART_EXCLUDED_FROM_BASE.get(normalized_base_name, set())
+    if entry_name in excluded_counterparts:
+        return False
+
     text = "{} {} {}".format(entry.name_ja or "", entry.sub_name or "", entry.dex_no or "")
     if "メガ" in text:
         # Mega is a same-species option UNLESS it belongs to an excluded base
         # whose Mega is only accessible from a specific alternate form.
-        return base_name not in _MEGA_EXCLUDED_FROM_BASE
+        return normalized_base_name not in _MEGA_EXCLUDED_FROM_BASE
     # Battle-only forms are opt-in by explicit allow-list.
     if _is_in_battle_form_entry(entry):
         if any(keyword in text for keyword in _IN_BATTLE_FORM_KEYWORDS):
             return True
-        return base_name in _IN_BATTLE_FORM_BASE_NAMES
+        return normalized_base_name in _IN_BATTLE_FORM_BASE_NAMES
     # Out-of-battle variant forms should generally be selectable.
     if (entry.sub_name or "").strip():
         return True
-    if (entry.name_ja or "").strip() and (entry.name_ja or "").strip() != (base_name or "").strip():
+    if entry_name and entry_name != normalized_base_name:
         return True
     return False
 

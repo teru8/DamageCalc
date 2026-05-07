@@ -83,6 +83,12 @@ _ALL_TYPES: set[str] = {
     "fairy",
 }
 
+# If a preferred form is already present in type-based candidates, suppress
+# its base counterpart to avoid duplicate/ambiguous sprite matching.
+_CANDIDATE_COUNTERPART_EXCLUDE_MAP: dict[str, set[str]] = {
+    "フラエッテ (えいえんのはな)": {"フラエッテ"},
+}
+
 
 def _read_image_color(path: Path) -> np.ndarray | None:
     """Unicode-safe image loader for Windows paths."""
@@ -215,17 +221,14 @@ def _detect_type_groups(slot: np.ndarray, slot_index: int = -1) -> list[list[str
         second_score = float(ranked[1][1]) if len(ranked) >= 2 else 0.0
         min_score = 0.50
         if best_score < min_score:
-            _logger.debug("[type_icon] slot=%d icon=%d REJECTED best=%.3f < min=%.2f", slot_index, icon_index, best_score, min_score)
             continue
         # Guard against unstable top-1 predictions at low confidence.
         if best_score < 0.42 and (best_score - second_score) < 0.07:
-            _logger.debug("[type_icon] slot=%d icon=%d REJECTED low_margin best=%.3f margin=%.3f", slot_index, icon_index, best_score, best_score - second_score)
             continue
         cutoff = max(0.16, best_score - 0.12)
         group = [name for name, score in ranked if float(score) >= cutoff][:4]
         if not group:
             continue
-        _logger.debug("[type_icon] slot=%d icon=%d ACCEPTED best=%.3f group=%s", slot_index, icon_index, best_score, group)
         ranked_icons.append((icon_index, best_score, group))
 
     if len(ranked_icons) >= 2:
@@ -239,6 +242,21 @@ def _detect_type_groups(slot: np.ndarray, slot_index: int = -1) -> list[list[str
 
     ranked_icons.sort(key=lambda row: row[0])
     return [group for _, _, group in ranked_icons]
+
+
+def _normalize_species_name(name: str) -> str:
+    return (name or "").strip().replace("（", "(").replace("）", ")")
+
+
+def _filter_counterpart_candidates(candidate_names: list[str]) -> list[str]:
+    normalized_names = {_normalize_species_name(name) for name in candidate_names}
+    excluded: set[str] = set()
+    for preferred, base_names in _CANDIDATE_COUNTERPART_EXCLUDE_MAP.items():
+        if _normalize_species_name(preferred) in normalized_names:
+            excluded.update(_normalize_species_name(base_name) for base_name in base_names)
+    if not excluded:
+        return candidate_names
+    return [name for name in candidate_names if _normalize_species_name(name) not in excluded]
 
 
 def _type_exact_species_names(
@@ -358,6 +376,7 @@ def detect_opponent_party(frame: np.ndarray, season: str | None = None) -> list[
         type_groups = _detect_type_groups(slot, slot_index=index)
         primary_types = [group[0] for group in type_groups if group]
         candidate_names = _type_exact_species_names(primary_types, season_species, sprite_names)
+        candidate_names = _filter_counterpart_candidates(candidate_names)
         _logger.debug("[candidates] slot=%d types=%s → %s", index, primary_types, candidate_names)
         if len(candidate_names) == 1:
             picked_name, picked_form, picked_shiny, ranked_candidates, confidence = candidate_names[0], "", False, candidate_names, 1.0

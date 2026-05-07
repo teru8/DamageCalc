@@ -817,10 +817,9 @@ def match_sprite(
                 ", ".join(f"{r['name_ja']}:{r['score']:.3f}" for r in debug_all[:5]),
             )
     if _logger.isEnabledFor(logging.DEBUG) and debug_all:
-        top5 = debug_all[:5]
         lines = ", ".join(
             f"{r['name_ja']}({r['form'] or 'base'})={'shiny' if r['is_shiny'] else 'n'}:{r['score']:.3f}"
-            for r in top5
+            for r in debug_all
         )
         _logger.debug("[color_fill] %s", lines)
 
@@ -857,10 +856,9 @@ def match_sprite(
             ", ".join(f"{r['name_ja']}:{r['score']:.3f}" for r in debug_shape[:5]),
         )
     if _logger.isEnabledFor(logging.DEBUG) and results:
-        top5 = results[:5]
         lines = ", ".join(
             f"{r['name_ja']}({r['form'] or 'base'})={'shiny' if r['is_shiny'] else 'n'}:{r['score']:.3f}"
-            for r in top5
+            for r in results
         )
         _logger.debug("[shape_fallback] %s", lines)
 
