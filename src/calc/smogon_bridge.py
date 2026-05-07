@@ -233,6 +233,19 @@ _POKEAPI_TO_SMOGON_SPECIES: dict[str, str] = {
     "palkia-origin":  "Palkia-Origin",
     # Ursaluna Bloodmoon
     "ursaluna-bloodmoon":  "Ursaluna-Bloodmoon",
+    # Cosmetic-only forms that should resolve to base species in calc
+    # (same competitive profile; app also treats them as base internally).
+    "dudunsparce-two-segment":  "Dudunsparce",
+    "dudunsparce-three-segment":  "Dudunsparce",
+    "maushold-family-of-four":  "Maushold",
+    "maushold-family-of-three":  "Maushold",
+    "tatsugiri-curly":  "Tatsugiri",
+    "tatsugiri-droopy":  "Tatsugiri",
+    "tatsugiri-stretchy":  "Tatsugiri",
+    "squawkabilly-green-plumage":  "Squawkabilly",
+    "squawkabilly-blue-plumage":  "Squawkabilly",
+    "squawkabilly-yellow-plumage":  "Squawkabilly",
+    "squawkabilly-white-plumage":  "Squawkabilly",
     # Ogerpon masks
     "ogerpon":  "Ogerpon",
     "ogerpon-wellspring-mask":  "Ogerpon-Wellspring",
