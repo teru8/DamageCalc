@@ -2,6 +2,7 @@ import math
 import re
 import unicodedata
 from src.models import PokemonInstance, MoveInfo, SpeciesInfo
+from src.calc.modifier_notes import _is_knock_off_protected
 from src.constants import (
     TYPE_CHART, NATURES_JA, GAME_LEVEL,
     SOUND_MOVES_JA, WIND_MOVES_JA,
@@ -285,6 +286,15 @@ def is_grounded(pokemon: PokemonInstance) -> bool:
     if (pokemon.item or "") == "ふうせん":
         return False
     return True
+
+
+def knock_off_auto_power(defender: PokemonInstance) -> int:
+    """Return Knock Off BP: 97 if item can be removed, else 65."""
+    defender_name = (defender.name_ja or "").strip()
+    defender_item = (defender.item or "").strip()
+    defender_ability = (defender.ability or "").strip()
+    protected = _is_knock_off_protected(defender_name, defender_item, defender_ability)
+    return 65 if protected else 97
 
 
 # Edit dialog / main window — populates all six stats on a PokemonInstance from

@@ -112,6 +112,8 @@ class DamagePanel(QWidget):
         self._display_to_move_slot = [0, 1, 2, 3]
         self._atk_form_cache: dict[str, str] = {}
         self._def_form_cache: dict[str, str] = {}
+        self._protean_stab_toggle_initialized = False
+        self._opp_protean_stab_toggle_initialized = False
         self.setStyleSheet(
             "QPushButton{font-size:14px;}"
             "QLabel{font-size:14px;}"
@@ -352,9 +354,44 @@ class DamagePanel(QWidget):
             "もうか": ability in ("もうか", "Blaze"),
             "げきりゅう": ability in ("げきりゅう", "Torrent"),
             "むしのしらせ": ability in ("むしのしらせ", "Swarm"),
+            "へんげんじざい（タイプ一致）": ability in ("へんげんじざい", "Protean", "リベロ", "Libero"),
             "どくぼうそう": ability in ("どくぼうそう", "Toxic Boost"),
         }
         self._update_cond_btn_visibility(getattr(self, cond_btns_attr), cond_show_map)
+
+        # Protean/Libero STAB toggle: default ON whenever it appears.
+        if is_attacker:
+            btn = getattr(self, "_protean_stab_btn", None)
+            show = cond_show_map.get("へんげんじざい（タイプ一致）", False)
+            if btn is not None and show:
+                if ability in ("リベロ", "Libero"):
+                    btn.setText("リベロ（タイプ一致）")
+                else:
+                    btn.setText("へんげんじざい（タイプ一致）")
+            if btn is not None and show and not self._protean_stab_toggle_initialized:
+                btn.blockSignals(True)
+                btn.setChecked(True)
+                btn.blockSignals(False)
+                btn._refresh()
+                self._protean_stab_toggle_initialized = True
+            if not show:
+                self._protean_stab_toggle_initialized = False
+        else:
+            btn = getattr(self, "_opp_protean_stab_btn", None)
+            show = cond_show_map.get("へんげんじざい（タイプ一致）", False)
+            if btn is not None and show:
+                if ability in ("リベロ", "Libero"):
+                    btn.setText("リベロ（タイプ一致）")
+                else:
+                    btn.setText("へんげんじざい（タイプ一致）")
+            if btn is not None and show and not self._opp_protean_stab_toggle_initialized:
+                btn.blockSignals(True)
+                btn.setChecked(True)
+                btn.blockSignals(False)
+                btn._refresh()
+                self._opp_protean_stab_toggle_initialized = True
+            if not show:
+                self._opp_protean_stab_toggle_initialized = False
 
         trigger_show_map = {
             "はりこみ": ability in ("はりこみ", "Stakeout"),

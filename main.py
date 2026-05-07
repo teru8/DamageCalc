@@ -14,7 +14,7 @@ logging.basicConfig(
 )
 
 APP_NAME = "DamageCalc"
-APP_VERSION = "0.2.1-alpha"
+APP_VERSION = "0.2.2-alpha"
 APP_USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 
 

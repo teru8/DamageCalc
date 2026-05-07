@@ -33,6 +33,9 @@ class MoveSection(QWidget):
         self._has_extra_controls = False
         self._has_modifier_notes = False
         self._show_bulk_rows = True
+        self._power_user_overridden = False
+        self._suppress_power_change_event = False
+        self._preserve_details_once = False
 
         labels = self._RIGHT_LABELS if right_side else self._LEFT_LABELS
 
@@ -154,6 +157,7 @@ class MoveSection(QWidget):
                 "QComboBox::drop-down{width:14px;}"
             )
             self._pow_combo.setVisible(False)
+            self._pow_combo.currentIndexChanged.connect(self._on_power_combo_changed)
             pow_row.addWidget(self._pow_combo)
             pow_row.addStretch()
             extra.addLayout(pow_row)
@@ -244,6 +248,11 @@ class MoveSection(QWidget):
             self._pow_combo.setCurrentIndex(selected_index)
         self._pow_combo.blockSignals(False)
 
+    def _on_power_combo_changed(self, _index: int) -> None:
+        if self._suppress_power_change_event:
+            return
+        self._power_user_overridden = True
+
     def setup_move(self, move: MoveInfo | None) -> None:
         prev_pow_data = self._pow_combo.currentData()
         prev_hit = self._hit_spin.value()
@@ -266,6 +275,7 @@ class MoveSection(QWidget):
             self._hit_opt_lbl.setVisible(False)
             self._has_extra_controls = False
             self._has_modifier_notes = False
+            self._power_user_overridden = False
             self._status_note.setVisible(False)
             self._row_custom.setVisible(True)
             self._row_custom.set_no_damage("---")
@@ -295,6 +305,7 @@ class MoveSection(QWidget):
         same_move = self._last_move_name == move.name_ja
         if not same_move:
             self._details_visible = False
+            self._power_user_overridden = False
 
         self._pow_lbl.setText(str(move.power) if move.power else "---")
         self._acc_lbl.setText(str(move.accuracy) if move.accuracy else "---")
@@ -305,6 +316,12 @@ class MoveSection(QWidget):
         options = variable_power_options(move)
         if options:
             default_data = options[0][1]
+            if move.name_ja == "おはかまいり":
+                # Default to allies_fainted=2 (BP 150) for Last Respects.
+                for _label, option_data in options:
+                    if power_option_value(option_data) == 150:
+                        default_data = option_data
+                        break
             next_data = prev_pow_data if (same_move and prev_is_var and prev_pow_data is not None) else default_data
             self._set_power_options(options, next_data)
             self._pow_combo.setVisible(True)
@@ -336,6 +353,9 @@ class MoveSection(QWidget):
         for row in (self._row_custom, self._row_hbd0, self._row_hbd252):
             row.set_no_damage(reason)
 
+    def request_preserve_details_once(self) -> None:
+        self._preserve_details_once = True
+
     @staticmethod
     def _is_zero_damage_result(data: tuple[int, int, int, bool] | None) -> bool:
         if data is None:
@@ -353,8 +373,9 @@ class MoveSection(QWidget):
     ) -> None:
         """Each tuple is (min_dmg, max_dmg, defender_hp, is_error)."""
         self._show_bulk_rows = bool(show_bulk_rows)
-        # Keep current detail-pane state while recalculating so picker changes
-        # (power/hit options) do not collapse the move details.
+        if not self._preserve_details_once:
+            self._details_visible = False
+        self._preserve_details_once = False
         self._apply_detail_visibility()
         if self._move is None:
             self._set_all_no_damage("---")
@@ -412,6 +433,23 @@ class MoveSection(QWidget):
         if self._pow_combo.isHidden():
             return 0
         return power_option_value(self._pow_combo.currentData())
+
+    def set_power_override_value(self, power: int, force: bool = False) -> None:
+        if self._pow_combo.isHidden():
+            return
+        if self._power_user_overridden and not force:
+            return
+        target = int(power)
+        for index in range(self._pow_combo.count()):
+            data = self._pow_combo.itemData(index)
+            if power_option_value(data) == target:
+                self._suppress_power_change_event = True
+                self._pow_combo.blockSignals(True)
+                self._pow_combo.setCurrentIndex(index)
+                self._pow_combo.blockSignals(False)
+                self._suppress_power_change_event = False
+                self._pow_lbl.setText(str(target))
+                return
 
     def hit_count(self) -> int:
         return self._hit_spin.value() if not self._hit_spin.isHidden() else 1

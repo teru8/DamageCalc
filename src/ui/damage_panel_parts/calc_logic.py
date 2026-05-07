@@ -154,7 +154,7 @@ def _calc_moves(self) -> None:
         calc_stat, get_nature_mult,
         get_damage_modifier_notes, move_type_effectiveness,
         resolve_effective_move_category, resolve_effective_move_type,
-        is_grounded, normalize_move_name,
+        is_grounded, normalize_move_name, knock_off_auto_power,
     )
     from src.calc.smogon_bridge import (
         SmogonBridge, pokemon_to_attacker_dict, defender_scenario_dict, attacker_scenario_dict,
@@ -172,6 +172,14 @@ def _calc_moves(self) -> None:
 
     inputs = self.collect_calc_inputs()
     atk = copy.copy(self._atk)
+    _protean_like = ("へんげんじざい", "Protean", "リベロ", "Libero")
+    if (
+        (atk.ability or "").strip() in _protean_like
+        and hasattr(self, "_protean_stab_btn")
+        and self._protean_stab_btn.isVisible()
+        and not self._protean_stab_btn.isChecked()
+    ):
+        atk.ability = ""
 
     # Apply attacker EV overrides for all stats
     ev_pts_h_atk = inputs.attacker.ev_hp
@@ -364,6 +372,10 @@ def _calc_moves(self) -> None:
             continue
 
         pow_override = sec.power_override()
+        if normalize_move_name(effective_move.name_ja) == normalize_move_name("はたきおとす"):
+            target_for_knock_off = self._def_custom if self._def_custom is not None else hbd0
+            pow_override = knock_off_auto_power(target_for_knock_off)
+            sec.set_power_override_value(pow_override)
         move_shared = dict(**shared, power_override=pow_override)
 
         is_phys = effective_move.category == "physical" or effective_move.name_ja in (
@@ -660,8 +672,17 @@ def _calc_moves(self) -> None:
 
         if self._def_custom and atk.hp > 0 and opp_effective_move and opp_effective_move.category != "status":
             _opp_species = self._resolve_species_info(self._def_custom, self._def_species_name)
+            _opp_calc_ability = self._def_custom.ability if self._def_custom else ""
+            if (
+                (_opp_calc_ability or "").strip() in _protean_like
+                and hasattr(self, "_opp_protean_stab_btn")
+                and self._opp_protean_stab_btn.isVisible()
+                and not self._opp_protean_stab_btn.isChecked()
+            ):
+                _opp_calc_ability = ""
+
             _opp_atk_en = _ability_name_to_en(
-                self._def_custom.ability if self._def_custom else "",
+                _opp_calc_ability,
                 self._def_custom.name_ja if self._def_custom else "",
                 bool(def_tera),
             ) or "No Ability"
@@ -687,9 +708,12 @@ def _calc_moves(self) -> None:
             _opp_is_crit = self._opp_crit_btn.isChecked()
             _opp_burn = self._opp_burn_btn.isChecked()
             _opp_pow_override = opp_sec.power_override()
+            if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("はたきおとす"):
+                _opp_pow_override = knock_off_auto_power(atk)
+                opp_sec.set_power_override_value(_opp_pow_override)
             _opp_hits = opp_sec.hit_count()
 
-            _opp_ability_for_skin = self._def_custom.ability if self._def_custom else ""
+            _opp_ability_for_skin = _opp_calc_ability
             _opp_defender_name_ja = self._def_custom.name_ja if self._def_custom else ""
             _mv_d_opp = _calc.build_opponent_move_dict(
                 opp_effective_move,

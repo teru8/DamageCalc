@@ -181,6 +181,7 @@ def _build_side_panel(self) -> None:
     self._blaze_btn = _ToggleBtn("もうか", cond_style=True)
     self._torrent_btn = _ToggleBtn("げきりゅう", cond_style=True)
     self._swarm_btn = _ToggleBtn("むしのしらせ", cond_style=True)
+    self._protean_stab_btn = _ToggleBtn("へんげんじざい（タイプ一致）", cond_style=True)
     self._toxic_boost_btn = _ToggleBtn("どくぼうそう", cond_style=True)
     self._stakeout_btn = _ToggleBtn("はりこみ", cond_style=True)
     self._flash_fire_boost_btn = _ToggleBtn("もらいび", cond_style=True)
@@ -194,6 +195,7 @@ def _build_side_panel(self) -> None:
         "もうか": self._blaze_btn,
         "げきりゅう": self._torrent_btn,
         "むしのしらせ": self._swarm_btn,
+        "へんげんじざい（タイプ一致）": self._protean_stab_btn,
         "どくぼうそう": self._toxic_boost_btn,
     }
     self._attacker_trigger_cond_btns: dict[str, _ToggleBtn] = {
@@ -356,6 +358,7 @@ def _build_side_panel(self) -> None:
     self._opp_blaze_btn = _ToggleBtn("もうか", cond_style=True)
     self._opp_torrent_btn = _ToggleBtn("げきりゅう", cond_style=True)
     self._opp_swarm_btn = _ToggleBtn("むしのしらせ", cond_style=True)
+    self._opp_protean_stab_btn = _ToggleBtn("へんげんじざい（タイプ一致）", cond_style=True)
     self._opp_toxic_boost_btn = _ToggleBtn("どくぼうそう", cond_style=True)
     self._opp_stakeout_btn = _ToggleBtn("はりこみ", cond_style=True)
     self._opp_flash_fire_btn = _ToggleBtn("もらいび", cond_style=True)
@@ -369,6 +372,7 @@ def _build_side_panel(self) -> None:
         "もうか": self._opp_blaze_btn,
         "げきりゅう": self._opp_torrent_btn,
         "むしのしらせ": self._opp_swarm_btn,
+        "へんげんじざい（タイプ一致）": self._opp_protean_stab_btn,
         "どくぼうそう": self._opp_toxic_boost_btn,
     }
     self._defender_trigger_cond_btns: dict[str, _ToggleBtn] = {
@@ -593,8 +597,12 @@ def _build_content(self) -> None:
 
         sec = _MoveSection(i, right_side=False)
         sec.move_change_requested.connect(self._change_move)
-        sec._pow_combo.currentIndexChanged.connect(self.recalculate)
-        sec._hit_spin.valueChanged.connect(self.recalculate)
+        sec._pow_combo.currentIndexChanged.connect(
+            lambda _, s=sec: (s.request_preserve_details_once(), self.recalculate())
+        )
+        sec._hit_spin.valueChanged.connect(
+            lambda _, s=sec: (s.request_preserve_details_once(), self.recalculate())
+        )
         sec.set_bulk_rows_visible(self._show_bulk_rows)
         self._move_sections.append(sec)
         pair_layout.addWidget(sec, 1)
@@ -606,8 +614,12 @@ def _build_content(self) -> None:
 
         opp_sec = _MoveSection(i, right_side=True)
         opp_sec.move_change_requested.connect(self._change_opp_move)
-        opp_sec._pow_combo.currentIndexChanged.connect(self.recalculate)
-        opp_sec._hit_spin.valueChanged.connect(self.recalculate)
+        opp_sec._pow_combo.currentIndexChanged.connect(
+            lambda _, s=opp_sec: (s.request_preserve_details_once(), self.recalculate())
+        )
+        opp_sec._hit_spin.valueChanged.connect(
+            lambda _, s=opp_sec: (s.request_preserve_details_once(), self.recalculate())
+        )
         opp_sec.set_bulk_rows_visible(self._show_bulk_rows)
         self._opp_move_sections.append(opp_sec)
         pair_layout.addWidget(opp_sec, 1)
