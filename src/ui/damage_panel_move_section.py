@@ -353,8 +353,8 @@ class MoveSection(QWidget):
     ) -> None:
         """Each tuple is (min_dmg, max_dmg, defender_hp, is_error)."""
         self._show_bulk_rows = bool(show_bulk_rows)
-        # , 0
-        self._details_visible = False
+        # Keep current detail-pane state while recalculating so picker changes
+        # (power/hit options) do not collapse the move details.
         self._apply_detail_visibility()
         if self._move is None:
             self._set_all_no_damage("---")

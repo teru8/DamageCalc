@@ -24,7 +24,7 @@ const TERRAIN_MAP = {
 };
 
 // ── Extract min/max from result.damage ───────────────────────────────────
-function extractDamage(result) {
+function extractDamage(result, moveName = '') {
   const dmg = result.damage;
   if (dmg === null || dmg === undefined) return { min: 0, max: 0 };
   if (typeof dmg === 'number') return { min: dmg, max: dmg };
@@ -77,7 +77,9 @@ function handleCalc(req) {
 
   try {
     const mo = { isCrit: !!(req.move && req.move.isCrit) };
-    if (req.move.hits > 1)      mo.hits      = req.move.hits;
+    if (Number.isInteger(req.move.hits) && req.move.hits >= 1) {
+      mo.hits = req.move.hits;
+    }
     if (req.move.overrides)     mo.overrides  = req.move.overrides;
     mv = new Move(GEN, req.move.name, mo);
   } catch (e) { return { min: 0, max: 0, error: 'move:' + e.message }; }
@@ -101,7 +103,7 @@ function handleCalc(req) {
   try { result = calculate(GEN, atk, def, mv, fd); }
   catch (e) { return { min: 0, max: 0, error: 'calc:' + e.message }; }
 
-  return extractDamage(result);
+  return extractDamage(result, mv.name);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────

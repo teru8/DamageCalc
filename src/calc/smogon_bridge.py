@@ -324,6 +324,11 @@ _FORCE_FIXED_BP_OVERRIDE_MOVES_JA: frozenset[str] = frozenset({
     "ジャイロボール", "エレキボール",
 })
 
+_ALWAYS_EXPLICIT_HITS_MOVES_JA: frozenset[str] = frozenset({
+    "トリプルアクセル",
+    "トリプルキック",
+})
+
 
 # ── Type name: English lowercase → title case (for smogon) ───────────────
 TYPE_TO_SMOGON: dict[str, str] = {
@@ -701,7 +706,7 @@ def move_to_dict(
         "name":   move.name_en or move.name_ja,
         "isCrit": is_crit,
     }
-    if hits > 1:
+    if hits > 1 or (hits >= 1 and move.name_ja in _ALWAYS_EXPLICIT_HITS_MOVES_JA):
         d["hits"] = hits
     if overrides:
         d["overrides"] = overrides
