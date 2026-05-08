@@ -105,7 +105,7 @@ class PokemonCard(QWidget):
         self._transform_btn = QPushButton("→ へんしん")
         self._transform_btn.setFixedHeight(12)
         self._transform_btn.setStyleSheet(
-            "QPushButton{font-size:12px;background:#313244;color:#F9E2AF;"
+            "QPushButton{font-size:12px;background:#313244;color:#A6E3A1;"
             "border:1px solid #45475a;border-radius:3px;padding:-6 4px;}"
             "QPushButton:hover{background:#45475a;}"
         )
@@ -156,7 +156,10 @@ class PokemonCard(QWidget):
     def _refresh_text(self) -> None:
         p = self._pokemon
         if p:
-            display_name = canonical_display_name(p.name_ja or "")
+            if self._is_transformed:
+                display_name = "メタモン"
+            else:
+                display_name = canonical_display_name(p.name_ja or "")
             self._name_lbl.setText(display_name)
             label_fit_text(self._ability_lbl, p.ability or "", 13)
             label_fit_text(self._item_lbl, p.item or "", 13)
@@ -171,7 +174,7 @@ class PokemonCard(QWidget):
             else:
                 self._form_btn.hide()
             if show_transform:
-                self._transform_btn.setText("→ もとに戻る" if self._is_transformed else "→ へんしん")
+                self._transform_btn.setText("→ メタモンに戻る" if self._is_transformed else "→ へんしん")
                 self._transform_btn.show()
             else:
                 self._transform_btn.hide()

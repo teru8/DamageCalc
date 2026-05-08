@@ -552,6 +552,7 @@ def _on_transform_atk(self) -> None:
     self._atk_card.set_transformed(True)
     self._atk_card.set_pokemon(self._atk)
     self._atk_panel.set_pokemon(self._atk)
+    self._atk_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
     self.attacker_changed.emit(self._atk)
     self.recalculate()
@@ -568,6 +569,7 @@ def _maybe_retransform_atk(self) -> None:
     self._atk_card.set_transformed(True)
     self._atk_card.set_pokemon(self._atk)
     self._atk_panel.set_pokemon(self._atk)
+    self._atk_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
     self.attacker_changed.emit(self._atk)
 
