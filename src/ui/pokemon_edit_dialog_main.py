@@ -980,9 +980,8 @@ class PokemonEditDialog(QDialog):
         for key, lbl_text in _STAT_LABELS.items():
             val = getattr(temp, key)
             if key == "speed" and scarf:
-                self._stat_val_labels[key].setText("{}({}×1.5)".format(lbl_text, val))
-            else:
-                self._stat_val_labels[key].setText("{}({})".format(lbl_text, val))
+                val = int(val * 1.5)
+            self._stat_val_labels[key].setText("{}({})".format(lbl_text, val))
 
     def _move_button_style(self, move_name: str) -> str:
         move = db.get_move_by_name_ja(move_name)

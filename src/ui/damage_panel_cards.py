@@ -160,16 +160,17 @@ class PokemonCard(QWidget):
             self._name_lbl.setText(display_name)
             label_fit_text(self._ability_lbl, p.ability or "", 13)
             label_fit_text(self._item_lbl, p.item or "", 13)
+            show_transform = self._show_transform_button and (
+                self._is_transformed or (p.name_ja or "") == "メタモン"
+            )
             next_form = next_form_name(p.name_ja or "", FORM_NAME_TO_GROUP)
-            if next_form:
+            if next_form and not show_transform:
                 next_display = canonical_display_name(next_form)
                 self._form_btn.setText("→ {}".format(next_display))
                 self._form_btn.show()
             else:
                 self._form_btn.hide()
-            if self._show_transform_button and (
-                self._is_transformed or (p.name_ja or "") == "メタモン"
-            ):
+            if show_transform:
                 self._transform_btn.setText("→ もとに戻る" if self._is_transformed else "→ へんしん")
                 self._transform_btn.show()
             else:

@@ -44,16 +44,6 @@ def _speed_modifier(p: PokemonInstance, weather: str) -> float:
     return mult
 
 
-def _format_stat_modifier(mult: float) -> str:
-    if abs(mult - 1.5) < 1e-6:
-        return "×1.5"
-    if abs(mult - 2.0) < 1e-6:
-        return "×2"
-    if abs(mult - 3.0) < 1e-6:
-        return "×3"
-    return "×{:g}".format(mult)
-
-
 _STAT_LBL_BASE = "font-size:16px;font-weight:bold;"
 _STAT_LBL_NEUTRAL = _STAT_LBL_BASE + "color:#cdd6f4;"
 _STAT_LBL_BOOST = _STAT_LBL_BASE + "color:#f38ba8;"
@@ -78,21 +68,18 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "") -> None:
     a_huge = ability in _HUGE_POWER_LIKE
     s_mult = _speed_modifier(p, weather)
 
+    a_val = int(p.attack * 2) if a_huge else p.attack
+    s_val = int(p.speed * s_mult) if s_mult > 1.0 else p.speed
     pairs = (
         ("_stat_lbl_h", "H", p.hp or p.max_hp or "---", False),
-        ("_stat_lbl_a", "A", p.attack, a_huge),
+        ("_stat_lbl_a", "A", a_val, a_huge),
         ("_stat_lbl_b", "B", p.defense, False),
         ("_stat_lbl_c", "C", p.sp_attack, False),
         ("_stat_lbl_d", "D", p.sp_defense, False),
-        ("_stat_lbl_s", "S", p.speed, s_mult > 1.0),
+        ("_stat_lbl_s", "S", s_val, s_mult > 1.0),
     )
     for attr, ch, val, is_boosted in pairs:
-        if attr == "_stat_lbl_a" and a_huge:
-            text = "A({}×2)".format(val)
-        elif attr == "_stat_lbl_s" and s_mult > 1.0:
-            text = "S({}{})".format(val, _format_stat_modifier(s_mult))
-        else:
-            text = "{}({})".format(ch, val)
+        text = "{}({})".format(ch, val)
         lbl = getattr(panel, attr)
         lbl.setText(text)
         if is_boosted or attr == boost_attr:
