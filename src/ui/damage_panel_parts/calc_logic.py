@@ -196,10 +196,15 @@ def _calc_moves(self) -> None:
 
     # Re-calc all stats from species if available
     species = self._resolve_species_info(atk, atk.name_ja)
+    transformed = getattr(self, "_atk_transform_origin", None) is not None
+    saved_hp, saved_max_hp = atk.hp, atk.max_hp
     if species:
         hp_iv = atk.iv_hp if atk.iv_hp > 0 else 31
         atk.hp = calc_stat(species.base_hp, hp_iv, ev_pts_h_atk * 8, is_hp=True)
         atk.max_hp = atk.hp
+        if transformed:
+            atk.hp = saved_hp
+            atk.max_hp = saved_max_hp
         atk.attack = calc_stat(species.base_attack, 31, ev_pts_a * 8,
                                nature_mult=_nature_mult_from_name(atk_nature, "attack"))
         atk.defense = calc_stat(species.base_defense, 31, ev_pts_b_atk * 8,
@@ -214,7 +219,7 @@ def _calc_moves(self) -> None:
             atk.weight_kg = species.weight_kg
         if atk.hp <= 0 and atk.max_hp > 0:
             atk.hp = atk.max_hp
-    self._atk_panel.update_stat_display(atk)
+    self._atk_panel.update_stat_display(atk, weather=self._weather_key())
 
     if inputs.attacker.is_burned:
         atk.status = "burn"
@@ -586,10 +591,15 @@ def _calc_moves(self) -> None:
                     opp_species.base_sp_defense, 31, def_ev_pts_d * 8,
                     nature_mult=_nature_mult_from_name(def_nature, "sp_defense")
                 )
+                _def_transformed = getattr(self, "_def_transform_origin", None) is not None
+                _saved_def_hp, _saved_def_max_hp = cd.hp, cd.max_hp
                 cd.hp = calc_stat(
                     opp_species.base_hp, 31, def_ev_pts_h * 8, is_hp=True
                 )
                 cd.max_hp = cd.hp
+                if _def_transformed:
+                    cd.hp = _saved_def_hp
+                    cd.max_hp = _saved_def_max_hp
                 cd.speed = calc_stat(
                     opp_species.base_speed, 31, def_ev_pts_s * 8,
                     nature_mult=_nature_mult_from_name(def_nature, "speed")
@@ -597,7 +607,7 @@ def _calc_moves(self) -> None:
                 if cd.weight_kg <= 0:
                     cd.weight_kg = opp_species.weight_kg
             cd.types = def_types_override or (cd.types or ["normal"])
-            self._def_panel.update_stat_display(cd)
+            self._def_panel.update_stat_display(cd, weather=self._weather_key())
 
             # Build smogon dict for custom defender with panel EV/nature override
             _custom_nat = nature_ja_to_en(def_nature)
@@ -707,6 +717,10 @@ def _calc_moves(self) -> None:
             # Build move dict for opponent's move
             _opp_is_crit = self._opp_crit_btn.isChecked()
             _opp_burn = self._opp_burn_btn.isChecked()
+            # Ensure the picker reflects this move before reading its value,
+            # otherwise variable-power moves (e.g. おはかまいり) read 0 on the
+            # first calc and smogon falls back to the move's base BP.
+            opp_sec.setup_move(opp_effective_move)
             _opp_pow_override = opp_sec.power_override()
             if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("はたきおとす"):
                 _opp_pow_override = knock_off_auto_power(atk)

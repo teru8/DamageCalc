@@ -94,6 +94,7 @@ class PokemonEditDialog(QDialog):
         self.item_combo = SuggestComboBox([""] + self._all_items)
         self.item_combo.set_items([""] + self._all_items, completer_items=[""] + self._item_suggest_items)
         self.item_combo.setPlaceholderText("持ち物を入力または選択")
+        self.item_combo.currentTextChanged.connect(lambda _=None: self._recalculate_stats_from_species())
         basic_form.addRow("持ち物:", self.item_combo)
 
         self.terastal_combo = QComboBox()
@@ -975,8 +976,12 @@ class PokemonEditDialog(QDialog):
         )
         fill_stats_from_species(temp, species)
 
+        scarf = self.item_combo.current_text_stripped() == "こだわりスカーフ"
         for key, lbl_text in _STAT_LABELS.items():
-            self._stat_val_labels[key].setText("{}({})".format(lbl_text, getattr(temp, key)))
+            val = getattr(temp, key)
+            if key == "speed" and scarf:
+                val = int(val * 1.5)
+            self._stat_val_labels[key].setText("{}({})".format(lbl_text, val))
 
     def _move_button_style(self, move_name: str) -> str:
         move = db.get_move_by_name_ja(move_name)
@@ -1113,6 +1118,30 @@ class PokemonEditDialog(QDialog):
                     "ポケモン名の候補が見つかりません。\n先に PokeAPI データを取得してください。",
                 )
                 return
+
+        # 持ち物に応じて反映フォルムを自動決定
+        # メガストーン → 対応メガフォルム / それ以外 → 原種(現在メガ選択時のみ戻す)
+        from src.ui.damage_panel_forms import mega_form_for_stone
+        current_item = self.item_combo.current_text_stripped()
+        desired_mega = mega_form_for_stone(current_item, species.name_ja)
+        if self._current_form_options:
+            if desired_mega:
+                for idx, opt in enumerate(self._current_form_options):
+                    if opt.display_name == desired_mega:
+                        self._selected_form_index = idx
+                        break
+            else:
+                current_opt = self._current_form_option()
+                if current_opt and current_opt.display_name.startswith("メガ"):
+                    self._selected_form_index = 0
+            self._recalculate_stats_from_species()
+            # メガフォルム固有の特性(例: フェアリースキン)を強制適用
+            from src.ui.damage_panel_form_data import FORM_ABILITY_JA
+            switched_opt = self._current_form_option()
+            if switched_opt:
+                forced_ability = FORM_ABILITY_JA.get(switched_opt.display_name, "")
+                if forced_ability:
+                    self.ability_combo.set_text(forced_ability)
 
         form_option = self._current_form_option()
         display_name = form_option.display_name if form_option else species.name_ja

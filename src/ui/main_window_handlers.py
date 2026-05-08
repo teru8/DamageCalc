@@ -1123,6 +1123,29 @@ def _build_usage_template_pokemon(self, name_ja: str) -> PokemonInstance | None:
     pokemon.max_hp = pokemon.hp
     pokemon.current_hp = pokemon.hp
     pokemon.current_hp_percent = 100.0
+
+    # 持ち物使用率1位がメガストーンなら自動でメガフォルムへ切替
+    from src.ui.damage_panel_forms import mega_form_for_stone, FORM_NAME_TO_GROUP
+    mega_name = mega_form_for_stone(pokemon.item or "", pokemon.name_ja)
+    if mega_name:
+        from src.ui.damage_panel_form_apply import apply_form
+        from src.ui.damage_panel_form_data import (
+            FORM_ABILITY_JA,
+            FORM_MISSING_MEGA_STATS,
+            FORM_POKEAPI_EN,
+        )
+        pokemon = apply_form(
+            pokemon=pokemon,
+            form_name=mega_name,
+            original_ability=pokemon.ability or "",
+            form_name_to_group=FORM_NAME_TO_GROUP,
+            form_pokeapi_en=FORM_POKEAPI_EN,
+            form_missing_mega_stats=FORM_MISSING_MEGA_STATS,
+            form_ability_ja=FORM_ABILITY_JA,
+        )
+        pokemon.max_hp = pokemon.hp
+        pokemon.current_hp = pokemon.hp
+        pokemon.current_hp_percent = 100.0
     return pokemon
 
 

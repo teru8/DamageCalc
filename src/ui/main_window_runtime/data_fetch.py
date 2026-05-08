@@ -16,7 +16,8 @@ class DataFetchManager:
     def start_pokeapi_fetch(self, window: Any, safe_disconnect: Callable[..., None]) -> None:
         if window._api_loader and window._api_loader.isRunning():
             return
-        safe_disconnect(window._api_loader, window._api_loader.progress, window._api_loader.finished)
+        if window._api_loader is not None:
+            safe_disconnect(window._api_loader, window._api_loader.progress, window._api_loader.finished)
         window._api_loader = PokeApiLoader()
         window._api_loader.progress.connect(window._on_api_progress)
         window._api_loader.finished.connect(window._on_api_done)
@@ -54,7 +55,8 @@ class DataFetchManager:
             return
         if window._scraper and window._scraper.isRunning():
             return
-        safe_disconnect(window._scraper, window._scraper.progress, window._scraper.finished)
+        if window._scraper is not None:
+            safe_disconnect(window._scraper, window._scraper.progress, window._scraper.finished)
         window._scraper = scraper_cls(season=season, source=resolved_source)
         window._scraper.progress.connect(window._on_usage_progress)
         window._scraper.finished.connect(window._on_scraper_done)
