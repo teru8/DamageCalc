@@ -1119,6 +1119,30 @@ class PokemonEditDialog(QDialog):
                 )
                 return
 
+        # 持ち物に応じて反映フォルムを自動決定
+        # メガストーン → 対応メガフォルム / それ以外 → 原種(現在メガ選択時のみ戻す)
+        from src.ui.damage_panel_forms import mega_form_for_stone
+        current_item = self.item_combo.current_text_stripped()
+        desired_mega = mega_form_for_stone(current_item, species.name_ja)
+        if self._current_form_options:
+            if desired_mega:
+                for idx, opt in enumerate(self._current_form_options):
+                    if opt.display_name == desired_mega:
+                        self._selected_form_index = idx
+                        break
+            else:
+                current_opt = self._current_form_option()
+                if current_opt and current_opt.display_name.startswith("メガ"):
+                    self._selected_form_index = 0
+            self._recalculate_stats_from_species()
+            # メガフォルム固有の特性(例: フェアリースキン)を強制適用
+            from src.ui.damage_panel_form_data import FORM_ABILITY_JA
+            switched_opt = self._current_form_option()
+            if switched_opt:
+                forced_ability = FORM_ABILITY_JA.get(switched_opt.display_name, "")
+                if forced_ability:
+                    self.ability_combo.set_text(forced_ability)
+
         form_option = self._current_form_option()
         display_name = form_option.display_name if form_option else species.name_ja
         selected_types = list(form_option.type_names) if form_option and form_option.type_names else self._selected_types()

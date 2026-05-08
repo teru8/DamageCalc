@@ -113,6 +113,9 @@ class DamagePanel(QWidget):
         self._atk_form_cache: dict[str, str] = {}
         self._def_form_cache: dict[str, str] = {}
         self._atk_transform_origin: PokemonInstance | None = None
+        self._def_transform_origin: PokemonInstance | None = None
+        self._atk_transform_slots: set[tuple[str, int]] = set()
+        self._def_transform_slots: set[tuple[str, int]] = set()
         self._protean_stab_toggle_initialized = False
         self._opp_protean_stab_toggle_initialized = False
         self.setStyleSheet(
@@ -124,6 +127,7 @@ class DamagePanel(QWidget):
         )
         self._build_ui()
         self.defender_changed.connect(lambda _=None: self._maybe_retransform_atk())
+        self.attacker_changed.connect(lambda _=None: self._maybe_retransform_def())
 
     # ── UI construction ───────────────────────────────────────────────
 
@@ -515,11 +519,13 @@ class DamagePanel(QWidget):
         if self._atk and self._atk_party_side in ("my", "opp") and self._atk_party_idx is not None:
             party = self._my_party if self._atk_party_side == "my" else self._opp_party
             if 0 <= self._atk_party_idx < len(party):
-                party[self._atk_party_idx] = copy.deepcopy(self._atk)
+                to_save = self._atk_transform_origin if self._atk_transform_origin is not None else self._atk
+                party[self._atk_party_idx] = copy.deepcopy(to_save)
         if self._def_custom and self._def_party_side in ("my", "opp") and self._def_party_idx is not None:
             party = self._my_party if self._def_party_side == "my" else self._opp_party
             if 0 <= self._def_party_idx < len(party):
-                party[self._def_party_idx] = copy.deepcopy(self._def_custom)
+                to_save = self._def_transform_origin if self._def_transform_origin is not None else self._def_custom
+                party[self._def_party_idx] = copy.deepcopy(to_save)
 
     def _on_atk_panel_changed(self) -> None:
         from src.ui.damage_panel_parts.signal_handlers import _on_atk_panel_changed as _on_atk_panel_changed_fn
@@ -702,6 +708,14 @@ class DamagePanel(QWidget):
     def _on_form_change_def(self) -> None:
         from src.ui.damage_panel_parts.signal_handlers import _on_form_change_def as _on_form_change_def_fn
         return _on_form_change_def_fn(self)
+
+    def _on_transform_def(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _on_transform_def as _on_transform_def_fn
+        return _on_transform_def_fn(self)
+
+    def _maybe_retransform_def(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _maybe_retransform_def as _maybe_retransform_def_fn
+        return _maybe_retransform_def_fn(self)
 
     def _on_my_party_slot_clicked(self, idx: int) -> None:
         from src.ui.damage_panel_parts.signal_handlers import _on_my_party_slot_clicked as _on_my_party_slot_clicked_fn

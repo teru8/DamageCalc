@@ -195,3 +195,4 @@ class AttackerCard(PokemonCard):
 class DefenderCard(PokemonCard):
     def __init__(self, parent=None):
         super().__init__("相手", "#89B4FA", parent)
+        self.set_transform_button_enabled(True)

@@ -591,10 +591,15 @@ def _calc_moves(self) -> None:
                     opp_species.base_sp_defense, 31, def_ev_pts_d * 8,
                     nature_mult=_nature_mult_from_name(def_nature, "sp_defense")
                 )
+                _def_transformed = getattr(self, "_def_transform_origin", None) is not None
+                _saved_def_hp, _saved_def_max_hp = cd.hp, cd.max_hp
                 cd.hp = calc_stat(
                     opp_species.base_hp, 31, def_ev_pts_h * 8, is_hp=True
                 )
                 cd.max_hp = cd.hp
+                if _def_transformed:
+                    cd.hp = _saved_def_hp
+                    cd.max_hp = _saved_def_max_hp
                 cd.speed = calc_stat(
                     opp_species.base_speed, 31, def_ev_pts_s * 8,
                     nature_mult=_nature_mult_from_name(def_nature, "speed")
@@ -712,6 +717,10 @@ def _calc_moves(self) -> None:
             # Build move dict for opponent's move
             _opp_is_crit = self._opp_crit_btn.isChecked()
             _opp_burn = self._opp_burn_btn.isChecked()
+            # Ensure the picker reflects this move before reading its value,
+            # otherwise variable-power moves (e.g. おはかまいり) read 0 on the
+            # first calc and smogon falls back to the move's base BP.
+            opp_sec.setup_move(opp_effective_move)
             _opp_pow_override = opp_sec.power_override()
             if normalize_move_name(opp_effective_move.name_ja) == normalize_move_name("はたきおとす"):
                 _opp_pow_override = knock_off_auto_power(atk)

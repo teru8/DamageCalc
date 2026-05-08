@@ -50,7 +50,13 @@ _STAT_LBL_BOOST = _STAT_LBL_BASE + "color:#f38ba8;"
 _STAT_LBL_REDUCE = _STAT_LBL_BASE + "color:#89b4fa;"
 
 
-def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "") -> None:
+_RANK_MULT_TABLE: dict[int, float] = {
+    -6: 2/8, -5: 2/7, -4: 2/6, -3: 2/5, -2: 2/4, -1: 2/3,
+    0: 1.0, 1: 3/2, 2: 4/2, 3: 5/2, 4: 6/2, 5: 7/2, 6: 8/2,
+}
+
+
+def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "", s_rank: int = 0) -> None:
     """Set H/A/B/C/D/S labels with ability/item modifiers and nature color."""
     nature = (p.nature or "").strip()
     boost, reduce = NATURES_JA.get(nature, (None, None))
@@ -69,14 +75,16 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "") -> None:
     s_mult = _speed_modifier(p, weather)
 
     a_val = int(p.attack * 2) if a_huge else p.attack
-    s_val = int(p.speed * s_mult) if s_mult > 1.0 else p.speed
+    s_rank_mult = _RANK_MULT_TABLE.get(max(-6, min(6, s_rank)), 1.0)
+    s_total_mult = s_mult * s_rank_mult
+    s_val = int(p.speed * s_total_mult) if s_total_mult != 1.0 else p.speed
     pairs = (
         ("_stat_lbl_h", "H", p.hp or p.max_hp or "---", False),
         ("_stat_lbl_a", "A", a_val, a_huge),
         ("_stat_lbl_b", "B", p.defense, False),
         ("_stat_lbl_c", "C", p.sp_attack, False),
         ("_stat_lbl_d", "D", p.sp_defense, False),
-        ("_stat_lbl_s", "S", s_val, s_mult > 1.0),
+        ("_stat_lbl_s", "S", s_val, s_total_mult > 1.0),
     )
     for attr, ch, val, is_boosted in pairs:
         text = "{}({})".format(ch, val)
@@ -88,6 +96,114 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "") -> None:
             lbl.setStyleSheet(_STAT_LBL_REDUCE)
         else:
             lbl.setStyleSheet(_STAT_LBL_NEUTRAL)
+
+def _make_rank_row(label_text: str, adj_cb):
+    """Build one rank row (label, −, value, +). Returns (layout, value_label)."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(4)
+    lbl = QLabel(label_text)
+    lbl.setFixedWidth(70)
+    lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
+    row.addWidget(lbl)
+    d_btn = QPushButton("−")
+    d_btn.setFixedSize(42, 32)
+    d_btn.setStyleSheet(
+        "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
+        "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
+        "min-height:32px;max-height:32px;}"
+        "QPushButton:hover{background:#3b3240;}"
+    )
+    rank_lbl = QLabel(" 0")
+    rank_lbl.setFixedSize(42, 32)
+    rank_lbl.setAlignment(Qt.AlignCenter)
+    rank_lbl.setStyleSheet(
+        "font-weight:bold;font-size:15px;color:#cdd6f4;background:#181825;"
+        "border:1px solid #45475a;border-radius:4px;padding:0px;margin:0px;"
+        "min-height:32px;max-height:32px;"
+    )
+    u_btn = QPushButton("+")
+    u_btn.setFixedSize(42, 32)
+    u_btn.setStyleSheet(
+        "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
+        "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
+        "min-height:32px;max-height:32px;}"
+        "QPushButton:hover{background:#2f3c36;}"
+    )
+    d_btn.clicked.connect(lambda: adj_cb(-1))
+    u_btn.clicked.connect(lambda: adj_cb(1))
+    row.addWidget(d_btn)
+    row.addWidget(rank_lbl)
+    row.addWidget(u_btn)
+    row.addStretch()
+    return row, rank_lbl
+
+
+def _format_rank(v: int) -> str:
+    return "{:+d}".format(v) if v != 0 else " 0"
+
+
+def _install_rank_section(panel, layout) -> None:
+    """Add ▷ 能力ランク toggle + collapsed (AC/BD) and expanded (A/B/C/D/S) widgets.
+
+    Sets attributes on panel: _rank_open, _ac_rank, _bd_rank, _a_rank, _b_rank,
+    _c_rank, _d_rank, _s_rank, _ac_rank_lbl, _bd_rank_lbl, _a_rank_lbl, ...,
+    _s_rank_lbl, _rank_toggle_btn, _rank_collapsed, _rank_expanded.
+    """
+    panel._rank_open = False
+    panel._ac_rank = 0
+    panel._bd_rank = 0
+    panel._a_rank = 0
+    panel._b_rank = 0
+    panel._c_rank = 0
+    panel._d_rank = 0
+    panel._s_rank = 0
+
+    rank_toggle_row = QHBoxLayout()
+    rank_toggle_row.setContentsMargins(0, 0, 0, 0)
+    rank_toggle_row.setSpacing(4)
+    panel._rank_toggle_btn = QPushButton("▷ 能力ランク")
+    panel._rank_toggle_btn.setCheckable(True)
+    panel._rank_toggle_btn.setChecked(False)
+    panel._rank_toggle_btn.setStyleSheet(
+        "QPushButton{background:transparent;border:none;color:#89b4fa;"
+        "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
+        "QPushButton:hover{color:#cdd6f4;}"
+    )
+    panel._rank_toggle_btn.clicked.connect(lambda _: panel._toggle_rank_section())
+    rank_toggle_row.addWidget(panel._rank_toggle_btn)
+    rank_toggle_row.addStretch()
+    layout.addLayout(rank_toggle_row)
+
+    # Collapsed (default): AC + BD
+    panel._rank_collapsed = QWidget()
+    cl = QVBoxLayout(panel._rank_collapsed)
+    cl.setContentsMargins(0, 0, 0, 0)
+    cl.setSpacing(4)
+    ac_row, panel._ac_rank_lbl = _make_rank_row("ACランク:", panel._adj_ac_rank)
+    bd_row, panel._bd_rank_lbl = _make_rank_row("BDランク:", panel._adj_bd_rank)
+    cl.addLayout(ac_row)
+    cl.addLayout(bd_row)
+    layout.addWidget(panel._rank_collapsed)
+
+    # Expanded: A/B/C/D/S
+    panel._rank_expanded = QWidget()
+    el = QVBoxLayout(panel._rank_expanded)
+    el.setContentsMargins(0, 0, 0, 0)
+    el.setSpacing(4)
+    for lbl_text, adj_attr, lbl_attr in (
+        ("Aランク:", "_adj_a_rank", "_a_rank_lbl"),
+        ("Bランク:", "_adj_b_rank", "_b_rank_lbl"),
+        ("Cランク:", "_adj_c_rank", "_c_rank_lbl"),
+        ("Dランク:", "_adj_d_rank", "_d_rank_lbl"),
+        ("Sランク:", "_adj_s_rank", "_s_rank_lbl"),
+    ):
+        row, val_lbl = _make_rank_row(lbl_text, getattr(panel, adj_attr))
+        setattr(panel, lbl_attr, val_lbl)
+        el.addLayout(row)
+    panel._rank_expanded.setVisible(False)
+    layout.addWidget(panel._rank_expanded)
+
 
 _TERA_TYPE_EN_TO_JA: dict[str, str] = {
     **TYPE_EN_TO_JA,
@@ -103,6 +219,7 @@ class _AttackerPanel(QWidget):
     new_requested = pyqtSignal()
     clear_requested = pyqtSignal()
     ev_section_toggled = pyqtSignal(bool)
+    rank_section_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -143,53 +260,7 @@ class _AttackerPanel(QWidget):
         layout.addWidget(self._tera_wrap)
         self._tera_wrap.setVisible(False)
 
-        # Rank modifiers: AC and BD separately
-        def _make_rank_row(label_text: str, adj_cb):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(70)
-            lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-            row.addWidget(lbl)
-            d_btn = QPushButton("−")
-            d_btn.setFixedSize(42, 32)
-            d_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            rank_lbl = QLabel(" 0")
-            rank_lbl.setFixedSize(42, 32)
-            rank_lbl.setAlignment(Qt.AlignCenter)
-            rank_lbl.setStyleSheet(
-                "font-weight:bold;font-size:15px;color:#cdd6f4;background:#181825;"
-                "border:1px solid #45475a;border-radius:4px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;"
-            )
-            u_btn = QPushButton("+")
-            u_btn.setFixedSize(42, 32)
-            u_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            d_btn.clicked.connect(lambda: adj_cb(-1))
-            u_btn.clicked.connect(lambda: adj_cb(1))
-            row.addWidget(d_btn)
-            row.addWidget(rank_lbl)
-            row.addWidget(u_btn)
-            row.addStretch()
-            return row, rank_lbl
-
-        self._ac_rank = 0
-        self._bd_rank = 0
-        ac_row, self._ac_rank_lbl = _make_rank_row("ACランク:", self._adj_ac_rank)
-        bd_row, self._bd_rank_lbl = _make_rank_row("BDランク:", self._adj_bd_rank)
-        layout.addLayout(ac_row)
-        layout.addLayout(bd_row)
+        _install_rank_section(self, layout)
 
         layout.addWidget(_sep())
 
@@ -320,10 +391,7 @@ class _AttackerPanel(QWidget):
                 _s.blockSignals(False)
             self._sync_ev_val_lbls()
             self._set_panel_nature("まじめ", emit=False)
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
+            self._reset_ranks()
             self._tera_cb.blockSignals(True)
             self._tera_cb.setChecked(False)
             self._tera_cb.blockSignals(False)
@@ -355,10 +423,7 @@ class _AttackerPanel(QWidget):
             _s.blockSignals(False)
         self._sync_ev_val_lbls()
         self._set_panel_nature(p.nature or "まじめ", emit=False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
+        self._reset_ranks()
         tera = (p.terastal_type or "normal")
         enable_tera = False
         self._tera_cb.blockSignals(True)
@@ -393,13 +458,17 @@ class _AttackerPanel(QWidget):
         return _nature_mult_from_name(self._panel_nature, stat_key)
 
     def ac_rank(self) -> int:
+        if self._rank_open:
+            return max(self._a_rank, self._c_rank)
         return self._ac_rank
 
     def bd_rank(self) -> int:
+        if self._rank_open:
+            return max(self._b_rank, self._d_rank)
         return self._bd_rank
 
     def rank(self) -> int:
-        return self._ac_rank
+        return self.ac_rank()
 
     def ev_hp_pts(self) -> int:
         return self._ev_slider_h.value()
@@ -445,7 +514,7 @@ class _AttackerPanel(QWidget):
     def _update_stat_display(self, p: PokemonInstance, weather: str = "") -> None:
         eff = copy.copy(p)
         eff.nature = self._panel_nature or p.nature
-        _apply_stat_labels(self, eff, weather=weather)
+        _apply_stat_labels(self, eff, weather=weather, s_rank=self._s_rank)
 
     def _toggle_actions(self) -> None:
         self._actions_visible = not self._actions_visible
@@ -473,10 +542,7 @@ class _AttackerPanel(QWidget):
             _s.blockSignals(False)
         self._sync_ev_val_lbls()
         self._set_panel_nature(p.nature or "まじめ", emit=False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
+        self._reset_ranks()
         tera = (p.terastal_type or "normal")
         enable_tera = False
         self._tera_cb.blockSignals(True)
@@ -534,13 +600,99 @@ class _AttackerPanel(QWidget):
 
     def _adj_ac_rank(self, delta: int) -> None:
         self._ac_rank = max(-6, min(6, self._ac_rank + delta))
-        self._ac_rank_lbl.setText("{:+d}".format(self._ac_rank) if self._ac_rank != 0 else " 0")
+        self._a_rank = self._c_rank = self._ac_rank
+        self._ac_rank_lbl.setText(_format_rank(self._ac_rank))
         self._emit()
 
     def _adj_bd_rank(self, delta: int) -> None:
         self._bd_rank = max(-6, min(6, self._bd_rank + delta))
-        self._bd_rank_lbl.setText("{:+d}".format(self._bd_rank) if self._bd_rank != 0 else " 0")
+        self._b_rank = self._d_rank = self._bd_rank
+        self._bd_rank_lbl.setText(_format_rank(self._bd_rank))
         self._emit()
+
+    def _adj_a_rank(self, delta: int) -> None:
+        self._a_rank = max(-6, min(6, self._a_rank + delta))
+        self._a_rank_lbl.setText(_format_rank(self._a_rank))
+        self._emit()
+
+    def _adj_b_rank(self, delta: int) -> None:
+        self._b_rank = max(-6, min(6, self._b_rank + delta))
+        self._b_rank_lbl.setText(_format_rank(self._b_rank))
+        self._emit()
+
+    def _adj_c_rank(self, delta: int) -> None:
+        self._c_rank = max(-6, min(6, self._c_rank + delta))
+        self._c_rank_lbl.setText(_format_rank(self._c_rank))
+        self._emit()
+
+    def _adj_d_rank(self, delta: int) -> None:
+        self._d_rank = max(-6, min(6, self._d_rank + delta))
+        self._d_rank_lbl.setText(_format_rank(self._d_rank))
+        self._emit()
+
+    def _adj_s_rank(self, delta: int) -> None:
+        self._s_rank = max(-6, min(6, self._s_rank + delta))
+        self._s_rank_lbl.setText(_format_rank(self._s_rank))
+        if self._base_pokemon is not None:
+            self._update_stat_display(self._base_pokemon)
+        self._emit()
+
+    def _toggle_rank_section(self, from_sync: bool = False) -> None:
+        opening = self._rank_toggle_btn.isChecked()
+        if opening and not self._rank_open:
+            self._a_rank = self._c_rank = self._ac_rank
+            self._b_rank = self._d_rank = self._bd_rank
+        elif (not opening) and self._rank_open:
+            self._ac_rank = max(self._a_rank, self._c_rank)
+            self._bd_rank = max(self._b_rank, self._d_rank)
+        self._rank_open = opening
+        self._rank_collapsed.setVisible(not opening)
+        self._rank_expanded.setVisible(opening)
+        self._rank_toggle_btn.setText("▽ 能力ランク" if opening else "▷ 能力ランク")
+        self._refresh_rank_labels()
+        if not from_sync:
+            self.rank_section_toggled.emit(opening)
+        self._emit()
+
+    def sync_rank_section(self, visible: bool) -> None:
+        self._rank_toggle_btn.blockSignals(True)
+        self._rank_toggle_btn.setChecked(visible)
+        self._rank_toggle_btn.blockSignals(False)
+        self._toggle_rank_section(from_sync=True)
+
+    def _refresh_rank_labels(self) -> None:
+        self._ac_rank_lbl.setText(_format_rank(self._ac_rank))
+        self._bd_rank_lbl.setText(_format_rank(self._bd_rank))
+        self._a_rank_lbl.setText(_format_rank(self._a_rank))
+        self._b_rank_lbl.setText(_format_rank(self._b_rank))
+        self._c_rank_lbl.setText(_format_rank(self._c_rank))
+        self._d_rank_lbl.setText(_format_rank(self._d_rank))
+        self._s_rank_lbl.setText(_format_rank(self._s_rank))
+
+    def _reset_ranks(self) -> None:
+        self._ac_rank = 0
+        self._bd_rank = 0
+        self._a_rank = 0
+        self._b_rank = 0
+        self._c_rank = 0
+        self._d_rank = 0
+        self._s_rank = 0
+        self._refresh_rank_labels()
+
+    def a_rank(self) -> int:
+        return self._a_rank if self._rank_open else self._ac_rank
+
+    def b_rank(self) -> int:
+        return self._b_rank if self._rank_open else self._bd_rank
+
+    def c_rank(self) -> int:
+        return self._c_rank if self._rank_open else self._ac_rank
+
+    def d_rank(self) -> int:
+        return self._d_rank if self._rank_open else self._bd_rank
+
+    def s_rank(self) -> int:
+        return self._s_rank
 
     def _emit(self) -> None:
         self.changed.emit()
@@ -554,13 +706,12 @@ class _DefenderPanel(QWidget):
     new_requested = pyqtSignal()
     clear_requested = pyqtSignal()
     ev_section_toggled = pyqtSignal(bool)
+    rank_section_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._ac_rank = 0
-        self._bd_rank = 0
         self._base_pokemon: PokemonInstance | None = None
         self._current_key = ""
         self._tera_visible = False
@@ -597,52 +748,7 @@ class _DefenderPanel(QWidget):
         layout.addWidget(self._tera_wrap)
         self._tera_wrap.setVisible(False)
 
-        def _make_rank_row(label_text: str, adj_cb):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(70)
-            lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;")
-            row.addWidget(lbl)
-            d_btn = QPushButton("−")
-            d_btn.setFixedSize(42, 32)
-            d_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #f38ba8;color:#f38ba8;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#3b3240;}"
-            )
-            rank_lbl = QLabel(" 0")
-            rank_lbl.setFixedSize(42, 32)
-            rank_lbl.setAlignment(Qt.AlignCenter)
-            rank_lbl.setStyleSheet(
-                "font-weight:bold;font-size:15px;color:#cdd6f4;background:#181825;"
-                "border:1px solid #45475a;border-radius:4px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;"
-            )
-            u_btn = QPushButton("+")
-            u_btn.setFixedSize(42, 32)
-            u_btn.setStyleSheet(
-                "QPushButton{background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;"
-                "font-weight:bold;border-radius:4px;font-size:15px;padding:0px;margin:0px;"
-                "min-height:32px;max-height:32px;}"
-                "QPushButton:hover{background:#2f3c36;}"
-            )
-            d_btn.clicked.connect(lambda: adj_cb(-1))
-            u_btn.clicked.connect(lambda: adj_cb(1))
-            row.addWidget(d_btn)
-            row.addWidget(rank_lbl)
-            row.addWidget(u_btn)
-            row.addStretch()
-            return row, rank_lbl
-
-        self._ac_rank = 0
-        self._bd_rank = 0
-        ac_row, self._ac_rank_lbl = _make_rank_row("ACランク:", self._adj_ac_rank)
-        bd_row, self._bd_rank_lbl = _make_rank_row("BDランク:", self._adj_bd_rank)
-        layout.addLayout(ac_row)
-        layout.addLayout(bd_row)
+        _install_rank_section(self, layout)
         layout.addWidget(_sep())
 
         # EV slider collapsible section
@@ -783,10 +889,7 @@ class _DefenderPanel(QWidget):
                 _s.setValue(0)
                 _s.blockSignals(False)
             self._sync_ev_val_lbls()
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
+            self._reset_ranks()
             self._disguise_cb.setVisible(False)
             self._disguise_cb.blockSignals(True)
             self._disguise_cb.setChecked(False)
@@ -819,10 +922,7 @@ class _DefenderPanel(QWidget):
             self._hp_pct_spin.blockSignals(True)
             self._hp_pct_spin.setValue(pct)
             self._hp_pct_spin.blockSignals(False)
-            self._ac_rank = 0
-            self._bd_rank = 0
-            self._ac_rank_lbl.setText(" 0")
-            self._bd_rank_lbl.setText(" 0")
+            self._reset_ranks()
 
             ev_map = [
                 (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
@@ -863,12 +963,16 @@ class _DefenderPanel(QWidget):
         self._update_stat_display(p)
 
     def rank(self) -> int:
-        return self._ac_rank
+        return self.ac_rank()
 
     def ac_rank(self) -> int:
+        if self._rank_open:
+            return max(self._a_rank, self._c_rank)
         return self._ac_rank
 
     def bd_rank(self) -> int:
+        if self._rank_open:
+            return max(self._b_rank, self._d_rank)
         return self._bd_rank
 
     def panel_nature(self) -> str:
@@ -971,10 +1075,7 @@ class _DefenderPanel(QWidget):
         self._hp_pct_spin.blockSignals(True)
         self._hp_pct_spin.setValue(pct)
         self._hp_pct_spin.blockSignals(False)
-        self._ac_rank = 0
-        self._bd_rank = 0
-        self._ac_rank_lbl.setText(" 0")
-        self._bd_rank_lbl.setText(" 0")
+        self._reset_ranks()
         ev_map = [
             (self._ev_slider_h, max(0, int((p.ev_hp or 0) / 8))),
             (self._ev_slider_a, max(0, int((p.ev_attack or 0) / 8))),
@@ -1038,13 +1139,99 @@ class _DefenderPanel(QWidget):
 
     def _adj_ac_rank(self, delta: int) -> None:
         self._ac_rank = max(-6, min(6, self._ac_rank + delta))
-        self._ac_rank_lbl.setText("{:+d}".format(self._ac_rank) if self._ac_rank != 0 else " 0")
+        self._a_rank = self._c_rank = self._ac_rank
+        self._ac_rank_lbl.setText(_format_rank(self._ac_rank))
         self._emit()
 
     def _adj_bd_rank(self, delta: int) -> None:
         self._bd_rank = max(-6, min(6, self._bd_rank + delta))
-        self._bd_rank_lbl.setText("{:+d}".format(self._bd_rank) if self._bd_rank != 0 else " 0")
+        self._b_rank = self._d_rank = self._bd_rank
+        self._bd_rank_lbl.setText(_format_rank(self._bd_rank))
         self._emit()
+
+    def _adj_a_rank(self, delta: int) -> None:
+        self._a_rank = max(-6, min(6, self._a_rank + delta))
+        self._a_rank_lbl.setText(_format_rank(self._a_rank))
+        self._emit()
+
+    def _adj_b_rank(self, delta: int) -> None:
+        self._b_rank = max(-6, min(6, self._b_rank + delta))
+        self._b_rank_lbl.setText(_format_rank(self._b_rank))
+        self._emit()
+
+    def _adj_c_rank(self, delta: int) -> None:
+        self._c_rank = max(-6, min(6, self._c_rank + delta))
+        self._c_rank_lbl.setText(_format_rank(self._c_rank))
+        self._emit()
+
+    def _adj_d_rank(self, delta: int) -> None:
+        self._d_rank = max(-6, min(6, self._d_rank + delta))
+        self._d_rank_lbl.setText(_format_rank(self._d_rank))
+        self._emit()
+
+    def _adj_s_rank(self, delta: int) -> None:
+        self._s_rank = max(-6, min(6, self._s_rank + delta))
+        self._s_rank_lbl.setText(_format_rank(self._s_rank))
+        if self._base_pokemon is not None:
+            self._update_stat_display(self._base_pokemon)
+        self._emit()
+
+    def _toggle_rank_section(self, from_sync: bool = False) -> None:
+        opening = self._rank_toggle_btn.isChecked()
+        if opening and not self._rank_open:
+            self._a_rank = self._c_rank = self._ac_rank
+            self._b_rank = self._d_rank = self._bd_rank
+        elif (not opening) and self._rank_open:
+            self._ac_rank = max(self._a_rank, self._c_rank)
+            self._bd_rank = max(self._b_rank, self._d_rank)
+        self._rank_open = opening
+        self._rank_collapsed.setVisible(not opening)
+        self._rank_expanded.setVisible(opening)
+        self._rank_toggle_btn.setText("▽ 能力ランク" if opening else "▷ 能力ランク")
+        self._refresh_rank_labels()
+        if not from_sync:
+            self.rank_section_toggled.emit(opening)
+        self._emit()
+
+    def sync_rank_section(self, visible: bool) -> None:
+        self._rank_toggle_btn.blockSignals(True)
+        self._rank_toggle_btn.setChecked(visible)
+        self._rank_toggle_btn.blockSignals(False)
+        self._toggle_rank_section(from_sync=True)
+
+    def _refresh_rank_labels(self) -> None:
+        self._ac_rank_lbl.setText(_format_rank(self._ac_rank))
+        self._bd_rank_lbl.setText(_format_rank(self._bd_rank))
+        self._a_rank_lbl.setText(_format_rank(self._a_rank))
+        self._b_rank_lbl.setText(_format_rank(self._b_rank))
+        self._c_rank_lbl.setText(_format_rank(self._c_rank))
+        self._d_rank_lbl.setText(_format_rank(self._d_rank))
+        self._s_rank_lbl.setText(_format_rank(self._s_rank))
+
+    def _reset_ranks(self) -> None:
+        self._ac_rank = 0
+        self._bd_rank = 0
+        self._a_rank = 0
+        self._b_rank = 0
+        self._c_rank = 0
+        self._d_rank = 0
+        self._s_rank = 0
+        self._refresh_rank_labels()
+
+    def a_rank(self) -> int:
+        return self._a_rank if self._rank_open else self._ac_rank
+
+    def b_rank(self) -> int:
+        return self._b_rank if self._rank_open else self._bd_rank
+
+    def c_rank(self) -> int:
+        return self._c_rank if self._rank_open else self._ac_rank
+
+    def d_rank(self) -> int:
+        return self._d_rank if self._rank_open else self._bd_rank
+
+    def s_rank(self) -> int:
+        return self._s_rank
 
     def _on_tera_changed(self, checked: bool) -> None:
         self._tera_combo.setEnabled(checked)
@@ -1053,7 +1240,7 @@ class _DefenderPanel(QWidget):
     def _update_stat_display(self, p: PokemonInstance, weather: str = "") -> None:
         eff = copy.copy(p)
         eff.nature = self._panel_nature or p.nature
-        _apply_stat_labels(self, eff, weather=weather)
+        _apply_stat_labels(self, eff, weather=weather, s_rank=self._s_rank)
 
     def _toggle_actions(self) -> None:
         self._actions_visible = not self._actions_visible

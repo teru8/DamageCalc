@@ -61,7 +61,7 @@ def _load_cached_map() -> dict[str, str] | None:
         for ja_name, en_name in item_map.items():
             ja = str(ja_name or "").strip()
             en = _normalize_item_name_en(str(en_name or ""))
-            if ja and en:
+            if ja:
                 result[ja] = en
         return result
     return None
@@ -106,7 +106,7 @@ def _fallback_map() -> dict[str, str]:
     for ja_name, en_name in ITEM_FALLBACK_JA_TO_EN.items():
         ja = str(ja_name or "").strip()
         en = _normalize_item_name_en(str(en_name or ""))
-        if ja and en:
+        if ja:
             result[ja] = en
     return result
 

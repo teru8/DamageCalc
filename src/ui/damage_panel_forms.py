@@ -158,3 +158,52 @@ def next_form_name(name_ja: str, form_name_to_group: dict[str, list[str]]) -> st
         return None
     idx = group.index(key) if key in group else 0
     return group[(idx + 1) % len(group)]
+
+
+def mega_form_for_stone(item: str, base_species_ja: str) -> str | None:
+    """Return mega form display name if `item` is a Mega Stone for `base_species_ja`.
+
+    Returns None when the item is not a recognized Mega Stone for the species
+    or when no matching mega form exists in FORM_GROUPS.
+    """
+    if not item or not base_species_ja:
+        return None
+    normalized = item.replace("Ｘ", "X").replace("Ｙ", "Y").replace("Ｚ", "Z")
+    if "ナイト" not in normalized:
+        return None
+    from src.calc.modifier_notes import _MEGA_STONE_SPECIES
+    species = _MEGA_STONE_SPECIES.get(normalized) or _MEGA_STONE_SPECIES.get(item)
+    if not species:
+        return None
+    # 種族名どちらかがもう一方を含めばマッチ扱い
+    # (例: stone="フラエッテ" / base="フラエッテ (えいえんのはな)")
+    if species != base_species_ja and species not in base_species_ja and base_species_ja not in species:
+        return None
+    group: list[str] | None = None
+    for g in FORM_GROUPS:
+        if not g:
+            continue
+        if g[0] == species or g[0] == base_species_ja:
+            group = g
+            break
+        if species in g[0] or base_species_ja in g[0]:
+            group = g
+            break
+    if not group:
+        return None
+    megas = [n for n in group[1:] if n.startswith("メガ")]
+    if not megas:
+        return None
+    if len(megas) == 1:
+        return megas[0]
+    has_x = "X" in normalized
+    has_y = "Y" in normalized
+    if has_x:
+        for m in megas:
+            if m.endswith("Ｘ") or m.endswith("X"):
+                return m
+    if has_y:
+        for m in megas:
+            if m.endswith("Ｙ") or m.endswith("Y"):
+                return m
+    return megas[0]
