@@ -16,10 +16,91 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from src.constants import TYPE_EN_TO_JA
+from src.constants import NATURES_JA, TYPE_EN_TO_JA
 from src.models import PokemonInstance
 from src.ui.damage_panel_math import nature_mult_from_name as _nature_mult_from_name
 from src.ui.damage_panel_ui_helpers import sep as _sep
+
+_HUGE_POWER_LIKE = ("ちからもち", "ヨガパワー", "Huge Power", "Pure Power")
+_WEATHER_SPEED_ABILITIES = {
+    "すいすい": ("rain",),
+    "Swift Swim": ("rain",),
+    "ようりょくそ": ("sun",),
+    "Chlorophyll": ("sun",),
+    "すなかき": ("sand",),
+    "Sand Rush": ("sand",),
+    "ゆきかき": ("hail", "snow"),
+    "Slush Rush": ("hail", "snow"),
+}
+
+
+def _speed_modifier(p: PokemonInstance, weather: str) -> float:
+    mult = 1.0
+    if (p.item or "").strip() == "こだわりスカーフ":
+        mult *= 1.5
+    ability = (p.ability or "").strip()
+    if ability in _WEATHER_SPEED_ABILITIES and weather in _WEATHER_SPEED_ABILITIES[ability]:
+        mult *= 2.0
+    return mult
+
+
+def _format_stat_modifier(mult: float) -> str:
+    if abs(mult - 1.5) < 1e-6:
+        return "×1.5"
+    if abs(mult - 2.0) < 1e-6:
+        return "×2"
+    if abs(mult - 3.0) < 1e-6:
+        return "×3"
+    return "×{:g}".format(mult)
+
+
+_STAT_LBL_BASE = "font-size:16px;font-weight:bold;"
+_STAT_LBL_NEUTRAL = _STAT_LBL_BASE + "color:#cdd6f4;"
+_STAT_LBL_BOOST = _STAT_LBL_BASE + "color:#f38ba8;"
+_STAT_LBL_REDUCE = _STAT_LBL_BASE + "color:#89b4fa;"
+
+
+def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "") -> None:
+    """Set H/A/B/C/D/S labels with ability/item modifiers and nature color."""
+    nature = (p.nature or "").strip()
+    boost, reduce = NATURES_JA.get(nature, (None, None))
+    nature_keys = {
+        "attack": "_stat_lbl_a",
+        "defense": "_stat_lbl_b",
+        "sp_attack": "_stat_lbl_c",
+        "sp_defense": "_stat_lbl_d",
+        "speed": "_stat_lbl_s",
+    }
+    boost_attr = nature_keys.get(boost or "")
+    reduce_attr = nature_keys.get(reduce or "")
+
+    ability = (p.ability or "").strip()
+    a_huge = ability in _HUGE_POWER_LIKE
+    s_mult = _speed_modifier(p, weather)
+
+    pairs = (
+        ("_stat_lbl_h", "H", p.hp or p.max_hp or "---", False),
+        ("_stat_lbl_a", "A", p.attack, a_huge),
+        ("_stat_lbl_b", "B", p.defense, False),
+        ("_stat_lbl_c", "C", p.sp_attack, False),
+        ("_stat_lbl_d", "D", p.sp_defense, False),
+        ("_stat_lbl_s", "S", p.speed, s_mult > 1.0),
+    )
+    for attr, ch, val, is_boosted in pairs:
+        if attr == "_stat_lbl_a" and a_huge:
+            text = "A({}×2)".format(val)
+        elif attr == "_stat_lbl_s" and s_mult > 1.0:
+            text = "S({}{})".format(val, _format_stat_modifier(s_mult))
+        else:
+            text = "{}({})".format(ch, val)
+        lbl = getattr(panel, attr)
+        lbl.setText(text)
+        if is_boosted or attr == boost_attr:
+            lbl.setStyleSheet(_STAT_LBL_BOOST)
+        elif attr == reduce_attr:
+            lbl.setStyleSheet(_STAT_LBL_REDUCE)
+        else:
+            lbl.setStyleSheet(_STAT_LBL_NEUTRAL)
 
 _TERA_TYPE_EN_TO_JA: dict[str, str] = {
     **TYPE_EN_TO_JA,
@@ -307,9 +388,9 @@ class _AttackerPanel(QWidget):
         self._tera_combo.setEnabled(enable_tera)
         self._update_stat_display(p)
 
-    def update_stat_display(self, p: PokemonInstance | None) -> None:
+    def update_stat_display(self, p: PokemonInstance | None, weather: str = "") -> None:
         if p:
-            self._update_stat_display(p)
+            self._update_stat_display(p, weather=weather)
 
     def terastal_type(self) -> str:
         if not self._tera_visible:
@@ -374,16 +455,10 @@ class _AttackerPanel(QWidget):
 
     # ── Private ─────────────────────────────────────────────────────────
 
-    def _update_stat_display(self, p: PokemonInstance) -> None:
-        self._stat_lbl_h.setText("H({})".format(p.hp or p.max_hp or "--"))
-        if p.ability in ("ちからもち", "ヨガパワー", "Huge Power", "Pure Power"):
-            self._stat_lbl_a.setText("A({}×2)".format(p.attack))
-        else:
-            self._stat_lbl_a.setText("A({})".format(p.attack))
-        self._stat_lbl_b.setText("B({})".format(p.defense))
-        self._stat_lbl_c.setText("C({})".format(p.sp_attack))
-        self._stat_lbl_d.setText("D({})".format(p.sp_defense))
-        self._stat_lbl_s.setText("S({})".format(p.speed))
+    def _update_stat_display(self, p: PokemonInstance, weather: str = "") -> None:
+        eff = copy.copy(p)
+        eff.nature = self._panel_nature or p.nature
+        _apply_stat_labels(self, eff, weather=weather)
 
     def _toggle_actions(self) -> None:
         self._actions_visible = not self._actions_visible
@@ -867,9 +942,9 @@ class _DefenderPanel(QWidget):
     def disguise_intact(self) -> bool:
         return (not self._disguise_cb.isHidden()) and self._disguise_cb.isChecked()
 
-    def update_stat_display(self, p: PokemonInstance | None) -> None:
+    def update_stat_display(self, p: PokemonInstance | None, weather: str = "") -> None:
         if p:
-            self._update_stat_display(p)
+            self._update_stat_display(p, weather=weather)
 
     def _toggle_ev_section(self, from_sync: bool = False) -> None:
         visible = self._ev_toggle_btn.isChecked()
@@ -988,13 +1063,10 @@ class _DefenderPanel(QWidget):
         self._tera_combo.setEnabled(checked)
         self._emit()
 
-    def _update_stat_display(self, p: PokemonInstance) -> None:
-        self._stat_lbl_h.setText("H({})".format(p.hp or p.max_hp or "---"))
-        self._stat_lbl_a.setText("A({})".format(p.attack))
-        self._stat_lbl_b.setText("B({})".format(p.defense))
-        self._stat_lbl_c.setText("C({})".format(p.sp_attack))
-        self._stat_lbl_d.setText("D({})".format(p.sp_defense))
-        self._stat_lbl_s.setText("S({})".format(p.speed))
+    def _update_stat_display(self, p: PokemonInstance, weather: str = "") -> None:
+        eff = copy.copy(p)
+        eff.nature = self._panel_nature or p.nature
+        _apply_stat_labels(self, eff, weather=weather)
 
     def _toggle_actions(self) -> None:
         self._actions_visible = not self._actions_visible

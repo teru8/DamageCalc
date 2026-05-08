@@ -175,6 +175,9 @@ def _new_attacker(self) -> None:
 
 
 def _clear_attacker(self) -> None:
+    self._atk_transform_origin = None
+    if hasattr(self, "_atk_card"):
+        self._atk_card.set_transformed(False)
     self._atk = None
     self._atk_party_side = None
     self._atk_party_idx = None
@@ -419,6 +422,10 @@ def _reset_conditions(self) -> None:
 
 
 def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> None:
+    if getattr(self, "_atk_transform_origin", None) is not None:
+        self._atk_transform_origin = None
+        if hasattr(self, "_atk_card"):
+            self._atk_card.set_transformed(False)
     self._atk = copy.deepcopy(pokemon)
     self._party_source = source
     self._refresh_bulk_rows_visibility()
@@ -488,6 +495,81 @@ def _change_def_item(self) -> None:
         self._refresh_party_slots()
         self.defender_changed.emit(self._def_custom)
         self.recalculate()
+
+
+def _build_transformed_atk(self, ditto: PokemonInstance, target: PokemonInstance) -> PokemonInstance:
+    """Copy non-HP stats/moves/ability/form from target into a Ditto-based instance."""
+    from src.calc.calc_utils import calc_stat
+    from src.data.database import get_species_by_id, get_species_by_name_ja
+
+    new = copy.deepcopy(target)
+    # Reset attacker-side identifiers/state we want to keep from Ditto
+    new.db_id = ditto.db_id
+    new.usage_name = ditto.usage_name
+    new.level = ditto.level
+    new.iv_hp = ditto.iv_hp
+    new.ev_hp = ditto.ev_hp
+    new.item = ditto.item
+    new.terastal_type = ditto.terastal_type
+    new.status = ditto.status
+    # Recompute HP based on Ditto's species base_hp + Ditto EV/IV
+    ditto_species = None
+    if ditto.species_id:
+        ditto_species = get_species_by_id(ditto.species_id)
+    if ditto_species is None and ditto.name_ja:
+        ditto_species = get_species_by_name_ja(ditto.name_ja)
+    if ditto_species:
+        hp_iv = ditto.iv_hp if ditto.iv_hp > 0 else 31
+        new.hp = calc_stat(ditto_species.base_hp, hp_iv, ditto.ev_hp, is_hp=True)
+        new.max_hp = new.hp
+        new.current_hp = ditto.current_hp if ditto.current_hp > 0 else new.max_hp
+    else:
+        new.hp = ditto.hp
+        new.max_hp = ditto.max_hp
+        new.current_hp = ditto.current_hp
+    return new
+
+
+def _on_transform_atk(self) -> None:
+    origin = getattr(self, "_atk_transform_origin", None)
+    if origin is not None:
+        # Revert
+        self._atk = copy.deepcopy(origin)
+        self._atk_transform_origin = None
+        self._atk_card.set_transformed(False)
+        self._atk_card.set_pokemon(self._atk)
+        self._atk_panel.set_pokemon(self._atk)
+        self._refresh_party_slots()
+        self.attacker_changed.emit(self._atk)
+        self.recalculate()
+        return
+    if not self._atk or (self._atk.name_ja or "") != "メタモン":
+        return
+    if not self._def_custom:
+        return
+    self._atk_transform_origin = copy.deepcopy(self._atk)
+    self._atk = _build_transformed_atk(self, self._atk, self._def_custom)
+    self._atk_card.set_transformed(True)
+    self._atk_card.set_pokemon(self._atk)
+    self._atk_panel.set_pokemon(self._atk)
+    self._refresh_party_slots()
+    self.attacker_changed.emit(self._atk)
+    self.recalculate()
+
+
+def _maybe_retransform_atk(self) -> None:
+    origin = getattr(self, "_atk_transform_origin", None)
+    if origin is None or not self._def_custom:
+        return
+    if (self._atk and self._atk.species_id == self._def_custom.species_id
+            and (self._atk.name_ja or "") == (self._def_custom.name_ja or "")):
+        return
+    self._atk = _build_transformed_atk(self, origin, self._def_custom)
+    self._atk_card.set_transformed(True)
+    self._atk_card.set_pokemon(self._atk)
+    self._atk_panel.set_pokemon(self._atk)
+    self._refresh_party_slots()
+    self.attacker_changed.emit(self._atk)
 
 
 def _on_form_change_atk(self) -> None:

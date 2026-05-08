@@ -112,6 +112,7 @@ class DamagePanel(QWidget):
         self._display_to_move_slot = [0, 1, 2, 3]
         self._atk_form_cache: dict[str, str] = {}
         self._def_form_cache: dict[str, str] = {}
+        self._atk_transform_origin: PokemonInstance | None = None
         self._protean_stab_toggle_initialized = False
         self._opp_protean_stab_toggle_initialized = False
         self.setStyleSheet(
@@ -122,6 +123,7 @@ class DamagePanel(QWidget):
             "QSpinBox{font-size:14px;}"
         )
         self._build_ui()
+        self.defender_changed.connect(lambda _=None: self._maybe_retransform_atk())
 
     # ── UI construction ───────────────────────────────────────────────
 
@@ -688,6 +690,14 @@ class DamagePanel(QWidget):
     def _on_form_change_atk(self) -> None:
         from src.ui.damage_panel_parts.signal_handlers import _on_form_change_atk as _on_form_change_atk_fn
         return _on_form_change_atk_fn(self)
+
+    def _on_transform_atk(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _on_transform_atk as _on_transform_atk_fn
+        return _on_transform_atk_fn(self)
+
+    def _maybe_retransform_atk(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _maybe_retransform_atk as _maybe_retransform_atk_fn
+        return _maybe_retransform_atk_fn(self)
 
     def _on_form_change_def(self) -> None:
         from src.ui.damage_panel_parts.signal_handlers import _on_form_change_def as _on_form_change_def_fn

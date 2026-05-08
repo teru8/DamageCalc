@@ -581,6 +581,7 @@ def _build_content(self) -> None:
     cards_row.addWidget(self._def_card, 1)
 
     self._atk_card.form_change_requested.connect(self._on_form_change_atk)
+    self._atk_card.transform_requested.connect(self._on_transform_atk)
 
     cl.addLayout(cards_row)
 

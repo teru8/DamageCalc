@@ -22,6 +22,7 @@ from src.ui.damage_panel_ui_helpers import label_fit_text
 class PokemonCard(QWidget):
     edit_requested = pyqtSignal()
     form_change_requested = pyqtSignal()
+    transform_requested = pyqtSignal()
     ability_change_requested = pyqtSignal()
     item_change_requested = pyqtSignal()
     _SPRITE_SIZE = 72
@@ -30,6 +31,8 @@ class PokemonCard(QWidget):
     def __init__(self, role_text: str, role_color: str, parent=None):
         super().__init__(parent)
         self._pokemon: PokemonInstance | None = None
+        self._is_transformed: bool = False
+        self._show_transform_button: bool = False
         self.setFixedHeight(self._CARD_HEIGHT)
         frame = QFrame(self)
         frame.setFrameShape(QFrame.StyledPanel)
@@ -98,6 +101,20 @@ class PokemonCard(QWidget):
         self._form_btn.setSizePolicy(sp)
         self._form_btn.hide()
         inner.addWidget(self._form_btn)
+
+        self._transform_btn = QPushButton("→ へんしん")
+        self._transform_btn.setFixedHeight(12)
+        self._transform_btn.setStyleSheet(
+            "QPushButton{font-size:12px;background:#313244;color:#F9E2AF;"
+            "border:1px solid #45475a;border-radius:3px;padding:-6 4px;}"
+            "QPushButton:hover{background:#45475a;}"
+        )
+        self._transform_btn.clicked.connect(self.transform_requested.emit)
+        sp_t = self._transform_btn.sizePolicy()
+        sp_t.setRetainSizeWhenHidden(False)
+        self._transform_btn.setSizePolicy(sp_t)
+        self._transform_btn.hide()
+        inner.addWidget(self._transform_btn)
         inner.addStretch()
 
         frame_row.addLayout(inner, 1)
@@ -128,6 +145,14 @@ class PokemonCard(QWidget):
         super().resizeEvent(event)
         self._refresh_text()
 
+    def set_transform_button_enabled(self, enabled: bool) -> None:
+        self._show_transform_button = bool(enabled)
+        self._refresh_text()
+
+    def set_transformed(self, active: bool) -> None:
+        self._is_transformed = bool(active)
+        self._refresh_text()
+
     def _refresh_text(self) -> None:
         p = self._pokemon
         if p:
@@ -142,16 +167,25 @@ class PokemonCard(QWidget):
                 self._form_btn.show()
             else:
                 self._form_btn.hide()
+            if self._show_transform_button and (
+                self._is_transformed or (p.name_ja or "") == "メタモン"
+            ):
+                self._transform_btn.setText("→ もとに戻る" if self._is_transformed else "→ へんしん")
+                self._transform_btn.show()
+            else:
+                self._transform_btn.hide()
         else:
             self._name_lbl.setText("（未設定）")
             self._ability_lbl.setText("")
             self._item_lbl.setText("")
             self._form_btn.hide()
+            self._transform_btn.hide()
 
 
 class AttackerCard(PokemonCard):
     def __init__(self, parent=None):
         super().__init__("自分", "#F38BA8", parent)
+        self.set_transform_button_enabled(True)
 
 
 class DefenderCard(PokemonCard):

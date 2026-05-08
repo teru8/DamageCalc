@@ -196,10 +196,15 @@ def _calc_moves(self) -> None:
 
     # Re-calc all stats from species if available
     species = self._resolve_species_info(atk, atk.name_ja)
+    transformed = getattr(self, "_atk_transform_origin", None) is not None
+    saved_hp, saved_max_hp = atk.hp, atk.max_hp
     if species:
         hp_iv = atk.iv_hp if atk.iv_hp > 0 else 31
         atk.hp = calc_stat(species.base_hp, hp_iv, ev_pts_h_atk * 8, is_hp=True)
         atk.max_hp = atk.hp
+        if transformed:
+            atk.hp = saved_hp
+            atk.max_hp = saved_max_hp
         atk.attack = calc_stat(species.base_attack, 31, ev_pts_a * 8,
                                nature_mult=_nature_mult_from_name(atk_nature, "attack"))
         atk.defense = calc_stat(species.base_defense, 31, ev_pts_b_atk * 8,
@@ -214,7 +219,7 @@ def _calc_moves(self) -> None:
             atk.weight_kg = species.weight_kg
         if atk.hp <= 0 and atk.max_hp > 0:
             atk.hp = atk.max_hp
-    self._atk_panel.update_stat_display(atk)
+    self._atk_panel.update_stat_display(atk, weather=self._weather_key())
 
     if inputs.attacker.is_burned:
         atk.status = "burn"
@@ -597,7 +602,7 @@ def _calc_moves(self) -> None:
                 if cd.weight_kg <= 0:
                     cd.weight_kg = opp_species.weight_kg
             cd.types = def_types_override or (cd.types or ["normal"])
-            self._def_panel.update_stat_display(cd)
+            self._def_panel.update_stat_display(cd, weather=self._weather_key())
 
             # Build smogon dict for custom defender with panel EV/nature override
             _custom_nat = nature_ja_to_en(def_nature)

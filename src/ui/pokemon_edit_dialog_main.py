@@ -94,6 +94,7 @@ class PokemonEditDialog(QDialog):
         self.item_combo = SuggestComboBox([""] + self._all_items)
         self.item_combo.set_items([""] + self._all_items, completer_items=[""] + self._item_suggest_items)
         self.item_combo.setPlaceholderText("持ち物を入力または選択")
+        self.item_combo.currentTextChanged.connect(lambda _=None: self._recalculate_stats_from_species())
         basic_form.addRow("持ち物:", self.item_combo)
 
         self.terastal_combo = QComboBox()
@@ -975,8 +976,13 @@ class PokemonEditDialog(QDialog):
         )
         fill_stats_from_species(temp, species)
 
+        scarf = self.item_combo.current_text_stripped() == "こだわりスカーフ"
         for key, lbl_text in _STAT_LABELS.items():
-            self._stat_val_labels[key].setText("{}({})".format(lbl_text, getattr(temp, key)))
+            val = getattr(temp, key)
+            if key == "speed" and scarf:
+                self._stat_val_labels[key].setText("{}({}×1.5)".format(lbl_text, val))
+            else:
+                self._stat_val_labels[key].setText("{}({})".format(lbl_text, val))
 
     def _move_button_style(self, move_name: str) -> str:
         move = db.get_move_by_name_ja(move_name)
