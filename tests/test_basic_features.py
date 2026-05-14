@@ -560,6 +560,86 @@ class TestSmogonDamageCalc:
         assert move_d["name"] != ""
 
 
+class TestMegaSpeedResolution:
+    def test_resolve_species_prefers_missing_mega_stats_before_species_id(self) -> None:
+        from src.ui.damage_panel_species import resolve_species
+
+        base_species = SpeciesInfo(
+            species_id=149,
+            name_ja="カイリュー",
+            name_en="dragonite",
+            type1="dragon",
+            type2="flying",
+            base_hp=91,
+            base_attack=134,
+            base_defense=95,
+            base_sp_attack=100,
+            base_sp_defense=100,
+            base_speed=80,
+            weight_kg=210.0,
+        )
+        pokemon = PokemonInstance(
+            species_id=149,
+            name_ja="メガカイリュー",
+            name_en="dragonite-mega",
+        )
+
+        def species_by_name(name: str) -> SpeciesInfo | None:
+            return base_species if name == "カイリュー" else None
+
+        with (
+            patch("src.data.database.get_species_by_name_ja", side_effect=species_by_name),
+            patch("src.data.database.get_species_by_id", return_value=base_species),
+            patch("src.ui.damage_panel_species.species_from_name_en", return_value=None),
+        ):
+            resolved = resolve_species(pokemon)
+
+        assert resolved is not None
+        assert resolved.name_ja == "メガカイリュー"
+        assert resolved.name_en == "dragonite-mega"
+        assert resolved.base_speed == 100
+
+    def test_speed_display_uses_resolved_mega_species(self) -> None:
+        from src.calc.calc_utils import calc_stat, get_nature_mult
+        from src.ui.damage_panel_panels import _raw_speed_for_display
+
+        mega_species = SpeciesInfo(
+            species_id=149,
+            name_ja="メガカイリュー",
+            name_en="dragonite-mega",
+            type1="dragon",
+            type2="flying",
+            base_hp=91,
+            base_attack=124,
+            base_defense=115,
+            base_sp_attack=145,
+            base_sp_defense=125,
+            base_speed=100,
+            weight_kg=290.0,
+        )
+        pokemon = PokemonInstance(
+            species_id=149,
+            name_ja="メガカイリュー",
+            name_en="dragonite-mega",
+            level=50,
+            nature="ようき",
+            ev_speed=252,
+            iv_speed=31,
+            speed=132,
+        )
+
+        with patch("src.ui.damage_panel_species.resolve_species", return_value=mega_species):
+            speed = _raw_speed_for_display(pokemon)
+
+        assert speed == calc_stat(
+            100,
+            31,
+            252,
+            level=50,
+            nature_mult=get_nature_mult("ようき", "speed"),
+        )
+
+
 # ─── ④ DamageCalcInputs (UIレス入力モデル) ──────────────────────────────────────
 
 class TestDamageCalcInputs:

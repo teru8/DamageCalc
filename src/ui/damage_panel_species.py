@@ -145,9 +145,6 @@ def resolve_species(
 
     species: SpeciesInfo | None = get_species_by_name_ja(name_ja) if name_ja else None
 
-    if species is None and pokemon and pokemon.species_id:
-        species = get_species_by_id(pokemon.species_id)
-
     if pokemon and pokemon.name_en:
         by_en = _resolve_by_name_en(pokemon, species)
         if by_en is not None:
@@ -155,6 +152,9 @@ def resolve_species(
 
     if species is None:
         species = _resolve_mega_by_name_ja(name_ja)
+
+    if species is None and pokemon and pokemon.species_id:
+        species = get_species_by_id(pokemon.species_id)
 
     if species is None and name_ja in _FLOETTE_ALIASES:
         species = get_species_by_name_ja("フラエッテ (えいえんのはな)") or get_species_by_name_ja("フラエッテ")

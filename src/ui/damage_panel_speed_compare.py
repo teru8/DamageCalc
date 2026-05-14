@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
 )
 
 from src.constants import NATURES_JA
-from src.models import PokemonInstance
+from src.models import PokemonInstance, SpeciesInfo
 from src.ui.ui_utils import sprite_pixmap_or_zukan
 
 _SPEED_RANK_MULT: dict[int, float] = {
@@ -507,19 +507,14 @@ def _base_speed(pokemon: PokemonInstance | None) -> int:
     return int(species.base_speed or 0) if species is not None else 0
 
 
-def _species_for(pokemon: PokemonInstance | None):
+def _species_for(pokemon: PokemonInstance | None) -> SpeciesInfo | None:
     if pokemon is None:
         return None
     try:
-        from src.data import database as db
+        from src.ui.damage_panel_species import resolve_species
     except ImportError:
         return None
-    species = None
-    if pokemon.species_id:
-        species = db.get_species_by_id(pokemon.species_id)
-    if species is None and pokemon.name_ja:
-        species = db.get_species_by_name_ja(pokemon.name_ja)
-    return species
+    return resolve_species(pokemon, pokemon.name_ja)
 
 
 def _effective_speed(

@@ -619,7 +619,79 @@ class DamagePanel(QWidget):
     def _refresh_speed_compare(self) -> None:
         if not hasattr(self, "_speed_compare"):
             return
-        self._speed_compare.set_parties(self._my_party, self._opp_party)
+
+        def _party_with_cached_forms(
+            party: list[PokemonInstance | None],
+            cache: dict,
+            active_side: str | None,
+            active_idx: int | None,
+            active_pokemon: PokemonInstance | None,
+            party_side: str,
+        ) -> list[PokemonInstance | None]:
+            result: list[PokemonInstance | None] = []
+            for idx, pokemon in enumerate((list(party) + [None] * 6)[:6]):
+                if pokemon is None:
+                    result.append(None)
+                    continue
+                if active_side == party_side and active_idx == idx and active_pokemon is not None:
+                    result.append(copy.deepcopy(active_pokemon))
+                    continue
+                norm = _normalize_form_name(pokemon.name_ja or "")
+                canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
+                cached = cache.get(canon)
+                form_name = (cached[0] if isinstance(cached, tuple) else cached) if cached else ""
+                result.append(_apply_form(pokemon, form_name) if form_name else pokemon)
+            return result
+
+        my_party = _party_with_cached_forms(
+            self._my_party,
+            (
+                self._my_side_form_cache
+                if self._party_source == "my"
+                else self._opponent_side_form_cache
+            ),
+            (
+                self._my_side_party_side
+                if self._party_source == "my"
+                else self._opponent_side_party_side
+            ),
+            (
+                self._my_side_party_idx
+                if self._party_source == "my"
+                else self._opponent_side_party_idx
+            ),
+            (
+                self._my_side_pokemon
+                if self._party_source == "my"
+                else self._opponent_side_pokemon
+            ),
+            "my",
+        )
+        opp_party = _party_with_cached_forms(
+            self._opp_party,
+            (
+                self._opponent_side_form_cache
+                if self._party_source == "my"
+                else self._my_side_form_cache
+            ),
+            (
+                self._opponent_side_party_side
+                if self._party_source == "my"
+                else self._my_side_party_side
+            ),
+            (
+                self._opponent_side_party_idx
+                if self._party_source == "my"
+                else self._my_side_party_idx
+            ),
+            (
+                self._opponent_side_pokemon
+                if self._party_source == "my"
+                else self._my_side_pokemon
+            ),
+            "opp",
+        )
+        self._speed_compare.set_parties(my_party, opp_party)
         if self._my_side_party_side in ("my", "opp") and self._my_side_party_idx is not None:
             self._speed_compare.set_active_rank(
                 self._my_side_party_side,

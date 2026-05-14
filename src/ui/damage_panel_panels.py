@@ -102,15 +102,11 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "", s_rank: int
 def _raw_speed_for_display(p: PokemonInstance) -> int:
     try:
         from src.calc.calc_utils import calc_stat, get_nature_mult
-        from src.data import database as db
+        from src.ui.damage_panel_species import resolve_species
     except ImportError:
         return _fallback_raw_speed_for_display(p)
 
-    species = None
-    if p.species_id:
-        species = db.get_species_by_id(p.species_id)
-    if species is None and p.name_ja:
-        species = db.get_species_by_name_ja(p.name_ja)
+    species = resolve_species(p, p.name_ja)
     if species is None:
         return _fallback_raw_speed_for_display(p)
     iv = p.iv_speed if p.iv_speed > 0 else 31
