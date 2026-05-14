@@ -10,8 +10,8 @@ class RuntimeCleanupManager:
 
     def disconnect_damage_panel_signals(self, window: Any) -> None:
         try:
-            window._damage_panel.attacker_changed.disconnect()
-            window._damage_panel.defender_changed.disconnect()
+            window._damage_panel.my_side_changed.disconnect()
+            window._damage_panel.opponent_side_changed.disconnect()
             window._damage_panel.registry_maybe_changed.disconnect()
             window._damage_panel.bridge_payload_logged.disconnect()
         except RuntimeError:

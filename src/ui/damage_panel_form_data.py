@@ -319,3 +319,4 @@ FORM_MISSING_MEGA_STATS: dict[str, tuple] = {
     "Zeraora-Mega":           ("zeraora-mega",            "electric","",         88,  157, 75,  147, 80,  153, 44.5),
     "Zygarde-Mega":           ("zygarde-mega",            "dragon",  "ground",   216, 70,  91,  216, 85,  100, 610.0),
 }
+

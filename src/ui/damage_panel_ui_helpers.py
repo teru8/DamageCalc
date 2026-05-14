@@ -40,3 +40,4 @@ def row_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet("color:#89b4fa;font-size:14px;font-weight:bold;")
     return lbl
+

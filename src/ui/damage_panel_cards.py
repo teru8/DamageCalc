@@ -59,7 +59,11 @@ class PokemonCard(QWidget):
         row1 = QHBoxLayout()
         row1.setSpacing(6)
         self._role_lbl = QLabel(role_text)
-        self._role_lbl.setStyleSheet(f"color:{role_color};font-size:12px;font-weight:bold;")
+        self._role_lbl.setStyleSheet(
+            "font-size:12px;font-weight:bold;padding:1px 6px;border-radius:9px;"
+            f"color:{role_color};border:1px solid {role_color};background:#181825;"
+        )
+        self._role_lbl.setAlignment(Qt.AlignCenter)
         row1.addWidget(self._role_lbl)
         self._name_lbl = QLabel("（未設定）")
         self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
@@ -196,3 +200,4 @@ class DefenderCard(PokemonCard):
     def __init__(self, parent=None):
         super().__init__("相手", "#89B4FA", parent)
         self.set_transform_button_enabled(True)
+

@@ -77,7 +77,8 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "", s_rank: int
     a_val = int(p.attack * 2) if a_huge else p.attack
     s_rank_mult = _RANK_MULT_TABLE.get(max(-6, min(6, s_rank)), 1.0)
     s_total_mult = s_mult * s_rank_mult
-    s_val = int(p.speed * s_total_mult) if s_total_mult != 1.0 else p.speed
+    raw_speed = _raw_speed_for_display(p)
+    s_val = int(raw_speed * s_total_mult) if s_total_mult != 1.0 else raw_speed
     pairs = (
         ("_stat_lbl_h", "H", p.hp or p.max_hp or "---", False),
         ("_stat_lbl_a", "A", a_val, a_huge),
@@ -96,6 +97,37 @@ def _apply_stat_labels(panel, p: PokemonInstance, weather: str = "", s_rank: int
             lbl.setStyleSheet(_STAT_LBL_REDUCE)
         else:
             lbl.setStyleSheet(_STAT_LBL_NEUTRAL)
+
+
+def _raw_speed_for_display(p: PokemonInstance) -> int:
+    try:
+        from src.calc.calc_utils import calc_stat, get_nature_mult
+        from src.data import database as db
+    except ImportError:
+        return _fallback_raw_speed_for_display(p)
+
+    species = None
+    if p.species_id:
+        species = db.get_species_by_id(p.species_id)
+    if species is None and p.name_ja:
+        species = db.get_species_by_name_ja(p.name_ja)
+    if species is None:
+        return _fallback_raw_speed_for_display(p)
+    iv = p.iv_speed if p.iv_speed > 0 else 31
+    return calc_stat(
+        species.base_speed,
+        iv,
+        p.ev_speed or 0,
+        level=p.level or 50,
+        nature_mult=get_nature_mult(p.nature or "まじめ", "speed"),
+    )
+
+
+def _fallback_raw_speed_for_display(p: PokemonInstance) -> int:
+    speed = max(0, int(p.speed or 0))
+    if (p.item or "").strip() == "こだわりスカーフ" and speed > 0:
+        return int(speed / 1.5)
+    return speed
 
 def _make_rank_row(label_text: str, adj_cb):
     """Build one rank row (label, −, value, +). Returns (layout, value_label)."""
@@ -229,16 +261,23 @@ class _AttackerPanel(QWidget):
         self._tera_visible = False
         self._actions_visible = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(6, 6, 0, 6)
         layout.setSpacing(6)
 
-        ttl = QLabel("自分のポケモン")
-        ttl.setStyleSheet("font-size:15px;font-weight:bold;color:#89b4fa;")
-        layout.addWidget(ttl)
-
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        self._role_lbl = QLabel("自分")
+        self._role_lbl.setStyleSheet(
+            "font-size:12px;font-weight:bold;padding:1px 6px;border-radius:9px;"
+            "color:#F38BA8;border:1px solid #F38BA8;background:#181825;"
+        )
+        self._role_lbl.setAlignment(Qt.AlignCenter)
+        name_row.addWidget(self._role_lbl)
         self._name_lbl = QLabel("（未設定）")
         self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
-        layout.addWidget(self._name_lbl)
+        name_row.addWidget(self._name_lbl, 1)
+        layout.addLayout(name_row)
 
         self._tera_wrap = QWidget()
         tera_row = QHBoxLayout(self._tera_wrap)
@@ -262,15 +301,19 @@ class _AttackerPanel(QWidget):
 
         _install_rank_section(self, layout)
 
-        layout.addWidget(_sep())
-
-        # EV slider collapsible section
+        # EV slider collapsible section (compact: separator + toggle row)
+        ev_toggle_wrap = QWidget()
+        ev_toggle_wrap_layout = QVBoxLayout(ev_toggle_wrap)
+        ev_toggle_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        ev_toggle_wrap_layout.setSpacing(2)
+        ev_toggle_wrap_layout.addWidget(_sep())
         ev_toggle_row = QHBoxLayout()
         ev_toggle_row.setContentsMargins(0, 0, 0, 0)
         ev_toggle_row.setSpacing(4)
         self._ev_toggle_btn = QPushButton("▷ 努力値/性格")
         self._ev_toggle_btn.setCheckable(True)
         self._ev_toggle_btn.setChecked(False)
+        self._ev_toggle_btn.setFixedHeight(22)
         self._ev_toggle_btn.setStyleSheet(
             "QPushButton{background:transparent;border:none;color:#89b4fa;"
             "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
@@ -279,7 +322,8 @@ class _AttackerPanel(QWidget):
         self._ev_toggle_btn.clicked.connect(lambda _: self._toggle_ev_section())
         ev_toggle_row.addWidget(self._ev_toggle_btn)
         ev_toggle_row.addStretch()
-        layout.addLayout(ev_toggle_row)
+        ev_toggle_wrap_layout.addLayout(ev_toggle_row)
+        layout.addWidget(ev_toggle_wrap)
 
         self._ev_section = QWidget()
         self._ev_section.setVisible(False)
@@ -717,16 +761,23 @@ class _DefenderPanel(QWidget):
         self._tera_visible = False
         self._actions_visible = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(0, 6, 6, 6)
         layout.setSpacing(6)
 
-        ttl = QLabel("相手のポケモン")
-        ttl.setStyleSheet("font-size:15px;font-weight:bold;color:#89b4fa;")
-        layout.addWidget(ttl)
-
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        self._role_lbl = QLabel("相手")
+        self._role_lbl.setStyleSheet(
+            "font-size:12px;font-weight:bold;padding:1px 6px;border-radius:9px;"
+            "color:#89B4FA;border:1px solid #89B4FA;background:#181825;"
+        )
+        self._role_lbl.setAlignment(Qt.AlignCenter)
+        name_row.addWidget(self._role_lbl)
         self._name_lbl = QLabel("（未設定）")
         self._name_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#cdd6f4;background:#181825;border:1px solid #45475a;border-radius:4px;padding:4px;")
-        layout.addWidget(self._name_lbl)
+        name_row.addWidget(self._name_lbl, 1)
+        layout.addLayout(name_row)
 
         self._tera_wrap = QWidget()
         tera_row = QHBoxLayout(self._tera_wrap)
@@ -749,15 +800,20 @@ class _DefenderPanel(QWidget):
         self._tera_wrap.setVisible(False)
 
         _install_rank_section(self, layout)
-        layout.addWidget(_sep())
 
-        # EV slider collapsible section
+        # EV slider collapsible section (compact: separator + toggle row)
+        ev_toggle_wrap = QWidget()
+        ev_toggle_wrap_layout = QVBoxLayout(ev_toggle_wrap)
+        ev_toggle_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        ev_toggle_wrap_layout.setSpacing(2)
+        ev_toggle_wrap_layout.addWidget(_sep())
         ev_toggle_row = QHBoxLayout()
         ev_toggle_row.setContentsMargins(0, 0, 0, 0)
         ev_toggle_row.setSpacing(4)
         self._ev_toggle_btn = QPushButton("▷ 努力値/性格")
         self._ev_toggle_btn.setCheckable(True)
         self._ev_toggle_btn.setChecked(False)
+        self._ev_toggle_btn.setFixedHeight(22)
         self._ev_toggle_btn.setStyleSheet(
             "QPushButton{background:transparent;border:none;color:#89b4fa;"
             "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
@@ -766,7 +822,8 @@ class _DefenderPanel(QWidget):
         self._ev_toggle_btn.clicked.connect(lambda _: self._toggle_ev_section())
         ev_toggle_row.addWidget(self._ev_toggle_btn)
         ev_toggle_row.addStretch()
-        layout.addLayout(ev_toggle_row)
+        ev_toggle_wrap_layout.addLayout(ev_toggle_row)
+        layout.addWidget(ev_toggle_wrap)
 
         self._ev_section = QWidget()
         self._ev_section.setVisible(False)
@@ -1248,4 +1305,5 @@ class _DefenderPanel(QWidget):
 
     def _emit(self) -> None:
         self.changed.emit()
+
 

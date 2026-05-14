@@ -470,3 +470,4 @@ class MoveSection(QWidget):
         self._eff_lbl.setText("等倍")
         self._eff_lbl.setStyleSheet("font-size:14px;color:#a6adc8;font-weight:bold;")
 
+

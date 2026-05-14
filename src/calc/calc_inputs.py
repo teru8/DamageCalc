@@ -11,8 +11,8 @@ from src.models import PokemonInstance
 
 
 @dataclasses.dataclass(frozen=True)
-class AttackerCalcConfig:
-    """All per-attacker inputs resolved from widget states."""
+class MySideCalcConfig:
+    """All per-my-side inputs resolved from widget states."""
 
     pokemon: PokemonInstance
     ev_hp: int = 0
@@ -46,8 +46,8 @@ class AttackerCalcConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class DefenderCalcConfig:
-    """All per-defender inputs resolved from widget states."""
+class OpponentSideCalcConfig:
+    """All per-opponent-side inputs resolved from widget states."""
 
     pokemon: PokemonInstance | None
     species_name: str = ""
@@ -106,7 +106,7 @@ class DamageCalcInputs:
     or build it directly in tests without any widget dependency.
     """
 
-    attacker: AttackerCalcConfig
-    defender: DefenderCalcConfig
+    my_side: MySideCalcConfig
+    opponent_side: OpponentSideCalcConfig
     field: FieldCalcConfig
     show_bulk_rows: bool = True

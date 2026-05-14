@@ -1163,15 +1163,31 @@ class PokemonEditDialog(QDialog):
         pokemon.terastal_type = str(self.terastal_combo.currentData() or "normal")
         pokemon.nature = self._current_nature
 
+        from src.calc.calc_utils import fill_stats_from_species
+
+        raw_stats = PokemonInstance(
+            species_id=species.species_id,
+            name_ja=display_name,
+            name_en=effective_species.name_en or species.name_en,
+            types=selected_types,
+            weight_kg=(
+                effective_species.weight_kg
+                if effective_species.weight_kg > 0
+                else species.weight_kg
+            ),
+            nature=self._current_nature,
+            ev_hp=self._ev_sliders["hp"].value() * 8,
+            ev_attack=self._ev_sliders["attack"].value() * 8,
+            ev_defense=self._ev_sliders["defense"].value() * 8,
+            ev_sp_attack=self._ev_sliders["sp_attack"].value() * 8,
+            ev_sp_defense=self._ev_sliders["sp_defense"].value() * 8,
+            ev_speed=self._ev_sliders["speed"].value() * 8,
+        )
+        fill_stats_from_species(raw_stats, effective_species)
         for key in self._ev_sliders:
-            lbl_text = self._stat_val_labels[key].text()
-            # "HP(207)" —
-            try:
-                stat_val = int(lbl_text.split("(")[-1].rstrip(")"))
-            except (ValueError, IndexError):
-                stat_val = 0
-            setattr(pokemon, key, stat_val)
-            setattr(pokemon, "ev_{}".format(key), self._ev_sliders[key].value() * 8)
+            setattr(pokemon, key, getattr(raw_stats, key))
+            ev_key = "ev_{}".format(key)
+            setattr(pokemon, ev_key, getattr(raw_stats, ev_key))
 
         pokemon.max_hp = pokemon.hp
         pokemon.current_hp = pokemon.hp

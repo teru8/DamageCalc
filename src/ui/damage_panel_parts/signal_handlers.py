@@ -77,18 +77,18 @@ def _edit_party_slot(self, side: str, idx: int) -> None:
 
     # , atk/def (_persist_party_member_edits )
     if self._party_source == side:
-        self._atk_party_side = side
-        self._atk_party_idx = idx
-        self._atk = copy.deepcopy(updated)
-        self._atk_panel.set_pokemon(self._atk)
-        self.attacker_changed.emit(self._atk)
+        self._my_side_party_side = side
+        self._my_side_party_idx = idx
+        self._my_side_pokemon = copy.deepcopy(updated)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
+        self.my_side_changed.emit(self._my_side_pokemon)
     else:
-        self._def_party_side = side
-        self._def_party_idx = idx
-        self._def_custom = copy.deepcopy(updated)
-        self._def_species_name = self._def_custom.name_ja or ""
-        self._def_panel.set_pokemon(self._def_custom)
-        self.defender_changed.emit(self._def_custom)
+        self._opponent_side_party_side = side
+        self._opponent_side_party_idx = idx
+        self._opponent_side_pokemon = copy.deepcopy(updated)
+        self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
 
     self.registry_maybe_changed.emit()
     self._refresh_party_slots()
@@ -128,32 +128,32 @@ def _add_party_slot(self, side: str, idx: int) -> None:
         self._on_opp_party_slot_clicked(idx)
 
 
-def _on_atk_panel_changed(self) -> None:
+def _on_my_side_panel_changed(self) -> None:
     self._persist_party_member_edits()
     self._refresh_party_slots()
     self.recalculate()
 
 
-def _on_def_panel_changed(self) -> None:
+def _on_opponent_side_panel_changed(self) -> None:
     self._persist_party_member_edits()
     self._refresh_party_slots()
     self.recalculate()
 
 
 def _edit_attacker(self) -> None:
-    dlg = open_pokemon_edit_dialog(self._atk, self, save_to_db=False)
+    dlg = open_pokemon_edit_dialog(self._my_side_pokemon, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
         if updated:
-            self._atk = copy.deepcopy(updated)
-            if self._atk_party_side is not None and self._atk_party_idx is not None:
-                party = self._my_party if self._atk_party_side == "my" else self._opp_party
-                if 0 <= self._atk_party_idx < len(party):
-                    party[self._atk_party_idx] = copy.deepcopy(updated)
-            self._atk_panel.set_pokemon(self._atk)
+            self._my_side_pokemon = copy.deepcopy(updated)
+            if self._my_side_party_side is not None and self._my_side_party_idx is not None:
+                party = self._my_party if self._my_side_party_side == "my" else self._opp_party
+                if 0 <= self._my_side_party_idx < len(party):
+                    party[self._my_side_party_idx] = copy.deepcopy(updated)
+            self._my_side_panel.set_pokemon(self._my_side_pokemon)
             self.registry_maybe_changed.emit()
             self._refresh_party_slots()
-            self.attacker_changed.emit(self._atk)
+            self.my_side_changed.emit(self._my_side_pokemon)
             self.recalculate()
     elif dlg.box_select_requested():
         QTimer.singleShot(0, self._change_attacker)
@@ -164,26 +164,26 @@ def _new_attacker(self) -> None:
     if dlg.exec_():
         updated = dlg.get_pokemon()
         if updated:
-            self._atk = copy.deepcopy(updated)
-            self._atk_party_side = None
-            self._atk_party_idx = None
-            self._atk_panel.set_pokemon(self._atk)
+            self._my_side_pokemon = copy.deepcopy(updated)
+            self._my_side_party_side = None
+            self._my_side_party_idx = None
+            self._my_side_panel.set_pokemon(self._my_side_pokemon)
             self.registry_maybe_changed.emit()
             self._refresh_party_slots()
-            self.attacker_changed.emit(self._atk)
+            self.my_side_changed.emit(self._my_side_pokemon)
             self.recalculate()
 
 
 def _clear_attacker(self) -> None:
-    self._atk_transform_origin = None
-    if hasattr(self, "_atk_card"):
-        self._atk_card.set_transformed(False)
-    self._atk = None
-    self._atk_party_side = None
-    self._atk_party_idx = None
-    self._atk_panel.set_pokemon(None)
+    self._my_side_transform_origin = None
+    if hasattr(self, "_my_side_card"):
+        self._my_side_card.set_transformed(False)
+    self._my_side_pokemon = None
+    self._my_side_party_side = None
+    self._my_side_party_idx = None
+    self._my_side_panel.set_pokemon(None)
     self._refresh_party_slots()
-    self.attacker_changed.emit(None)
+    self.my_side_changed.emit(None)
     self.recalculate()
 
 
@@ -194,38 +194,38 @@ def _change_attacker(self) -> None:
         return
     selected_pokemon = dlg.selected_pokemon()
     if selected_pokemon:
-        self._atk = copy.deepcopy(selected_pokemon)
-        self._atk_party_side = None
-        self._atk_party_idx = None
-        self._atk_panel.set_pokemon(self._atk)
+        self._my_side_pokemon = copy.deepcopy(selected_pokemon)
+        self._my_side_party_side = None
+        self._my_side_party_idx = None
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
         self._refresh_party_slots()
-        self.attacker_changed.emit(self._atk)
+        self.my_side_changed.emit(self._my_side_pokemon)
         self.recalculate()
 
 
 def _edit_defender(self) -> None:
-    dlg = open_pokemon_edit_dialog(self._def_custom, self, save_to_db=False)
+    dlg = open_pokemon_edit_dialog(self._opponent_side_pokemon, self, save_to_db=False)
     if dlg.exec_():
         updated = dlg.get_pokemon()
         if updated:
-            self._def_custom = copy.deepcopy(updated)
-            self._def_species_name = updated.name_ja or ""
-            if self._def_party_side is not None and self._def_party_idx is not None:
-                party = self._my_party if self._def_party_side == "my" else self._opp_party
-                while len(party) <= self._def_party_idx:
+            self._opponent_side_pokemon = copy.deepcopy(updated)
+            self._opponent_side_species_name = updated.name_ja or ""
+            if self._opponent_side_party_side is not None and self._opponent_side_party_idx is not None:
+                party = self._my_party if self._opponent_side_party_side == "my" else self._opp_party
+                while len(party) <= self._opponent_side_party_idx:
                     party.append(None)
-                party[self._def_party_idx] = copy.deepcopy(self._def_custom)
+                party[self._opponent_side_party_idx] = copy.deepcopy(self._opponent_side_pokemon)
             else:
                 if self._opp_party:
-                    self._opp_party[0] = copy.deepcopy(self._def_custom)
+                    self._opp_party[0] = copy.deepcopy(self._opponent_side_pokemon)
                 else:
-                    self._opp_party = [copy.deepcopy(self._def_custom)]
-                self._def_party_side = "opp"
-                self._def_party_idx = 0
-            self._def_panel.set_pokemon(self._def_custom)
+                    self._opp_party = [copy.deepcopy(self._opponent_side_pokemon)]
+                self._opponent_side_party_side = "opp"
+                self._opponent_side_party_idx = 0
+            self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
             self.registry_maybe_changed.emit()
             self._refresh_party_slots()
-            self.defender_changed.emit(self._def_custom)
+            self.opponent_side_changed.emit(self._opponent_side_pokemon)
             self.recalculate()
     elif dlg.box_select_requested():
         QTimer.singleShot(0, self._change_defender)
@@ -236,32 +236,32 @@ def _new_defender(self) -> None:
     if dlg.exec_():
         updated = dlg.get_pokemon()
         if updated:
-            self._def_custom = copy.deepcopy(updated)
-            self._def_species_name = updated.name_ja or ""
+            self._opponent_side_pokemon = copy.deepcopy(updated)
+            self._opponent_side_species_name = updated.name_ja or ""
             if self._opp_party:
-                self._opp_party[0] = copy.deepcopy(self._def_custom)
+                self._opp_party[0] = copy.deepcopy(self._opponent_side_pokemon)
             else:
-                self._opp_party = [copy.deepcopy(self._def_custom)]
-            self._def_party_side = "opp"
-            self._def_party_idx = 0
-            self._def_panel.set_pokemon(self._def_custom)
+                self._opp_party = [copy.deepcopy(self._opponent_side_pokemon)]
+            self._opponent_side_party_side = "opp"
+            self._opponent_side_party_idx = 0
+            self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
             self.registry_maybe_changed.emit()
             self._refresh_party_slots()
-            self.defender_changed.emit(self._def_custom)
+            self.opponent_side_changed.emit(self._opponent_side_pokemon)
             self.recalculate()
 
 
 def _clear_defender(self) -> None:
-    self._def_transform_origin = None
-    if hasattr(self, "_def_card"):
-        self._def_card.set_transformed(False)
-    self._def_custom = None
-    self._def_species_name = ""
-    self._def_party_side = None
-    self._def_party_idx = None
-    self._def_panel.set_pokemon(None)
+    self._opponent_side_transform_origin = None
+    if hasattr(self, "_opponent_side_card"):
+        self._opponent_side_card.set_transformed(False)
+    self._opponent_side_pokemon = None
+    self._opponent_side_species_name = ""
+    self._opponent_side_party_side = None
+    self._opponent_side_party_idx = None
+    self._opponent_side_panel.set_pokemon(None)
     self._refresh_party_slots()
-    self.defender_changed.emit(None)
+    self.opponent_side_changed.emit(None)
     self.recalculate()
 
 
@@ -272,17 +272,17 @@ def _change_defender(self) -> None:
         return
     p = dlg.selected_pokemon()
     if p:
-        self._def_custom = copy.deepcopy(p)
-        self._def_species_name = self._def_custom.name_ja or ""
+        self._opponent_side_pokemon = copy.deepcopy(p)
+        self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
         if self._opp_party:
-            self._opp_party[0] = copy.deepcopy(self._def_custom)
+            self._opp_party[0] = copy.deepcopy(self._opponent_side_pokemon)
         else:
-            self._opp_party = [copy.deepcopy(self._def_custom)]
-        self._def_party_side = "opp"
-        self._def_party_idx = 0
-        self._def_panel.set_pokemon(self._def_custom)
+            self._opp_party = [copy.deepcopy(self._opponent_side_pokemon)]
+        self._opponent_side_party_side = "opp"
+        self._opponent_side_party_idx = 0
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
         self._refresh_party_slots()
-        self.defender_changed.emit(self._def_custom)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self.recalculate()
 
 
@@ -306,73 +306,73 @@ def _box_select_into_slot(self, side: str, idx: int) -> None:
 
 
 def _change_move(self, slot: int) -> None:
-    if self._atk is None:
+    if self._my_side_pokemon is None:
         return
     from src.ui.pokemon_edit_dialog import MoveSelectDialog
     from src.data.database import get_species_by_id, get_species_by_name_ja
-    species = get_species_by_id(self._atk.species_id) if self._atk.species_id else None
-    if species is None and self._atk.name_ja:
-        species = get_species_by_name_ja(self._atk.name_ja)
-    current_moves = (self._atk.moves + ["", "", "", ""])[:4]
+    species = get_species_by_id(self._my_side_pokemon.species_id) if self._my_side_pokemon.species_id else None
+    if species is None and self._my_side_pokemon.name_ja:
+        species = get_species_by_name_ja(self._my_side_pokemon.name_ja)
+    current_moves = (self._my_side_pokemon.moves + ["", "", "", ""])[:4]
     original_move = current_moves[slot]
     current_moves[slot] = ""
     dlg = MoveSelectDialog(
         species.species_id if species else None,
-        self._atk.name_ja or "",
+        self._my_side_pokemon.name_ja or "",
         original_move,
         self,
-        usage_name=self._atk.usage_name or self._atk.name_ja or "",
+        usage_name=self._my_side_pokemon.usage_name or self._my_side_pokemon.name_ja or "",
         current_moves=current_moves,
     )
     if dlg.exec_():
-        self._atk.moves = dlg.selected_moves()
+        self._my_side_pokemon.moves = dlg.selected_moves()
         self._persist_party_member_edits()
-        self.attacker_changed.emit(self._atk)
+        self.my_side_changed.emit(self._my_side_pokemon)
         self.recalculate()
 
 
 def _change_opp_move(self, slot: int) -> None:
-    if self._def_custom is None:
+    if self._opponent_side_pokemon is None:
         return
     from src.ui.pokemon_edit_dialog import MoveSelectDialog
     from src.data.database import get_species_by_id, get_species_by_name_ja
-    species = get_species_by_id(self._def_custom.species_id) if self._def_custom.species_id else None
-    if species is None and self._def_custom.name_ja:
-        species = get_species_by_name_ja(self._def_custom.name_ja)
-    current_moves = (self._def_custom.moves + ["", "", "", ""])[:4]
+    species = get_species_by_id(self._opponent_side_pokemon.species_id) if self._opponent_side_pokemon.species_id else None
+    if species is None and self._opponent_side_pokemon.name_ja:
+        species = get_species_by_name_ja(self._opponent_side_pokemon.name_ja)
+    current_moves = (self._opponent_side_pokemon.moves + ["", "", "", ""])[:4]
     original_move = current_moves[slot]
     current_moves[slot] = ""
     dlg = MoveSelectDialog(
         species.species_id if species else None,
-        self._def_custom.name_ja or "",
+        self._opponent_side_pokemon.name_ja or "",
         original_move,
         self,
-        usage_name=self._def_custom.usage_name or self._def_custom.name_ja or "",
+        usage_name=self._opponent_side_pokemon.usage_name or self._opponent_side_pokemon.name_ja or "",
         current_moves=current_moves,
     )
     if dlg.exec_():
-        self._def_custom.moves = dlg.selected_moves()
+        self._opponent_side_pokemon.moves = dlg.selected_moves()
         self._persist_party_member_edits()
-        self.defender_changed.emit(self._def_custom)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self.recalculate()
 
 
 def _swap_atk_def(self) -> None:
-    if self._def_custom is None:
+    if self._opponent_side_pokemon is None:
         return
-    old_atk = self._atk
-    self._atk = copy.deepcopy(self._def_custom)
-    self._def_custom = copy.deepcopy(old_atk) if old_atk else None
-    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
+    old_atk = self._my_side_pokemon
+    self._my_side_pokemon = copy.deepcopy(self._opponent_side_pokemon)
+    self._opponent_side_pokemon = copy.deepcopy(old_atk) if old_atk else None
+    self._opponent_side_species_name = (self._opponent_side_pokemon.name_ja or "") if self._opponent_side_pokemon else ""
     self._party_source = "opp" if self._party_source == "my" else "my"
     self._refresh_bulk_rows_visibility()
-    self._atk_panel.set_pokemon(self._atk)
-    self._def_panel.set_pokemon(self._def_custom)
+    self._my_side_panel.set_pokemon(self._my_side_pokemon)
+    self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
     self._refresh_party_selector_labels()
     self._refresh_party_slots()
-    self.attacker_changed.emit(self._atk)
-    if self._def_custom:
-        self.defender_changed.emit(self._def_custom)
+    self.my_side_changed.emit(self._my_side_pokemon)
+    if self._opponent_side_pokemon:
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
     self.recalculate()
 
 
@@ -419,88 +419,88 @@ def _reset_conditions(self) -> None:
         if hasattr(self, btn_name):
             btn = getattr(self, btn_name)
             btn.setChecked(True)
-    self._atk_panel.reset_to_base()
-    self._def_panel.reset_to_base()
+    self._my_side_panel.reset_to_base()
+    self._opponent_side_panel.reset_to_base()
     self.recalculate()
 
 
 def _set_attacker_from_party(self, pokemon: PokemonInstance, source: str) -> None:
-    if getattr(self, "_atk_transform_origin", None) is not None:
-        self._atk_transform_origin = None
-        if hasattr(self, "_atk_card"):
-            self._atk_card.set_transformed(False)
-    self._atk = copy.deepcopy(pokemon)
+    if getattr(self, "_my_side_transform_origin", None) is not None:
+        self._my_side_transform_origin = None
+        if hasattr(self, "_my_side_card"):
+            self._my_side_card.set_transformed(False)
+    self._my_side_pokemon = copy.deepcopy(pokemon)
     self._party_source = source
     self._refresh_bulk_rows_visibility()
-    self._atk_panel.set_pokemon(self._atk)
+    self._my_side_panel.set_pokemon(self._my_side_pokemon)
     self._refresh_party_selector_labels()
-    self.attacker_changed.emit(self._atk)
+    self.my_side_changed.emit(self._my_side_pokemon)
 
 
 def _set_defender_from_party(self, pokemon: PokemonInstance) -> None:
-    if getattr(self, "_def_transform_origin", None) is not None:
-        self._def_transform_origin = None
-        if hasattr(self, "_def_card"):
-            self._def_card.set_transformed(False)
-    self._def_custom = copy.deepcopy(pokemon)
-    self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
-    self._def_panel.set_pokemon(self._def_custom)
-    self.defender_changed.emit(self._def_custom)
+    if getattr(self, "_opponent_side_transform_origin", None) is not None:
+        self._opponent_side_transform_origin = None
+        if hasattr(self, "_opponent_side_card"):
+            self._opponent_side_card.set_transformed(False)
+    self._opponent_side_pokemon = copy.deepcopy(pokemon)
+    self._opponent_side_species_name = (self._opponent_side_pokemon.name_ja or "") if self._opponent_side_pokemon else ""
+    self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+    self.opponent_side_changed.emit(self._opponent_side_pokemon)
 
 
 def _change_atk_ability(self) -> None:
-    if not self._atk:
+    if not self._my_side_pokemon:
         return
-    new_val = _pick_ability(self._atk, self)
+    new_val = _pick_ability(self._my_side_pokemon, self)
     if new_val is not None:
-        self._atk.ability = new_val
+        self._my_side_pokemon.ability = new_val
         self._persist_party_member_edits()
-        self._atk_panel.set_pokemon(self._atk)
-        self._atk_card.set_pokemon(self._atk)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
+        self._my_side_card.set_pokemon(self._my_side_pokemon)
         self._refresh_party_slots()
-        self.attacker_changed.emit(self._atk)
+        self.my_side_changed.emit(self._my_side_pokemon)
         self.recalculate()
 
 
 def _change_atk_item(self) -> None:
-    if not self._atk:
+    if not self._my_side_pokemon:
         return
-    new_val = _pick_item(self._atk, self)
+    new_val = _pick_item(self._my_side_pokemon, self)
     if new_val is not None:
-        self._atk.item = new_val
+        self._my_side_pokemon.item = new_val
         self._persist_party_member_edits()
-        self._atk_panel.set_pokemon(self._atk)
-        self._atk_card.set_pokemon(self._atk)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
+        self._my_side_card.set_pokemon(self._my_side_pokemon)
         self._refresh_party_slots()
-        self.attacker_changed.emit(self._atk)
+        self.my_side_changed.emit(self._my_side_pokemon)
         self.recalculate()
 
 
 def _change_def_ability(self) -> None:
-    if not self._def_custom:
+    if not self._opponent_side_pokemon:
         return
-    new_val = _pick_ability(self._def_custom, self)
+    new_val = _pick_ability(self._opponent_side_pokemon, self)
     if new_val is not None:
-        self._def_custom.ability = new_val
+        self._opponent_side_pokemon.ability = new_val
         self._persist_party_member_edits()
-        self._def_panel.set_pokemon(self._def_custom)
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
         self._refresh_defender_card()
         self._refresh_party_slots()
-        self.defender_changed.emit(self._def_custom)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self.recalculate()
 
 
 def _change_def_item(self) -> None:
-    if not self._def_custom:
+    if not self._opponent_side_pokemon:
         return
-    new_val = _pick_item(self._def_custom, self)
+    new_val = _pick_item(self._opponent_side_pokemon, self)
     if new_val is not None:
-        self._def_custom.item = new_val
+        self._opponent_side_pokemon.item = new_val
         self._persist_party_member_edits()
-        self._def_panel.set_pokemon(self._def_custom)
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
         self._refresh_defender_card()
         self._refresh_party_slots()
-        self.defender_changed.emit(self._def_custom)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self.recalculate()
 
 
@@ -538,48 +538,48 @@ def _build_transformed_atk(self, ditto: PokemonInstance, target: PokemonInstance
 
 
 def _atk_slot_key(self) -> tuple[str, int] | None:
-    if self._atk_party_side in ("my", "opp") and self._atk_party_idx is not None:
-        return (self._atk_party_side, self._atk_party_idx)
+    if self._my_side_party_side in ("my", "opp") and self._my_side_party_idx is not None:
+        return (self._my_side_party_side, self._my_side_party_idx)
     return None
 
 
 def _def_slot_key(self) -> tuple[str, int] | None:
-    if self._def_party_side in ("my", "opp") and self._def_party_idx is not None:
-        return (self._def_party_side, self._def_party_idx)
+    if self._opponent_side_party_side in ("my", "opp") and self._opponent_side_party_idx is not None:
+        return (self._opponent_side_party_side, self._opponent_side_party_idx)
     return None
 
 
 def _on_transform_atk(self) -> None:
-    origin = getattr(self, "_atk_transform_origin", None)
+    origin = getattr(self, "_my_side_transform_origin", None)
     if origin is not None:
         # Revert
-        self._atk = copy.deepcopy(origin)
-        self._atk_transform_origin = None
+        self._my_side_pokemon = copy.deepcopy(origin)
+        self._my_side_transform_origin = None
         key = _atk_slot_key(self)
         if key is not None:
-            self._atk_transform_slots.discard(key)
-        self._atk_card.set_transformed(False)
-        self._atk_card.set_pokemon(self._atk)
-        self._atk_panel.set_pokemon(self._atk)
+            self._my_side_transform_slots.discard(key)
+        self._my_side_card.set_transformed(False)
+        self._my_side_card.set_pokemon(self._my_side_pokemon)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
         self._refresh_party_slots()
-        self.attacker_changed.emit(self._atk)
+        self.my_side_changed.emit(self._my_side_pokemon)
         self.recalculate()
         return
-    if not self._atk or (self._atk.name_ja or "") != "メタモン":
+    if not self._my_side_pokemon or (self._my_side_pokemon.name_ja or "") != "メタモン":
         return
-    if not self._def_custom:
+    if not self._opponent_side_pokemon:
         return
-    self._atk_transform_origin = copy.deepcopy(self._atk)
+    self._my_side_transform_origin = copy.deepcopy(self._my_side_pokemon)
     key = _atk_slot_key(self)
     if key is not None:
-        self._atk_transform_slots.add(key)
-    self._atk = _build_transformed_atk(self, self._atk, self._def_custom)
-    self._atk_card.set_transformed(True)
-    self._atk_card.set_pokemon(self._atk)
-    self._atk_panel.set_pokemon(self._atk)
-    self._atk_panel._name_lbl.setText("メタモン")
+        self._my_side_transform_slots.add(key)
+    self._my_side_pokemon = _build_transformed_atk(self, self._my_side_pokemon, self._opponent_side_pokemon)
+    self._my_side_card.set_transformed(True)
+    self._my_side_card.set_pokemon(self._my_side_pokemon)
+    self._my_side_panel.set_pokemon(self._my_side_pokemon)
+    self._my_side_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
-    self.attacker_changed.emit(self._atk)
+    self.my_side_changed.emit(self._my_side_pokemon)
     self.recalculate()
 
 
@@ -615,70 +615,70 @@ def _build_transformed_def(self, ditto: PokemonInstance, target: PokemonInstance
 
 
 def _on_transform_def(self) -> None:
-    origin = getattr(self, "_def_transform_origin", None)
+    origin = getattr(self, "_opponent_side_transform_origin", None)
     if origin is not None:
-        self._def_custom = copy.deepcopy(origin)
-        self._def_transform_origin = None
+        self._opponent_side_pokemon = copy.deepcopy(origin)
+        self._opponent_side_transform_origin = None
         key = _def_slot_key(self)
         if key is not None:
-            self._def_transform_slots.discard(key)
-        self._def_species_name = (self._def_custom.name_ja or "") if self._def_custom else ""
-        self._def_card.set_transformed(False)
+            self._opponent_side_transform_slots.discard(key)
+        self._opponent_side_species_name = (self._opponent_side_pokemon.name_ja or "") if self._opponent_side_pokemon else ""
+        self._opponent_side_card.set_transformed(False)
         self._refresh_defender_card()
-        self._def_panel.set_pokemon(self._def_custom)
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
         self._refresh_party_slots()
-        self.defender_changed.emit(self._def_custom)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self.recalculate()
         return
-    if not self._def_custom or (self._def_custom.name_ja or "") != "メタモン":
+    if not self._opponent_side_pokemon or (self._opponent_side_pokemon.name_ja or "") != "メタモン":
         return
-    if not self._atk:
+    if not self._my_side_pokemon:
         return
-    self._def_transform_origin = copy.deepcopy(self._def_custom)
+    self._opponent_side_transform_origin = copy.deepcopy(self._opponent_side_pokemon)
     key = _def_slot_key(self)
     if key is not None:
-        self._def_transform_slots.add(key)
-    self._def_custom = _build_transformed_def(self, self._def_custom, self._atk)
-    self._def_species_name = self._def_custom.name_ja or ""
-    self._def_card.set_transformed(True)
+        self._opponent_side_transform_slots.add(key)
+    self._opponent_side_pokemon = _build_transformed_def(self, self._opponent_side_pokemon, self._my_side_pokemon)
+    self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+    self._opponent_side_card.set_transformed(True)
     self._refresh_defender_card()
-    self._def_panel.set_pokemon(self._def_custom)
-    self._def_panel._name_lbl.setText("メタモン")
+    self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+    self._opponent_side_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
-    self.defender_changed.emit(self._def_custom)
+    self.opponent_side_changed.emit(self._opponent_side_pokemon)
     self.recalculate()
 
 
 def _maybe_retransform_def(self) -> None:
-    origin = getattr(self, "_def_transform_origin", None)
-    if origin is None or not self._atk:
+    origin = getattr(self, "_opponent_side_transform_origin", None)
+    if origin is None or not self._my_side_pokemon:
         return
-    if (self._def_custom and self._def_custom.species_id == self._atk.species_id
-            and (self._def_custom.name_ja or "") == (self._atk.name_ja or "")):
+    if (self._opponent_side_pokemon and self._opponent_side_pokemon.species_id == self._my_side_pokemon.species_id
+            and (self._opponent_side_pokemon.name_ja or "") == (self._my_side_pokemon.name_ja or "")):
         return
-    self._def_custom = _build_transformed_def(self, origin, self._atk)
-    self._def_species_name = self._def_custom.name_ja or ""
-    self._def_card.set_transformed(True)
+    self._opponent_side_pokemon = _build_transformed_def(self, origin, self._my_side_pokemon)
+    self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+    self._opponent_side_card.set_transformed(True)
     self._refresh_defender_card()
-    self._def_panel.set_pokemon(self._def_custom)
-    self._def_panel._name_lbl.setText("メタモン")
+    self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+    self._opponent_side_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
 
 
 def _maybe_retransform_atk(self) -> None:
-    origin = getattr(self, "_atk_transform_origin", None)
-    if origin is None or not self._def_custom:
+    origin = getattr(self, "_my_side_transform_origin", None)
+    if origin is None or not self._opponent_side_pokemon:
         return
-    if (self._atk and self._atk.species_id == self._def_custom.species_id
-            and (self._atk.name_ja or "") == (self._def_custom.name_ja or "")):
+    if (self._my_side_pokemon and self._my_side_pokemon.species_id == self._opponent_side_pokemon.species_id
+            and (self._my_side_pokemon.name_ja or "") == (self._opponent_side_pokemon.name_ja or "")):
         return
-    self._atk = _build_transformed_atk(self, origin, self._def_custom)
-    self._atk_card.set_transformed(True)
-    self._atk_card.set_pokemon(self._atk)
-    self._atk_panel.set_pokemon(self._atk)
-    self._atk_panel._name_lbl.setText("メタモン")
+    self._my_side_pokemon = _build_transformed_atk(self, origin, self._opponent_side_pokemon)
+    self._my_side_card.set_transformed(True)
+    self._my_side_card.set_pokemon(self._my_side_pokemon)
+    self._my_side_panel.set_pokemon(self._my_side_pokemon)
+    self._my_side_panel._name_lbl.setText("メタモン")
     self._refresh_party_slots()
-    self.attacker_changed.emit(self._atk)
+    self.my_side_changed.emit(self._my_side_pokemon)
 
 
 def _on_form_change_atk(self) -> None:
@@ -700,9 +700,9 @@ def _on_form_change_atk(self) -> None:
             return candidates[0]
         return ranked[0] if ranked else ""
 
-    if not self._atk:
+    if not self._my_side_pokemon:
         return
-    key = _normalize_form_name(self._atk.name_ja)
+    key = _normalize_form_name(self._my_side_pokemon.name_ja)
     group = _FORM_NAME_TO_GROUP.get(key)
     if not group or len(group) < 2:
         return
@@ -710,21 +710,21 @@ def _on_form_change_atk(self) -> None:
     cur_idx = group.index(key) if key in group else 0
     next_name = group[(cur_idx + 1) % len(group)]
     if next_name == canon:
-        cached = self._atk_form_cache.pop(canon, None)
+        cached = self._my_side_form_cache.pop(canon, None)
         original_ability = cached[1] if isinstance(cached, tuple) else ""
         if not original_ability:
             # PT
-            original_ability = _fallback_original_ability(self._atk.ability, canon)
-        new_p = _apply_form(self._atk, next_name, original_ability=original_ability)
+            original_ability = _fallback_original_ability(self._my_side_pokemon.ability, canon)
+        new_p = _apply_form(self._my_side_pokemon, next_name, original_ability=original_ability)
     else:
-        existing = self._atk_form_cache.get(canon)
-        original_ability = existing[1] if isinstance(existing, tuple) else self._atk.ability
-        self._atk_form_cache[canon] = (next_name, original_ability)
-        new_p = _apply_form(self._atk, next_name)
-    self._atk = new_p
+        existing = self._my_side_form_cache.get(canon)
+        original_ability = existing[1] if isinstance(existing, tuple) else self._my_side_pokemon.ability
+        self._my_side_form_cache[canon] = (next_name, original_ability)
+        new_p = _apply_form(self._my_side_pokemon, next_name)
+    self._my_side_pokemon = new_p
     self._persist_party_member_edits()
-    self._atk_panel.set_pokemon(self._atk)
-    self.attacker_changed.emit(self._atk)
+    self._my_side_panel.set_pokemon(self._my_side_pokemon)
+    self.my_side_changed.emit(self._my_side_pokemon)
     self._refresh_defender_card()
     self._refresh_party_slots()
     self.recalculate()
@@ -749,9 +749,9 @@ def _on_form_change_def(self) -> None:
             return candidates[0]
         return ranked[0] if ranked else ""
 
-    if not self._def_custom:
+    if not self._opponent_side_pokemon:
         return
-    key = _normalize_form_name(self._def_custom.name_ja)
+    key = _normalize_form_name(self._opponent_side_pokemon.name_ja)
     group = _FORM_NAME_TO_GROUP.get(key)
     if not group or len(group) < 2:
         return
@@ -759,21 +759,21 @@ def _on_form_change_def(self) -> None:
     cur_idx = group.index(key) if key in group else 0
     next_name = group[(cur_idx + 1) % len(group)]
     if next_name == canon:
-        cached = self._def_form_cache.pop(canon, None)
+        cached = self._opponent_side_form_cache.pop(canon, None)
         original_ability = cached[1] if isinstance(cached, tuple) else ""
         if not original_ability:
-            original_ability = _fallback_original_ability(self._def_custom.ability, canon)
-        new_p = _apply_form(self._def_custom, next_name, original_ability=original_ability)
+            original_ability = _fallback_original_ability(self._opponent_side_pokemon.ability, canon)
+        new_p = _apply_form(self._opponent_side_pokemon, next_name, original_ability=original_ability)
     else:
-        existing = self._def_form_cache.get(canon)
-        original_ability = existing[1] if isinstance(existing, tuple) else self._def_custom.ability
-        self._def_form_cache[canon] = (next_name, original_ability)
-        new_p = _apply_form(self._def_custom, next_name)
-    self._def_custom = new_p
-    self._def_species_name = new_p.name_ja or ""
+        existing = self._opponent_side_form_cache.get(canon)
+        original_ability = existing[1] if isinstance(existing, tuple) else self._opponent_side_pokemon.ability
+        self._opponent_side_form_cache[canon] = (next_name, original_ability)
+        new_p = _apply_form(self._opponent_side_pokemon, next_name)
+    self._opponent_side_pokemon = new_p
+    self._opponent_side_species_name = new_p.name_ja or ""
     self._persist_party_member_edits()
-    self._def_panel.set_pokemon(self._def_custom)
-    self.defender_changed.emit(self._def_custom)
+    self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+    self.opponent_side_changed.emit(self._opponent_side_pokemon)
     self._refresh_defender_card()
     self._refresh_party_slots()
     self.recalculate()
@@ -783,31 +783,31 @@ def _restore_transform_for_active_slots(self) -> None:
     """Re-apply Ditto transform when the active attacker/defender slot was previously transformed."""
     atk_key = _atk_slot_key(self)
     if (atk_key is not None
-            and atk_key in self._atk_transform_slots
-            and self._atk_transform_origin is None
-            and self._atk and (self._atk.name_ja or "") == "メタモン"
-            and self._def_custom):
-        self._atk_transform_origin = copy.deepcopy(self._atk)
-        self._atk = _build_transformed_atk(self, self._atk, self._def_custom)
-        self._atk_card.set_transformed(True)
-        self._atk_card.set_pokemon(self._atk)
-        self._atk_panel.set_pokemon(self._atk)
-        self._atk_panel._name_lbl.setText("メタモン")
-        self.attacker_changed.emit(self._atk)
+            and atk_key in self._my_side_transform_slots
+            and self._my_side_transform_origin is None
+            and self._my_side_pokemon and (self._my_side_pokemon.name_ja or "") == "メタモン"
+            and self._opponent_side_pokemon):
+        self._my_side_transform_origin = copy.deepcopy(self._my_side_pokemon)
+        self._my_side_pokemon = _build_transformed_atk(self, self._my_side_pokemon, self._opponent_side_pokemon)
+        self._my_side_card.set_transformed(True)
+        self._my_side_card.set_pokemon(self._my_side_pokemon)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
+        self._my_side_panel._name_lbl.setText("メタモン")
+        self.my_side_changed.emit(self._my_side_pokemon)
     def_key = _def_slot_key(self)
     if (def_key is not None
-            and def_key in self._def_transform_slots
-            and self._def_transform_origin is None
-            and self._def_custom and (self._def_custom.name_ja or "") == "メタモン"
-            and self._atk):
-        self._def_transform_origin = copy.deepcopy(self._def_custom)
-        self._def_custom = _build_transformed_def(self, self._def_custom, self._atk)
-        self._def_species_name = self._def_custom.name_ja or ""
-        self._def_card.set_transformed(True)
+            and def_key in self._opponent_side_transform_slots
+            and self._opponent_side_transform_origin is None
+            and self._opponent_side_pokemon and (self._opponent_side_pokemon.name_ja or "") == "メタモン"
+            and self._my_side_pokemon):
+        self._opponent_side_transform_origin = copy.deepcopy(self._opponent_side_pokemon)
+        self._opponent_side_pokemon = _build_transformed_def(self, self._opponent_side_pokemon, self._my_side_pokemon)
+        self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+        self._opponent_side_card.set_transformed(True)
         self._refresh_defender_card()
-        self._def_panel.set_pokemon(self._def_custom)
-        self._def_panel._name_lbl.setText("メタモン")
-        self.defender_changed.emit(self._def_custom)
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+        self._opponent_side_panel._name_lbl.setText("メタモン")
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
 
 
 def _on_my_party_slot_clicked(self, idx: int) -> None:
@@ -816,30 +816,30 @@ def _on_my_party_slot_clicked(self, idx: int) -> None:
         return
     party_member = self._my_party[idx]
     if self._party_source == "my":
-        self._atk_party_side = "my"
-        self._atk_party_idx = idx
+        self._my_side_party_side = "my"
+        self._my_side_party_idx = idx
         self._set_attacker_from_party(party_member, source="my")
         norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
-        cached = self._atk_form_cache.get(canon)
+        cached = self._my_side_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
-            self._atk = _apply_form(self._atk, form_name)
-            self._atk_panel.set_pokemon(self._atk)
-            self.attacker_changed.emit(self._atk)
+            self._my_side_pokemon = _apply_form(self._my_side_pokemon, form_name)
+            self._my_side_panel.set_pokemon(self._my_side_pokemon)
+            self.my_side_changed.emit(self._my_side_pokemon)
     else:
-        self._def_party_side = "my"
-        self._def_party_idx = idx
+        self._opponent_side_party_side = "my"
+        self._opponent_side_party_idx = idx
         self._set_defender_from_party(party_member)
         norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
-        cached = self._def_form_cache.get(canon)
+        cached = self._opponent_side_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
-            self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja or ""
-            self._def_panel.set_pokemon(self._def_custom)
-            self.defender_changed.emit(self._def_custom)
+            self._opponent_side_pokemon = _apply_form(self._opponent_side_pokemon, form_name)
+            self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+            self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+            self.opponent_side_changed.emit(self._opponent_side_pokemon)
     _restore_transform_for_active_slots(self)
     self._refresh_party_slots()
     self.recalculate()
@@ -851,30 +851,30 @@ def _on_opp_party_slot_clicked(self, idx: int) -> None:
         return
     party_member = self._opp_party[idx]
     if self._party_source == "opp":
-        self._atk_party_side = "opp"
-        self._atk_party_idx = idx
+        self._my_side_party_side = "opp"
+        self._my_side_party_idx = idx
         self._set_attacker_from_party(party_member, source="opp")
         norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
-        cached = self._atk_form_cache.get(canon)
+        cached = self._my_side_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
-            self._atk = _apply_form(self._atk, form_name)
-            self._atk_panel.set_pokemon(self._atk)
-            self.attacker_changed.emit(self._atk)
+            self._my_side_pokemon = _apply_form(self._my_side_pokemon, form_name)
+            self._my_side_panel.set_pokemon(self._my_side_pokemon)
+            self.my_side_changed.emit(self._my_side_pokemon)
     else:
-        self._def_party_side = "opp"
-        self._def_party_idx = idx
+        self._opponent_side_party_side = "opp"
+        self._opponent_side_party_idx = idx
         self._set_defender_from_party(party_member)
         norm = _normalize_form_name(party_member.name_ja)
         canon = (_FORM_NAME_TO_GROUP.get(norm) or [norm])[0]
-        cached = self._def_form_cache.get(canon)
+        cached = self._opponent_side_form_cache.get(canon)
         if cached:
             form_name = cached[0] if isinstance(cached, tuple) else cached
-            self._def_custom = _apply_form(self._def_custom, form_name)
-            self._def_species_name = self._def_custom.name_ja or ""
-            self._def_panel.set_pokemon(self._def_custom)
-            self.defender_changed.emit(self._def_custom)
+            self._opponent_side_pokemon = _apply_form(self._opponent_side_pokemon, form_name)
+            self._opponent_side_species_name = self._opponent_side_pokemon.name_ja or ""
+            self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+            self.opponent_side_changed.emit(self._opponent_side_pokemon)
     _restore_transform_for_active_slots(self)
     self._refresh_party_slots()
     self.recalculate()
@@ -912,7 +912,7 @@ def _set_battle_format(self, mode: str) -> None:
 
 def _toggle_details(self, checked: bool) -> None:
     self._detail_container.setVisible(checked)
-    self._detail_toggle_btn.setText("詳細設定を隠す" if checked else "詳細設定を表示")
+    self._detail_toggle_btn.setText("▽ 詳細設定" if checked else "▷ 詳細設定")
     if checked:
         self.recalculate()
 
@@ -935,5 +935,7 @@ def _set_bulk_rows_visible(self, visible: bool, refresh: bool = True) -> None:
 
 def _on_bulk_toggle_clicked(self, checked: bool) -> None:
     self._set_bulk_rows_visible(bool(checked), refresh=True)
+
+
 
 

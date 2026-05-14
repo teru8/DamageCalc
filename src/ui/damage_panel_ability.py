@@ -115,3 +115,4 @@ def sanitize_form_ability(
             pokemon.ability = ability
             return
     pokemon.ability = candidates[0]
+

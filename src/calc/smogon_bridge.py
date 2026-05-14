@@ -427,10 +427,32 @@ class SmogonBridge:
 
     def calc(self, attacker_d: dict, defender_d: dict,
              move_d: dict, field_d: dict) -> tuple[int, int, bool]:
+        move_name = (move_d.get("name") or "").lower()
+        # Sanitize untranslated (non-ASCII) items: Smogon's calc fails on unknown
+        # items when it tries to look up mega-stone data. Drop them to "" except
+        # for Poltergeist on the defender, where we substitute Venusaurite so the
+        # move still detects "has item".
+        atk_item = attacker_d.get("item") or ""
+        if atk_item and not atk_item.isascii():
+            attacker_d = {**attacker_d, "item": ""}
+        def_item = defender_d.get("item") or ""
+        if def_item and not def_item.isascii():
+            if move_name == "poltergeist":
+                defender_d = {**defender_d, "item": "Venusaurite"}
+            else:
+                defender_d = {**defender_d, "item": ""}
         req = {"attacker": attacker_d, "defender": defender_d,
                "move": move_d, "field": field_d}
         try:
             res = self._send(req)
+            if res.get("error"):
+                logging.warning(
+                    "SmogonBridge error: %s | atk=%s def=%s move=%s item_atk=%s item_def=%s ability_atk=%s ability_def=%s",
+                    res.get("error"),
+                    attacker_d.get("species"), defender_d.get("species"), move_d.get("name"),
+                    attacker_d.get("item"), defender_d.get("item"),
+                    attacker_d.get("ability"), defender_d.get("ability"),
+                )
         except (
             AttributeError,
             BrokenPipeError,
@@ -440,7 +462,6 @@ class SmogonBridge:
             TypeError,
             ValueError,
         ) as e:
-            import logging
             logging.warning(
                 "SmogonBridge calc error (atk=%r def=%r move=%r): %s",
                 attacker_d.get("name"), defender_d.get("name"), move_d.get("name"),

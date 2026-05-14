@@ -133,3 +133,4 @@ def variable_power_options(move: MoveInfo) -> list[tuple[str, object]]:
         return discrete_options([10, 30, 50, 70, 90, 110, 150])
 
     return []
+

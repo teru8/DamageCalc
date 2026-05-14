@@ -5,7 +5,6 @@ import json
 import sys
 import time
 import traceback
-from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -54,7 +53,7 @@ _USAGE_SOURCES_FALLBACK = {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DamageCalc α — Pokemon Champions")
+        self.setWindowTitle("DamageCalc β — Pokemon Champions")
         self.setMinimumSize(_RIGHT_PANEL_MIN_WIDTH + _CAM_PANEL_WIDTH + _WINDOW_WIDTH_PADDING, 720)
 
         self._battle_state = BattleState()
@@ -86,7 +85,6 @@ class MainWindow(QMainWindow):
         self._auto_detect_pending = False
         self._auto_detect_cooldown_until = 0.0
         self._auto_detect_score_log_last = 0.0
-        self._auto_detect_debug_dump_last = 0.0
         self._damage_tera_visible = False
         self._detailed_log_enabled = False
         self._sample_party_pending = False
@@ -244,7 +242,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot(bool, str)
     def _on_scraper_done(self, ok: bool, msg: str) -> None:
         self._set_fetch_buttons_enabled(True)
-        self._refresh_usage_season_options(self._current_usage_season())
+        season = db.get_active_usage_season()
+        if ok:
+            self._save_settings(usage_season=season)
+        self._refresh_usage_season_options(season)
         self._refresh_data_status()
         self._status_bar.showMessage(msg)
         self._log(msg)
@@ -396,10 +397,6 @@ class MainWindow(QMainWindow):
     def _poll_opponent_party_auto_detect(self) -> None:
         from src.ui.main_window_handlers import _poll_opponent_party_auto_detect as _poll_opponent_party_auto_detect_fn
         return _poll_opponent_party_auto_detect_fn(self)
-
-    def _dump_auto_detect_debug_frame(self, frame) -> None:
-        from src.ui.main_window_handlers import _dump_auto_detect_debug_frame as _dump_auto_detect_debug_frame_fn
-        return _dump_auto_detect_debug_frame_fn(self, frame)
 
     def _toggle_live_battle_tracking(self, enabled: bool) -> None:
         from src.ui.main_window_handlers import _toggle_live_battle_tracking as _toggle_live_battle_tracking_fn

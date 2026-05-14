@@ -55,13 +55,19 @@ function buildPokemon(d) {
     status: STATUS_MAP[d.status || ''] || '',
   };
   if (d.ability)             opts.ability  = d.ability;
-  if (d.item)                opts.item     = d.item;
   if (d.teraType)            opts.teraType = d.teraType;
   if (d.curHP !== undefined) opts.curHP    = d.curHP;
   if (d.gender)              opts.gender   = d.gender;
   if (d.alliesFainted !== undefined) opts.alliesFainted = d.alliesFainted;
   if (d.abilityOn !== undefined) opts.abilityOn = !!d.abilityOn;
   if (d.boostedStat) opts.boostedStat = d.boostedStat;
+  if (d.item) {
+    try {
+      return new Pokemon(GEN, d.species, { ...opts, item: d.item });
+    } catch (e) {
+      // Unknown item (e.g. Champions custom): retry without item.
+    }
+  }
   return new Pokemon(GEN, d.species, opts);
 }
 

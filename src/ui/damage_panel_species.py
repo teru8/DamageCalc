@@ -165,3 +165,4 @@ def resolve_species(
             species = get_species_by_name_ja(base)
 
     return species
+

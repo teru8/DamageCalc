@@ -51,3 +51,4 @@ class PartySlot(QFrame):
             return
         self.clicked_signal.emit(self._idx)
         super().mousePressEvent(event)
+

@@ -124,3 +124,4 @@ def battle_stat_icon(kind: str, width: int = 60, height: int = 22) -> QPixmap:
 
     _ICON_CACHE[key] = pm
     return pm
+

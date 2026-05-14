@@ -75,8 +75,8 @@ class DamageCalculator:
         attacker_ability: str,
         defender_ability: str,
     ) -> DamageRuntimeContext:
-        attacker = self._inputs.attacker
-        defender = self._inputs.defender
+        attacker = self._inputs.my_side
+        defender = self._inputs.opponent_side
         field = self._inputs.field
 
         atk_weather = self._weather_for_attacker(field.weather, attacker_ability)
@@ -163,7 +163,7 @@ class DamageCalculator:
         )
         from src.constants import nature_ja_to_en
 
-        attacker = self._inputs.attacker
+        attacker = self._inputs.my_side
         ev_override = {
             "hp": attacker.ev_hp * 8,
             "atk": attacker.ev_attack * 8,
@@ -367,3 +367,4 @@ class DamageCalculator:
             atk_d = dict(atk_d)
             atk_d["status"] = ""
         return atk_d
+

@@ -207,3 +207,4 @@ def mega_form_for_stone(item: str, base_species_ja: str) -> str | None:
             if m.endswith("Ｙ") or m.endswith("Y"):
                 return m
     return megas[0]
+

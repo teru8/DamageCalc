@@ -288,3 +288,4 @@ class DmgRow(QWidget):
         self._detail_txt.setText(reason)
         self._detail_txt.setStyleSheet("font-size:14px;color:#f38ba8;font-weight:bold;")
         self._ko_txt.setText("")
+

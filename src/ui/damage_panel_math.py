@@ -78,3 +78,4 @@ def round1(value: float) -> float:
     if value >= 0:
         return math.floor(value * 10 + 0.5) / 10
     return math.ceil(value * 10 - 0.5) / 10
+

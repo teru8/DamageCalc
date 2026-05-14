@@ -89,33 +89,33 @@ def _show_pick_dialog(
 # ── Main DamagePanel ──────────────────────────────────────────────────────
 
 class DamagePanel(QWidget):
-    attacker_changed = pyqtSignal(object)   # emitted when attacker pokemon changes
-    defender_changed = pyqtSignal(object)   # emitted when defender pokemon changes
+    my_side_changed = pyqtSignal(object)  # emitted when my-side active pokemon changes
+    opponent_side_changed = pyqtSignal(object)  # emitted when opponent-side active pokemon changes
     registry_maybe_changed = pyqtSignal()
     bridge_payload_logged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._atk: PokemonInstance | None = None
-        self._def_custom: PokemonInstance | None = None   # registered / edited defender
-        self._def_species_name: str = ""
+        self._my_side_pokemon: PokemonInstance | None = None
+        self._opponent_side_pokemon: PokemonInstance | None = None   # registered / edited defender
+        self._opponent_side_species_name: str = ""
         self._my_party: list[PokemonInstance | None] = []
         self._opp_party: list[PokemonInstance | None] = []
         self._party_source = "my"
-        self._atk_party_side: str | None = None
-        self._atk_party_idx: int | None = None
-        self._def_party_side: str | None = None
-        self._def_party_idx: int | None = None
+        self._my_side_party_side: str | None = None
+        self._my_side_party_idx: int | None = None
+        self._opponent_side_party_side: str | None = None
+        self._opponent_side_party_idx: int | None = None
         self._show_bulk_rows = True
         self._is_recalculating = False
         self._move_cache: dict[str, MoveInfo] = {}
         self._display_to_move_slot = [0, 1, 2, 3]
-        self._atk_form_cache: dict[str, str] = {}
-        self._def_form_cache: dict[str, str] = {}
-        self._atk_transform_origin: PokemonInstance | None = None
-        self._def_transform_origin: PokemonInstance | None = None
-        self._atk_transform_slots: set[tuple[str, int]] = set()
-        self._def_transform_slots: set[tuple[str, int]] = set()
+        self._my_side_form_cache: dict[str, str] = {}
+        self._opponent_side_form_cache: dict[str, str] = {}
+        self._my_side_transform_origin: PokemonInstance | None = None
+        self._opponent_side_transform_origin: PokemonInstance | None = None
+        self._my_side_transform_slots: set[tuple[str, int]] = set()
+        self._opponent_side_transform_slots: set[tuple[str, int]] = set()
         self._protean_stab_toggle_initialized = False
         self._opp_protean_stab_toggle_initialized = False
         self.setStyleSheet(
@@ -126,8 +126,8 @@ class DamagePanel(QWidget):
             "QSpinBox{font-size:14px;}"
         )
         self._build_ui()
-        self.defender_changed.connect(lambda _=None: self._maybe_retransform_atk())
-        self.attacker_changed.connect(lambda _=None: self._maybe_retransform_def())
+        self.opponent_side_changed.connect(lambda _=None: self._maybe_retransform_atk())
+        self.my_side_changed.connect(lambda _=None: self._maybe_retransform_def())
 
     # ── UI construction ───────────────────────────────────────────────
 
@@ -149,12 +149,12 @@ class DamagePanel(QWidget):
         return build_content_fn(self)
 
     def set_my_pokemon(self, pokemon: PokemonInstance) -> None:
-        self._atk = copy.deepcopy(pokemon)
+        self._my_side_pokemon = copy.deepcopy(pokemon)
         self._party_source = "my"
-        self._atk_party_side = None
-        self._atk_party_idx = None
+        self._my_side_party_side = None
+        self._my_side_party_idx = None
         self._refresh_bulk_rows_visibility()
-        self._atk_panel.set_pokemon(self._atk)
+        self._my_side_panel.set_pokemon(self._my_side_pokemon)
         self._refresh_party_selector_labels()
         self._refresh_party_slots()
         self.recalculate()
@@ -203,15 +203,15 @@ class DamagePanel(QWidget):
         defender = active or next((member for member in self._opp_party if member), None)
         if not defender:
             return
-        self._def_custom = copy.deepcopy(defender)
-        self._def_species_name = defender.name_ja or ""
-        self._def_party_side = "opp"
-        self._def_party_idx = next(
+        self._opponent_side_pokemon = copy.deepcopy(defender)
+        self._opponent_side_species_name = defender.name_ja or ""
+        self._opponent_side_party_side = "opp"
+        self._opponent_side_party_idx = next(
             (index for index, member in enumerate(self._opp_party) if member and member.name_ja == defender.name_ja),
             None,
         )
-        self._def_panel.set_pokemon(self._def_custom)
-        self.defender_changed.emit(self._def_custom)
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self._refresh_party_slots()
         self._refresh_defender_card()
         self.recalculate()
@@ -221,12 +221,12 @@ class DamagePanel(QWidget):
             self._opp_party[0] = copy.deepcopy(pokemon)
         else:
             self._opp_party = [copy.deepcopy(pokemon)]
-        self._def_custom = copy.deepcopy(pokemon)
-        self._def_species_name = pokemon.name_ja or ""
-        self._def_party_side = "opp"
-        self._def_party_idx = 0
-        self._def_panel.set_pokemon(self._def_custom)
-        self.defender_changed.emit(self._def_custom)
+        self._opponent_side_pokemon = copy.deepcopy(pokemon)
+        self._opponent_side_species_name = pokemon.name_ja or ""
+        self._opponent_side_party_side = "opp"
+        self._opponent_side_party_idx = 0
+        self._opponent_side_panel.set_pokemon(self._opponent_side_pokemon)
+        self.opponent_side_changed.emit(self._opponent_side_pokemon)
         self._refresh_party_slots()
         self._refresh_defender_card()
         self.recalculate()
@@ -249,17 +249,17 @@ class DamagePanel(QWidget):
         self.recalculate()
 
     def set_terastal_controls_visible(self, visible: bool) -> None:
-        if hasattr(self, "_atk_panel"):
-            self._atk_panel.set_tera_visible(visible)
-        if hasattr(self, "_def_panel"):
-            self._def_panel.set_tera_visible(visible)
+        if hasattr(self, "_my_side_panel"):
+            self._my_side_panel.set_tera_visible(visible)
+        if hasattr(self, "_opponent_side_panel"):
+            self._opponent_side_panel.set_tera_visible(visible)
         if hasattr(self, "_move_sections"):
             self.recalculate()
 
-    def attacker_side(self) -> str:
+    def my_side(self) -> str:
         return "opp" if self._party_source == "opp" else "my"
 
-    def defender_side(self) -> str:
+    def opponent_side(self) -> str:
         return "my" if self._party_source == "opp" else "opp"
 
     # ── Ability combo shared style constants ─────────────────────────────
@@ -345,12 +345,12 @@ class DamagePanel(QWidget):
     def _sync_ability_support_buttons(self, is_attacker: bool) -> None:
         """攻撃側/守備側の能力条件ボタン表示を ability に合わせて一括更新する。"""
         if is_attacker:
-            ability = (self._atk.ability if self._atk else "").strip()
+            ability = (self._my_side_pokemon.ability if self._my_side_pokemon else "").strip()
             cond_btns_attr = "_attacker_ability_cond_btns"
             trigger_btns_attr = "_attacker_trigger_cond_btns"
             full_hp_btns_attr = "_attacker_full_hp_guard_btns"
         else:
-            ability = (self._def_custom.ability if self._def_custom else "").strip()
+            ability = (self._opponent_side_pokemon.ability if self._opponent_side_pokemon else "").strip()
             cond_btns_attr = "_defender_ability_cond_btns"
             trigger_btns_attr = "_defender_trigger_cond_btns"
             full_hp_btns_attr = "_defender_full_hp_guard_btns"
@@ -460,12 +460,12 @@ class DamagePanel(QWidget):
         """自分未設定・相手のみ設定時に相手のわざ名だけ右側に表示する。"""
         from src.data.database import get_move_by_name_ja
 
-        if not self._def_custom:
+        if not self._opponent_side_pokemon:
             for sec in self._opp_move_sections:
                 sec.setup_move(None)
             return
 
-        opp_moves = self._def_custom.moves or []
+        opp_moves = self._opponent_side_pokemon.moves or []
         for opp_sec, opp_move_name in zip_longest(self._opp_move_sections, opp_moves, fillvalue=None):
             if opp_sec is None:
                 continue
@@ -494,53 +494,53 @@ class DamagePanel(QWidget):
         return _calc_moves_fn(self)
 
     def _refresh_defender_card(self, atk_view: PokemonInstance | None = None) -> None:
-        self._atk_card.set_pokemon(atk_view if atk_view is not None else self._atk)
-        self._def_card.set_pokemon(self._def_custom)
+        self._my_side_card.set_pokemon(atk_view if atk_view is not None else self._my_side_pokemon)
+        self._opponent_side_card.set_pokemon(self._opponent_side_pokemon)
 
     def _persist_party_member_edits(self) -> None:
-        if self._atk:
-            self._atk.ev_hp = self._atk_panel.ev_hp_pts() * 8
-            self._atk.ev_attack = self._atk_panel.ev_attack_pts() * 8
-            self._atk.ev_defense = self._atk_panel.ev_defense_pts() * 8
-            self._atk.ev_sp_attack = self._atk_panel.ev_sp_attack_pts() * 8
-            self._atk.ev_sp_defense = self._atk_panel.ev_sp_defense_pts() * 8
-            self._atk.ev_speed = self._atk_panel.ev_speed_pts() * 8
-            self._atk.nature = self._atk_panel.panel_nature()
+        if self._my_side_pokemon:
+            self._my_side_pokemon.ev_hp = self._my_side_panel.ev_hp_pts() * 8
+            self._my_side_pokemon.ev_attack = self._my_side_panel.ev_attack_pts() * 8
+            self._my_side_pokemon.ev_defense = self._my_side_panel.ev_defense_pts() * 8
+            self._my_side_pokemon.ev_sp_attack = self._my_side_panel.ev_sp_attack_pts() * 8
+            self._my_side_pokemon.ev_sp_defense = self._my_side_panel.ev_sp_defense_pts() * 8
+            self._my_side_pokemon.ev_speed = self._my_side_panel.ev_speed_pts() * 8
+            self._my_side_pokemon.nature = self._my_side_panel.panel_nature()
 
-        if self._def_custom:
-            self._def_custom.ev_hp = self._def_panel.ev_hp_pts() * 8
-            self._def_custom.ev_attack = self._def_panel.ev_attack_pts() * 8
-            self._def_custom.ev_defense = self._def_panel.ev_defense_pts() * 8
-            self._def_custom.ev_sp_attack = self._def_panel.ev_sp_attack_pts() * 8
-            self._def_custom.ev_sp_defense = self._def_panel.ev_sp_defense_pts() * 8
-            self._def_custom.ev_speed = self._def_panel.ev_speed_pts() * 8
-            self._def_custom.nature = self._def_panel.panel_nature()
+        if self._opponent_side_pokemon:
+            self._opponent_side_pokemon.ev_hp = self._opponent_side_panel.ev_hp_pts() * 8
+            self._opponent_side_pokemon.ev_attack = self._opponent_side_panel.ev_attack_pts() * 8
+            self._opponent_side_pokemon.ev_defense = self._opponent_side_panel.ev_defense_pts() * 8
+            self._opponent_side_pokemon.ev_sp_attack = self._opponent_side_panel.ev_sp_attack_pts() * 8
+            self._opponent_side_pokemon.ev_sp_defense = self._opponent_side_panel.ev_sp_defense_pts() * 8
+            self._opponent_side_pokemon.ev_speed = self._opponent_side_panel.ev_speed_pts() * 8
+            self._opponent_side_pokemon.nature = self._opponent_side_panel.panel_nature()
 
-        if self._atk and self._atk_party_side in ("my", "opp") and self._atk_party_idx is not None:
-            party = self._my_party if self._atk_party_side == "my" else self._opp_party
-            if 0 <= self._atk_party_idx < len(party):
-                to_save = self._atk_transform_origin if self._atk_transform_origin is not None else self._atk
-                party[self._atk_party_idx] = copy.deepcopy(to_save)
-        if self._def_custom and self._def_party_side in ("my", "opp") and self._def_party_idx is not None:
-            party = self._my_party if self._def_party_side == "my" else self._opp_party
-            if 0 <= self._def_party_idx < len(party):
-                to_save = self._def_transform_origin if self._def_transform_origin is not None else self._def_custom
-                party[self._def_party_idx] = copy.deepcopy(to_save)
+        if self._my_side_pokemon and self._my_side_party_side in ("my", "opp") and self._my_side_party_idx is not None:
+            party = self._my_party if self._my_side_party_side == "my" else self._opp_party
+            if 0 <= self._my_side_party_idx < len(party):
+                to_save = self._my_side_transform_origin if self._my_side_transform_origin is not None else self._my_side_pokemon
+                party[self._my_side_party_idx] = copy.deepcopy(to_save)
+        if self._opponent_side_pokemon and self._opponent_side_party_side in ("my", "opp") and self._opponent_side_party_idx is not None:
+            party = self._my_party if self._opponent_side_party_side == "my" else self._opp_party
+            if 0 <= self._opponent_side_party_idx < len(party):
+                to_save = self._opponent_side_transform_origin if self._opponent_side_transform_origin is not None else self._opponent_side_pokemon
+                party[self._opponent_side_party_idx] = copy.deepcopy(to_save)
 
-    def _on_atk_panel_changed(self) -> None:
-        from src.ui.damage_panel_parts.signal_handlers import _on_atk_panel_changed as _on_atk_panel_changed_fn
-        return _on_atk_panel_changed_fn(self)
+    def _on_my_side_panel_changed(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _on_my_side_panel_changed as _on_my_side_panel_changed_fn
+        return _on_my_side_panel_changed_fn(self)
 
-    def _on_def_panel_changed(self) -> None:
-        from src.ui.damage_panel_parts.signal_handlers import _on_def_panel_changed as _on_def_panel_changed_fn
-        return _on_def_panel_changed_fn(self)
+    def _on_opponent_side_panel_changed(self) -> None:
+        from src.ui.damage_panel_parts.signal_handlers import _on_opponent_side_panel_changed as _on_opponent_side_panel_changed_fn
+        return _on_opponent_side_panel_changed_fn(self)
 
     def _effective_def_types(self) -> list[str]:
-        tera = self._def_panel.terastal_type() if hasattr(self, "_def_panel") else ""
+        tera = self._opponent_side_panel.terastal_type() if hasattr(self, "_opponent_side_panel") else ""
         if tera:
             return [tera]
-        if self._def_custom:
-            return self._def_custom.types or ["normal"]
+        if self._opponent_side_pokemon:
+            return self._opponent_side_pokemon.types or ["normal"]
         return ["normal"]
 
     def _active_party(self) -> list[PokemonInstance | None]:
@@ -564,26 +564,26 @@ class DamagePanel(QWidget):
             return (cached[0] if isinstance(cached, tuple) else cached) if cached else ""
 
         my_is_attacker = (self._party_source == "my")
-        atk_name = (self._atk.name_ja or "") if self._atk else ""
-        def_name = (self._def_custom.name_ja or "") if self._def_custom else ""
+        atk_name = (self._my_side_pokemon.name_ja or "") if self._my_side_pokemon else ""
+        def_name = (self._opponent_side_pokemon.name_ja or "") if self._opponent_side_pokemon else ""
         atk_canon = _canon(atk_name) if atk_name else ""
         def_canon = _canon(def_name) if def_name else ""
         atk_current = atk_name
         def_current = def_name
-        atk_idx_known = self._atk_party_side is not None and self._atk_party_idx is not None
-        def_idx_known = self._def_party_side is not None and self._def_party_idx is not None
-        my_cache = self._atk_form_cache if my_is_attacker else self._def_form_cache
-        opp_cache = self._def_form_cache if my_is_attacker else self._atk_form_cache
+        atk_idx_known = self._my_side_party_side is not None and self._my_side_party_idx is not None
+        def_idx_known = self._opponent_side_party_side is not None and self._opponent_side_party_idx is not None
+        my_cache = self._my_side_form_cache if my_is_attacker else self._opponent_side_form_cache
+        opp_cache = self._opponent_side_form_cache if my_is_attacker else self._my_side_form_cache
         for i, slot in enumerate(self._my_party_slots):
             if i < len(self._my_party) and self._my_party[i]:
                 name = self._my_party[i].name_ja or ""
                 name_canon = _canon(name)
                 if atk_idx_known:
-                    is_atk = my_is_attacker and self._atk_party_side == "my" and self._atk_party_idx == i
+                    is_atk = my_is_attacker and self._my_side_party_side == "my" and self._my_side_party_idx == i
                 else:
                     is_atk = my_is_attacker and name_canon == atk_canon
                 if def_idx_known:
-                    is_def = not my_is_attacker and self._def_party_side == "my" and self._def_party_idx == i
+                    is_def = not my_is_attacker and self._opponent_side_party_side == "my" and self._opponent_side_party_idx == i
                 else:
                     is_def = not my_is_attacker and name_canon == def_canon
                 if not is_atk and not is_def:
@@ -599,11 +599,11 @@ class DamagePanel(QWidget):
                 name = self._opp_party[i].name_ja or ""
                 name_canon = _canon(name)
                 if atk_idx_known:
-                    is_atk = not my_is_attacker and self._atk_party_side == "opp" and self._atk_party_idx == i
+                    is_atk = not my_is_attacker and self._my_side_party_side == "opp" and self._my_side_party_idx == i
                 else:
                     is_atk = not my_is_attacker and name_canon == atk_canon
                 if def_idx_known:
-                    is_def = my_is_attacker and self._def_party_side == "opp" and self._def_party_idx == i
+                    is_def = my_is_attacker and self._opponent_side_party_side == "opp" and self._opponent_side_party_idx == i
                 else:
                     is_def = my_is_attacker and name_canon == def_canon
                 if not is_atk and not is_def:
@@ -614,6 +614,39 @@ class DamagePanel(QWidget):
                 slot.set_name(name, attack_active=is_atk, defense_active=is_def, sprite_name=sprite)
             else:
                 slot.set_name("")
+        self._refresh_speed_compare()
+
+    def _refresh_speed_compare(self) -> None:
+        if not hasattr(self, "_speed_compare"):
+            return
+        self._speed_compare.set_parties(self._my_party, self._opp_party)
+        if self._my_side_party_side in ("my", "opp") and self._my_side_party_idx is not None:
+            self._speed_compare.set_active_rank(
+                self._my_side_party_side,
+                self._my_side_party_idx,
+                self._my_side_panel.s_rank(),
+            )
+        if (
+            self._opponent_side_party_side in ("my", "opp")
+            and self._opponent_side_party_idx is not None
+        ):
+            self._speed_compare.set_active_rank(
+                self._opponent_side_party_side,
+                self._opponent_side_party_idx,
+                self._opponent_side_panel.s_rank(),
+            )
+        self._speed_compare.refresh()
+
+    def _on_speed_compare_rank_changed(self, side: str, index: int, rank: int) -> None:
+        if self._my_side_party_side == side and self._my_side_party_idx == index:
+            delta = rank - self._my_side_panel.s_rank()
+            if delta:
+                self._my_side_panel._adj_s_rank(delta)
+            return
+        if self._opponent_side_party_side == side and self._opponent_side_party_idx == index:
+            delta = rank - self._opponent_side_panel.s_rank()
+            if delta:
+                self._opponent_side_panel._adj_s_rank(delta)
 
     # ── Event handlers ────────────────────────────────────────────────
 
@@ -760,3 +793,5 @@ class DamagePanel(QWidget):
         return {"エレキ": "electric", "グラス": "grassy",
                 "ミスト": "misty", "サイコ": "psychic"}.get(
             self._terrain_grp.value(), "none")
+
+

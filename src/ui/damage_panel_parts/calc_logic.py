@@ -7,8 +7,8 @@ import json
 import math
 
 from src.calc.calc_inputs import (
-    AttackerCalcConfig,
-    DefenderCalcConfig,
+    MySideCalcConfig,
+    OpponentSideCalcConfig,
     DamageCalcInputs,
     FieldCalcConfig,
 )
@@ -20,7 +20,7 @@ def recalculate(self) -> None:
         return
     self._sync_attacker_ability_support_buttons()
     self._sync_defender_ability_support_buttons()
-    if self._atk is None:
+    if self._my_side_pokemon is None:
         for sec in self._move_sections:
             sec.setup_move(None)
         self._refresh_defender_card()
@@ -44,21 +44,21 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
             return default
         return bool(btn.isVisible() and btn.isChecked())
 
-    atk = self._atk
+    atk = self._my_side_pokemon
 
     # ── attacker ─────────────────────────────────────────────────────────
-    atk_config = AttackerCalcConfig(
+    atk_config = MySideCalcConfig(
         pokemon=atk,
-        ev_hp=self._atk_panel.ev_hp_pts(),
-        ev_attack=self._atk_panel.ev_attack_pts(),
-        ev_defense=self._atk_panel.ev_defense_pts(),
-        ev_sp_attack=self._atk_panel.ev_sp_attack_pts(),
-        ev_sp_defense=self._atk_panel.ev_sp_defense_pts(),
-        ev_speed=self._atk_panel.ev_speed_pts(),
-        nature=self._atk_panel.panel_nature(),
-        ac_rank=self._atk_panel.ac_rank(),
-        bd_rank=self._atk_panel.bd_rank(),
-        tera=self._atk_panel.terastal_type(),
+        ev_hp=self._my_side_panel.ev_hp_pts(),
+        ev_attack=self._my_side_panel.ev_attack_pts(),
+        ev_defense=self._my_side_panel.ev_defense_pts(),
+        ev_sp_attack=self._my_side_panel.ev_sp_attack_pts(),
+        ev_sp_defense=self._my_side_panel.ev_sp_defense_pts(),
+        ev_speed=self._my_side_panel.ev_speed_pts(),
+        nature=self._my_side_panel.panel_nature(),
+        ac_rank=self._my_side_panel.ac_rank(),
+        bd_rank=self._my_side_panel.bd_rank(),
+        tera=self._my_side_panel.terastal_type(),
         is_burned=self._burn_btn.isChecked(),
         is_toxic_boosted=_btn("_toxic_boost_btn"),
         is_pinch=any(_btn(n) for n in (
@@ -86,27 +86,27 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
     )
 
     # ── defender ─────────────────────────────────────────────────────────
-    has_def = hasattr(self, "_def_panel")
-    def_config = DefenderCalcConfig(
-        pokemon=self._def_custom,
-        species_name=self._def_species_name or "",
-        ev_hp=self._def_panel.ev_hp_pts() if has_def else 0,
-        ev_attack=self._def_panel.ev_attack_pts() if has_def else 0,
-        ev_defense=self._def_panel.ev_defense_pts() if has_def else 0,
-        ev_sp_attack=self._def_panel.ev_sp_attack_pts() if has_def else 0,
-        ev_sp_defense=self._def_panel.ev_sp_defense_pts() if has_def else 0,
-        ev_speed=self._def_panel.ev_speed_pts() if has_def else 0,
-        nature=self._def_panel.panel_nature() if has_def else "まじめ",
-        ac_rank=self._def_panel.ac_rank() if has_def else 0,
-        bd_rank=self._def_panel.bd_rank() if has_def else 0,
-        hp_percent=self._def_panel.current_hp_percent() if has_def else 100.0,
-        use_sp_defense=self._def_panel.use_sp_defense() if has_def else False,
-        tera=self._def_panel.terastal_type() if has_def else "",
+    has_def = hasattr(self, "_opponent_side_panel")
+    def_config = OpponentSideCalcConfig(
+        pokemon=self._opponent_side_pokemon,
+        species_name=self._opponent_side_species_name or "",
+        ev_hp=self._opponent_side_panel.ev_hp_pts() if has_def else 0,
+        ev_attack=self._opponent_side_panel.ev_attack_pts() if has_def else 0,
+        ev_defense=self._opponent_side_panel.ev_defense_pts() if has_def else 0,
+        ev_sp_attack=self._opponent_side_panel.ev_sp_attack_pts() if has_def else 0,
+        ev_sp_defense=self._opponent_side_panel.ev_sp_defense_pts() if has_def else 0,
+        ev_speed=self._opponent_side_panel.ev_speed_pts() if has_def else 0,
+        nature=self._opponent_side_panel.panel_nature() if has_def else "まじめ",
+        ac_rank=self._opponent_side_panel.ac_rank() if has_def else 0,
+        bd_rank=self._opponent_side_panel.bd_rank() if has_def else 0,
+        hp_percent=self._opponent_side_panel.current_hp_percent() if has_def else 100.0,
+        use_sp_defense=self._opponent_side_panel.use_sp_defense() if has_def else False,
+        tera=self._opponent_side_panel.terastal_type() if has_def else "",
         multiscale_intact=_btn("_opp_multiscale_btn", default=True),
         shadow_shield_intact=_btn("_opp_shadow_shield_btn", default=True),
         tera_shell_intact=_btn("_opp_tera_shell_btn", default=True),
         disguise_intact=(
-            has_def and self._def_panel.disguise_intact()
+            has_def and self._opponent_side_panel.disguise_intact()
         ),
     )
 
@@ -142,8 +142,8 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
     )
 
     return DamageCalcInputs(
-        attacker=atk_config,
-        defender=def_config,
+        my_side=atk_config,
+        opponent_side=def_config,
         field=field_config,
         show_bulk_rows=self._show_bulk_rows,
     )
@@ -171,7 +171,7 @@ def _calc_moves(self) -> None:
     from src.calc.damage_calculator import DamageCalculator
 
     inputs = self.collect_calc_inputs()
-    atk = copy.copy(self._atk)
+    atk = copy.copy(self._my_side_pokemon)
     _protean_like = ("へんげんじざい", "Protean", "リベロ", "Libero")
     if (
         (atk.ability or "").strip() in _protean_like
@@ -182,21 +182,21 @@ def _calc_moves(self) -> None:
         atk.ability = ""
 
     # Apply attacker EV overrides for all stats
-    ev_pts_h_atk = inputs.attacker.ev_hp
-    ev_pts_a = inputs.attacker.ev_attack
-    ev_pts_b_atk = inputs.attacker.ev_defense
-    ev_pts_c = inputs.attacker.ev_sp_attack
-    ev_pts_d_atk = inputs.attacker.ev_sp_defense
-    ev_pts_s_atk = inputs.attacker.ev_speed
-    atk_nature = inputs.attacker.nature
-    atk_ac_rank = inputs.attacker.ac_rank
-    atk_bd_rank = inputs.attacker.bd_rank
+    ev_pts_h_atk = inputs.my_side.ev_hp
+    ev_pts_a = inputs.my_side.ev_attack
+    ev_pts_b_atk = inputs.my_side.ev_defense
+    ev_pts_c = inputs.my_side.ev_sp_attack
+    ev_pts_d_atk = inputs.my_side.ev_sp_defense
+    ev_pts_s_atk = inputs.my_side.ev_speed
+    atk_nature = inputs.my_side.nature
+    atk_ac_rank = inputs.my_side.ac_rank
+    atk_bd_rank = inputs.my_side.bd_rank
     rank = atk_ac_rank
-    tera = inputs.attacker.tera
+    tera = inputs.my_side.tera
 
     # Re-calc all stats from species if available
     species = self._resolve_species_info(atk, atk.name_ja)
-    transformed = getattr(self, "_atk_transform_origin", None) is not None
+    transformed = getattr(self, "_my_side_transform_origin", None) is not None
     saved_hp, saved_max_hp = atk.hp, atk.max_hp
     if species:
         hp_iv = atk.iv_hp if atk.iv_hp > 0 else 31
@@ -219,14 +219,14 @@ def _calc_moves(self) -> None:
             atk.weight_kg = species.weight_kg
         if atk.hp <= 0 and atk.max_hp > 0:
             atk.hp = atk.max_hp
-    self._atk_panel.update_stat_display(atk, weather=self._weather_key())
+    self._my_side_panel.update_stat_display(atk, weather=self._weather_key())
 
-    if inputs.attacker.is_burned:
+    if inputs.my_side.is_burned:
         atk.status = "burn"
-    if inputs.attacker.is_toxic_boosted:
+    if inputs.my_side.is_toxic_boosted:
         atk.status = "poison"
 
-    pinch_trigger = inputs.attacker.is_pinch
+    pinch_trigger = inputs.my_side.is_pinch
     if pinch_trigger:
         hp_max = atk.max_hp if atk.max_hp > 0 else atk.hp
         if hp_max > 0:
@@ -241,14 +241,14 @@ def _calc_moves(self) -> None:
 
     # Defender scenarios
     def_types_override: list[str] = []
-    def_tera = inputs.defender.tera
+    def_tera = inputs.opponent_side.tera
     if def_tera:
         def_types_override = [def_tera]
 
     _calc = DamageCalculator(inputs)
     runtime = _calc.build_runtime_context(
         attacker_ability=atk.ability,
-        defender_ability=self._def_custom.ability if self._def_custom else "",
+        defender_ability=self._opponent_side_pokemon.ability if self._opponent_side_pokemon else "",
     )
     atk_weather = runtime.atk_weather
     opp_weather = runtime.opp_weather
@@ -289,8 +289,8 @@ def _calc_moves(self) -> None:
     protosynthesis_active = runtime.protosynthesis_active
     quark_drive_active = runtime.quark_drive_active
     analytic_active = runtime.analytic_active
-    flare_boost_active = inputs.attacker.flare_boost_active
-    guts_active = inputs.attacker.guts_active
+    flare_boost_active = inputs.my_side.flare_boost_active
+    guts_active = inputs.my_side.guts_active
     if flare_boost_active:
         atk.status = "burn"
     if guts_active and not atk.status:
@@ -378,7 +378,7 @@ def _calc_moves(self) -> None:
 
         pow_override = sec.power_override()
         if normalize_move_name(effective_move.name_ja) == normalize_move_name("はたきおとす"):
-            target_for_knock_off = self._def_custom if self._def_custom is not None else hbd0
+            target_for_knock_off = self._opponent_side_pokemon if self._opponent_side_pokemon is not None else hbd0
             pow_override = knock_off_auto_power(target_for_knock_off)
             sec.set_power_override_value(pow_override)
         move_shared = dict(**shared, power_override=pow_override)
@@ -387,11 +387,11 @@ def _calc_moves(self) -> None:
             "サイコショック", "サイコブレイク", "しんぴのつるぎ"
         )
         best_nat = BEST_DEF_NATURE_FOR["defense" if is_phys else "sp_defense"]
-        opp_species = self._resolve_species_info(self._def_custom, self._def_species_name)
+        opp_species = self._resolve_species_info(self._opponent_side_pokemon, self._opponent_side_species_name)
 
         def _build_def(hp_ev: int, bd_ev: int, nat: str) -> PokemonInstance:
-            d = copy.copy(self._def_custom) if self._def_custom else PokemonInstance()
-            d.ability = (self._def_custom.ability if self._def_custom else "")
+            d = copy.copy(self._opponent_side_pokemon) if self._opponent_side_pokemon else PokemonInstance()
+            d.ability = (self._opponent_side_pokemon.ability if self._opponent_side_pokemon else "")
             if opp_species:
                 d.hp = calc_stat(opp_species.base_hp, 31, hp_ev, is_hp=True)
                 if d.attack <= 0:
@@ -434,17 +434,17 @@ def _calc_moves(self) -> None:
 
         # ── defender meta for smogon dicts ───────────────────────────
         _raw_species_en = (opp_species.name_en if opp_species
-                           else (self._def_custom.name_en if self._def_custom else ""))
-        _def_name_ja = (self._def_custom.name_ja if self._def_custom else "") or ""
+                           else (self._opponent_side_pokemon.name_en if self._opponent_side_pokemon else ""))
+        _def_name_ja = (self._opponent_side_pokemon.name_ja if self._opponent_side_pokemon else "") or ""
         species_en = smogon_mega_species(_raw_species_en, _def_name_ja)
-        def_ability_ja = self._def_custom.ability if self._def_custom else ""
+        def_ability_ja = self._opponent_side_pokemon.ability if self._opponent_side_pokemon else ""
         def_terastal_active = bool(def_tera)
         def_ability_en = _ability_name_to_en(def_ability_ja, _def_name_ja, def_terastal_active)
         def_item_en = ITEM_FALLBACK_JA_TO_EN.get(
-            self._def_custom.item if self._def_custom else "", ""
+            self._opponent_side_pokemon.item if self._opponent_side_pokemon else "", ""
         )
         if not def_item_en:
-            def_item_en = get_item_name_en(self._def_custom.item if self._def_custom else "")
+            def_item_en = get_item_name_en(self._opponent_side_pokemon.item if self._opponent_side_pokemon else "")
         best_nat_en = nature_ja_to_en(best_nat)
 
         _def0_d = defender_scenario_dict(
@@ -468,9 +468,9 @@ def _calc_moves(self) -> None:
 
         # ── type effectiveness (for berry check + display) ────────────
         disp_types = def_types_override or (
-            (self._def_custom.types or ["normal"]) if self._def_custom else ["normal"]
+            (self._opponent_side_pokemon.types or ["normal"]) if self._opponent_side_pokemon else ["normal"]
         )
-        disp_ability = self._def_custom.ability if self._def_custom else ""
+        disp_ability = self._opponent_side_pokemon.ability if self._opponent_side_pokemon else ""
         type_eff = move_type_effectiveness(
             effective_move, effective_move.type_name, disp_types, disp_ability
         )
@@ -518,8 +518,8 @@ def _calc_moves(self) -> None:
                 cur_hp = max(1, hp - 1)
             disguise = bool(
                 def_d.get("ability") == "Disguise" and
-                hasattr(self, "_def_panel") and
-                self._def_panel.disguise_intact() and
+                hasattr(self, "_opponent_side_panel") and
+                self._opponent_side_panel.disguise_intact() and
                 cur_hp >= hp
             )
             if disguise:
@@ -559,8 +559,8 @@ def _calc_moves(self) -> None:
             cur_hp = max(1, math.floor(d.hp * hp_percent / 100.0))
             disguise = bool(
                 d.ability == "ばけのかわ" and
-                hasattr(self, "_def_panel") and
-                self._def_panel.disguise_intact() and
+                hasattr(self, "_opponent_side_panel") and
+                self._opponent_side_panel.disguise_intact() and
                 cur_hp >= d.hp
             )
             return get_damage_modifier_notes(
@@ -572,8 +572,8 @@ def _calc_moves(self) -> None:
         # ── custom defender ───────────────────────────────────────────
         custom_result: tuple[int, int, int, bool] | None = None
         mod_target = hbd0
-        if self._def_custom and self._def_custom.hp > 0:
-            cd = copy.copy(self._def_custom)
+        if self._opponent_side_pokemon and self._opponent_side_pokemon.hp > 0:
+            cd = copy.copy(self._opponent_side_pokemon)
             if opp_species:
                 cd.attack = calc_stat(
                     opp_species.base_attack, 31, def_ev_pts_a * 8,
@@ -591,7 +591,7 @@ def _calc_moves(self) -> None:
                     opp_species.base_sp_defense, 31, def_ev_pts_d * 8,
                     nature_mult=_nature_mult_from_name(def_nature, "sp_defense")
                 )
-                _def_transformed = getattr(self, "_def_transform_origin", None) is not None
+                _def_transformed = getattr(self, "_opponent_side_transform_origin", None) is not None
                 _saved_def_hp, _saved_def_max_hp = cd.hp, cd.max_hp
                 cd.hp = calc_stat(
                     opp_species.base_hp, 31, def_ev_pts_h * 8, is_hp=True
@@ -607,7 +607,7 @@ def _calc_moves(self) -> None:
                 if cd.weight_kg <= 0:
                     cd.weight_kg = opp_species.weight_kg
             cd.types = def_types_override or (cd.types or ["normal"])
-            self._def_panel.update_stat_display(cd, weather=self._weather_key())
+            self._opponent_side_panel.update_stat_display(cd, weather=self._weather_key())
 
             # Build smogon dict for custom defender with panel EV/nature override
             _custom_nat = nature_ja_to_en(def_nature)
@@ -635,7 +635,7 @@ def _calc_moves(self) -> None:
             show_bulk_rows=self._show_bulk_rows,
         )
 
-    opp_moves = self._def_custom.moves if self._def_custom else []
+    opp_moves = self._opponent_side_pokemon.moves if self._opponent_side_pokemon else []
     for slot, opp_sec in enumerate(self._opp_move_sections):
         opp_custom_result: tuple[int, int, int, bool] | None = None
         opp_ac0_result: tuple[int, int, int, bool] | None = None
@@ -649,15 +649,15 @@ def _calc_moves(self) -> None:
             if opp_move_info:
                 self._move_cache[opp_move_name] = opp_move_info
                 opp_effective_move = opp_move_info
-                _opp_def_ac_rank_preview = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
+                _opp_def_ac_rank_preview = self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0
                 _opp_resolved_type = resolve_effective_move_type(
-                    self._def_custom if self._def_custom else PokemonInstance(),
+                    self._opponent_side_pokemon if self._opponent_side_pokemon else PokemonInstance(),
                     opp_move_info,
                     def_tera,
                     opp_weather,
                 )
                 _opp_resolved_category = resolve_effective_move_category(
-                    self._def_custom if self._def_custom else PokemonInstance(),
+                    self._opponent_side_pokemon if self._opponent_side_pokemon else PokemonInstance(),
                     opp_move_info,
                     atk_rank=_opp_def_ac_rank_preview,
                     terastal_type=def_tera,
@@ -680,9 +680,9 @@ def _calc_moves(self) -> None:
                         power=_opp_resolved_power,
                     )
 
-        if self._def_custom and atk.hp > 0 and opp_effective_move and opp_effective_move.category != "status":
-            _opp_species = self._resolve_species_info(self._def_custom, self._def_species_name)
-            _opp_calc_ability = self._def_custom.ability if self._def_custom else ""
+        if self._opponent_side_pokemon and atk.hp > 0 and opp_effective_move and opp_effective_move.category != "status":
+            _opp_species = self._resolve_species_info(self._opponent_side_pokemon, self._opponent_side_species_name)
+            _opp_calc_ability = self._opponent_side_pokemon.ability if self._opponent_side_pokemon else ""
             if (
                 (_opp_calc_ability or "").strip() in _protean_like
                 and hasattr(self, "_opp_protean_stab_btn")
@@ -693,18 +693,18 @@ def _calc_moves(self) -> None:
 
             _opp_atk_en = _ability_name_to_en(
                 _opp_calc_ability,
-                self._def_custom.name_ja if self._def_custom else "",
+                self._opponent_side_pokemon.name_ja if self._opponent_side_pokemon else "",
                 bool(def_tera),
             ) or "No Ability"
-            _opp_item_en = ITEM_FALLBACK_JA_TO_EN.get(self._def_custom.item or "", "")
+            _opp_item_en = ITEM_FALLBACK_JA_TO_EN.get(self._opponent_side_pokemon.item or "", "")
             if not _opp_item_en:
-                _opp_item_en = get_item_name_en(self._def_custom.item or "")
+                _opp_item_en = get_item_name_en(self._opponent_side_pokemon.item or "")
             _opp_species_en = ""
             if _opp_species:
                 _opp_species_en = _opp_species.name_en or ""
             _opp_species_en = smogon_mega_species(
-                _opp_species_en or (self._def_custom.name_en or ""),
-                self._def_custom.name_ja or "",
+                _opp_species_en or (self._opponent_side_pokemon.name_en or ""),
+                self._opponent_side_pokemon.name_ja or "",
             )
             _is_opp_phys = opp_effective_move.category == "physical" or opp_effective_move.name_ja in (
                 "サイコショック", "サイコブレイク", "しんぴのつるぎ"
@@ -728,7 +728,7 @@ def _calc_moves(self) -> None:
             _opp_hits = opp_sec.hit_count()
 
             _opp_ability_for_skin = _opp_calc_ability
-            _opp_defender_name_ja = self._def_custom.name_ja if self._def_custom else ""
+            _opp_defender_name_ja = self._opponent_side_pokemon.name_ja if self._opponent_side_pokemon else ""
             _mv_d_opp = _calc.build_opponent_move_dict(
                 opp_effective_move,
                 opp_move_info,
@@ -781,7 +781,7 @@ def _calc_moves(self) -> None:
                 mn, mx, is_error = _bridge.calc(opp_atk_d, def_payload, _mv_d_opp, _field_d_rev)
                 return (mn, mx, self_hp, is_error)
 
-            _opp_def_ac_rank = self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0
+            _opp_def_ac_rank = self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0
             _opp_ability_on = any(
                 btn.isVisible() and btn.isChecked()
                 for btn in list(
@@ -799,7 +799,7 @@ def _calc_moves(self) -> None:
             _opp_guts_active = hasattr(self, "_opp_guts_btn") and self._opp_guts_btn.isVisible() and self._opp_guts_btn.isChecked()
 
             # pinch()HP
-            _opp_atk_instance = copy.copy(self._def_custom)
+            _opp_atk_instance = copy.copy(self._opponent_side_pokemon)
             _opp_pinch_trigger = any(
                 btn.isVisible() and btn.isChecked()
                 for btn in (
@@ -842,7 +842,7 @@ def _calc_moves(self) -> None:
 
             # AC 0: / EV=0,
             _opp_ac0_atk_d = attacker_scenario_dict(
-                _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
+                _opp_species_en or self._opponent_side_pokemon.name_ja or "Bulbasaur",
                 ev_hp=int(_opp_atk_instance.ev_hp or 0),
                 ev_atk=0,
                 ev_spa=0,
@@ -864,7 +864,7 @@ def _calc_moves(self) -> None:
 
             # AC 32: / EV=252,
             _opp_ac32_atk_d = attacker_scenario_dict(
-                _opp_species_en or self._def_custom.name_ja or "Bulbasaur",
+                _opp_species_en or self._opponent_side_pokemon.name_ja or "Bulbasaur",
                 ev_hp=int(_opp_atk_instance.ev_hp or 0),
                 ev_atk=252 if _is_opp_phys else 0,
                 ev_spa=0 if _is_opp_phys else 252,
@@ -890,7 +890,7 @@ def _calc_moves(self) -> None:
             _atk_ability = atk.ability or ""
             _opp_eff = move_type_effectiveness(opp_effective_move, opp_effective_move.type_name, _atk_types, _atk_ability)
             opp_sec.set_effectiveness(_opp_eff)
-            if opp_effective_move.category != "status" and self._def_custom and atk.hp > 0:
+            if opp_effective_move.category != "status" and self._opponent_side_pokemon and atk.hp > 0:
                 _opp_move_shared = dict(
                     weather=opp_weather, terrain=terrain,
                     is_critical=self._opp_crit_btn.isChecked(),
@@ -898,7 +898,7 @@ def _calc_moves(self) -> None:
                     helping_hand=opp_helping, steel_spirit=opp_steel_spirit, charged=opp_charged,
                     fairy_aura=fairy_aura, dark_aura=dark_aura,
                     terastal_type=def_tera,
-                    atk_rank=self._def_panel.ac_rank() if hasattr(self, "_def_panel") else 0,
+                    atk_rank=self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0,
                     def_rank=def_bd_rank,
                     defender_def_rank=def_bd_rank,
                     defender_atk_rank=atk_ac_rank,
@@ -931,5 +931,8 @@ def _calc_moves(self) -> None:
             opp_ac32_result,
             show_bulk_rows=self._show_bulk_rows,
         )
+
+
+
 
 

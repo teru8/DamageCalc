@@ -115,8 +115,8 @@ class CopyDialog(QDialog):
 
     def _build_ui(self) -> None:
         p = self._panel
-        atk = p._atk
-        def_ = p._def_custom
+        atk = p._my_side_pokemon
+        def_ = p._opponent_side_pokemon
 
         main = QVBoxLayout(self)
         main.setSpacing(8)
@@ -270,8 +270,8 @@ class CopyDialog(QDialog):
 
     def _build_text(self) -> str | None:
         p = self._panel
-        atk = p._atk
-        def_ = p._def_custom
+        atk = p._my_side_pokemon
+        def_ = p._opponent_side_pokemon
 
         atk_lines = []
         def_lines = []
@@ -425,3 +425,5 @@ class CopyDialog(QDialog):
             self._status_lbl.setText("送信しました")
         except Exception as exc:
             QMessageBox.critical(self, "送信エラー", "Discord送信に失敗しました:\n{}".format(exc))
+
+

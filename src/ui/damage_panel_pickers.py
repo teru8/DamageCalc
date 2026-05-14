@@ -71,3 +71,4 @@ def pick_item(pokemon: "PokemonInstance", parent: QWidget) -> str | None:
             ranked = _unique(db.get_items_by_usage(base.name_ja))
     items, sep = _build_ranked_options(ranked, list_items)
     return show_pick_dialog("持ち物を選択", items, sep, pokemon.item or "", parent, completer_items=completer_items)
+

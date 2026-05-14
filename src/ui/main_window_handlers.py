@@ -831,7 +831,6 @@ def _poll_opponent_party_auto_detect(self) -> None:
     frame = self._video_thread.get_last_frame()
     if frame is None or frame.size == 0:
         return
-    self._dump_auto_detect_debug_frame(frame)
     matched, scores = opponent_party_auto_trigger.evaluate_auto_detect(frame)
     all_types = opponent_party_auto_trigger.has_all_slot_types(frame) if matched else False
     now = time.monotonic()
@@ -860,56 +859,6 @@ def _poll_opponent_party_auto_detect(self) -> None:
             self._auto_detect_pending = False
 
     QTimer.singleShot(1000, _run_detect)
-
-
-
-def _dump_auto_detect_debug_frame(self, frame) -> None:
-    now = time.monotonic()
-    if now - self._auto_detect_debug_dump_last < 2.0:
-        return
-    self._auto_detect_debug_dump_last = now
-    try:
-        import cv2
-        import numpy as np
-        from pathlib import Path
-
-        dbg = frame.copy()
-        if dbg is None or getattr(dbg, "size", 0) == 0:
-            return
-        h, w = dbg.shape[:2]
-        base_w, base_h = 1280.0, 720.0
-        sx, sy = w / base_w, h / base_h
-        rects = [
-            ((88, 609, 182, 649), "temp1", (0, 255, 255)),
-            ((229, 606, 331, 652), "temp2", (255, 255, 0)),
-        ]
-        for (x1, y1, x2, y2), label, color in rects:
-            rx1 = int(round(x1 * sx))
-            ry1 = int(round(y1 * sy))
-            rx2 = int(round(x2 * sx))
-            ry2 = int(round(y2 * sy))
-            cv2.rectangle(dbg, (rx1, ry1), (rx2, ry2), color, 2)
-            cv2.putText(
-                dbg,
-                "{} ({},{})-({},{})".format(label, rx1, ry1, rx2, ry2),
-                (max(0, rx1), max(18, ry1 - 8)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                color,
-                1,
-                cv2.LINE_AA,
-            )
-        out_dir = Path.cwd() / "captures" / "auto_detect_debug"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        out_path = out_dir / "opp_auto_detect_{}.png".format(ts)
-        cv2.imwrite(str(out_path), dbg)
-    except (ImportError, OSError, ValueError, TypeError) as exc:
-        if self._detailed_log_enabled:
-            self._log("[WARN] 自動検出デバッグ画像の保存失敗: {}".format(exc))
-        return
-
-
 
 def _toggle_live_battle_tracking(self, enabled: bool) -> None:
     enabled = bool(enabled)
@@ -1614,7 +1563,7 @@ def _on_damage_panel_atk_changed(self, pokemon: PokemonInstance | None) -> None:
         self._battle_state.my_party = self._damage_panel.get_my_party_snapshot()
     if hasattr(self._damage_panel, "get_opp_party_snapshot"):
         self._battle_state.opponent_party = self._damage_panel.get_opp_party_snapshot()
-    side = self._damage_panel.attacker_side() if hasattr(self._damage_panel, "attacker_side") else "my"
+    side = self._damage_panel.my_side() if hasattr(self._damage_panel, "my_side") else "my"
     copied = copy.deepcopy(pokemon) if pokemon else None
     if side == "opp":
         self._battle_state.opponent_pokemon = copied
@@ -1632,7 +1581,7 @@ def _on_damage_panel_def_changed(self, pokemon: PokemonInstance | None) -> None:
         self._battle_state.my_party = self._damage_panel.get_my_party_snapshot()
     if hasattr(self._damage_panel, "get_opp_party_snapshot"):
         self._battle_state.opponent_party = self._damage_panel.get_opp_party_snapshot()
-    side = self._damage_panel.defender_side() if hasattr(self._damage_panel, "defender_side") else "opp"
+    side = self._damage_panel.opponent_side() if hasattr(self._damage_panel, "opponent_side") else "opp"
     copied = copy.deepcopy(pokemon) if pokemon else None
     if side == "my":
         self._battle_state.my_pokemon = copied

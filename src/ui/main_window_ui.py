@@ -58,8 +58,8 @@ def _build_ui(self) -> None:
     old_damage_panel = getattr(self, "_damage_panel", None)
     if old_damage_panel is not None:
         try:
-            old_damage_panel.attacker_changed.disconnect(self._on_damage_panel_atk_changed)
-            old_damage_panel.defender_changed.disconnect(self._on_damage_panel_def_changed)
+            old_damage_panel.my_side_changed.disconnect(self._on_damage_panel_atk_changed)
+            old_damage_panel.opponent_side_changed.disconnect(self._on_damage_panel_def_changed)
             old_damage_panel.registry_maybe_changed.disconnect(self._refresh_registry_list)
             old_damage_panel.bridge_payload_logged.disconnect(self._on_bridge_payload_log)
         except (RuntimeError, TypeError):
@@ -82,8 +82,8 @@ def _build_ui(self) -> None:
     self._tabs.tabBar().hide()
 
     self._damage_panel = DamagePanel()
-    self._damage_panel.attacker_changed.connect(self._on_damage_panel_atk_changed)
-    self._damage_panel.defender_changed.connect(self._on_damage_panel_def_changed)
+    self._damage_panel.my_side_changed.connect(self._on_damage_panel_atk_changed)
+    self._damage_panel.opponent_side_changed.connect(self._on_damage_panel_def_changed)
     self._damage_panel.registry_maybe_changed.connect(self._refresh_registry_list)
     self._damage_panel.bridge_payload_logged.connect(self._on_bridge_payload_log)
     self._tabs.addTab(self._damage_panel, "ダメージ計算")
@@ -654,24 +654,7 @@ def _show_usage_fetch_dialog(self) -> None:
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(8)
-    
-    season_row = QHBoxLayout()
-    season_row.addWidget(QLabel("シーズン:"))
-    season_combo = QComboBox()
-    season_combo.setEditable(True)
-    season_combo.setMinimumWidth(150)
-    seasons = list(db.get_available_usage_seasons())
-    current = db.get_active_usage_season()
-    if current not in seasons:
-        seasons.insert(0, current)
-    for season in seasons:
-        season_combo.addItem(season)
-    if current:
-        season_combo.setEditText(current)
-    season_row.addWidget(season_combo)
-    season_row.addStretch()
-    layout.addLayout(season_row)
-    
+
     source_row = QHBoxLayout()
     source_row.addWidget(QLabel("データ源:"))
     source_combo = QComboBox()
@@ -697,12 +680,8 @@ def _show_usage_fetch_dialog(self) -> None:
     layout.addLayout(btn_row)
     
     def on_start():
-        season = db.normalize_season_token(season_combo.currentText())
+        season = db.get_active_usage_season()
         source = source_combo.currentData()
-        if not season:
-            QMessageBox.warning(dlg, "エラー", "シーズンを入力してください。")
-            return
-        db.set_active_usage_season(season)
         dlg.accept()
         self._fetch_usage_data_with_source(season, source)
     

@@ -12,6 +12,7 @@ from src.ui.damage_panel_cards import DefenderCard as _DefenderCard
 from src.ui.damage_panel_move_section import MoveSection as _MoveSection
 from src.ui.damage_panel_panels import _AttackerPanel, _DefenderPanel
 from src.ui.damage_panel_party import PartySlot as _PartySlot
+from src.ui.damage_panel_speed_compare import SpeedCompareWidget
 from src.ui.damage_panel_ui_helpers import row_label as _row_label
 from src.ui.damage_panel_ui_helpers import sep as _sep
 from src.ui.damage_panel_widgets import RadioGroup as _RadioGroup
@@ -54,50 +55,64 @@ def _build_side_panel(self) -> None:
     sp.setContentsMargins(6, 6, 6, 6)
     sp.setSpacing(6)
 
+    self._speed_compare = SpeedCompareWidget(
+        rank_changed=self._on_speed_compare_rank_changed
+    )
+    sp.addWidget(self._speed_compare)
+    sp.addWidget(_sep())
+
     # Attacker + Defender side by side
     panels_row = QHBoxLayout()
     panels_row.setSpacing(6)
 
-    self._atk_panel = _AttackerPanel()
-    self._atk_panel.changed.connect(self._on_atk_panel_changed)
-    self._atk_panel.edit_requested.connect(self._edit_attacker)
-    self._atk_panel.change_requested.connect(self._change_attacker)
-    self._atk_panel.new_requested.connect(self._new_attacker)
-    self._atk_panel.clear_requested.connect(self._clear_attacker)
-    panels_row.addWidget(self._atk_panel, 1, Qt.AlignTop)
+    self._my_side_panel = _AttackerPanel()
+    self._my_side_panel.changed.connect(self._on_my_side_panel_changed)
+    self._my_side_panel.edit_requested.connect(self._edit_attacker)
+    self._my_side_panel.change_requested.connect(self._change_attacker)
+    self._my_side_panel.new_requested.connect(self._new_attacker)
+    self._my_side_panel.clear_requested.connect(self._clear_attacker)
+    panels_row.addWidget(self._my_side_panel, 1, Qt.AlignTop)
 
-    self._def_panel = _DefenderPanel()
-    self._def_panel.changed.connect(self._on_def_panel_changed)
-    self._def_panel.edit_requested.connect(self._edit_defender)
-    self._def_panel.change_requested.connect(self._change_defender)
-    self._def_panel.new_requested.connect(self._new_defender)
-    self._def_panel.clear_requested.connect(self._clear_defender)
-    panels_row.addWidget(self._def_panel, 1, Qt.AlignTop)
+    self._opponent_side_panel = _DefenderPanel()
+    self._opponent_side_panel.changed.connect(self._on_opponent_side_panel_changed)
+    self._opponent_side_panel.edit_requested.connect(self._edit_defender)
+    self._opponent_side_panel.change_requested.connect(self._change_defender)
+    self._opponent_side_panel.new_requested.connect(self._new_defender)
+    self._opponent_side_panel.clear_requested.connect(self._clear_defender)
+    panels_row.addWidget(self._opponent_side_panel, 1, Qt.AlignTop)
 
-    self._atk_panel.ev_section_toggled.connect(self._def_panel.sync_ev_section)
-    self._def_panel.ev_section_toggled.connect(self._atk_panel.sync_ev_section)
-    self._atk_panel.rank_section_toggled.connect(self._def_panel.sync_rank_section)
-    self._def_panel.rank_section_toggled.connect(self._atk_panel.sync_rank_section)
+    self._my_side_panel.ev_section_toggled.connect(self._opponent_side_panel.sync_ev_section)
+    self._opponent_side_panel.ev_section_toggled.connect(self._my_side_panel.sync_ev_section)
+    self._my_side_panel.rank_section_toggled.connect(self._opponent_side_panel.sync_rank_section)
+    self._opponent_side_panel.rank_section_toggled.connect(self._my_side_panel.sync_rank_section)
 
     sp.addLayout(panels_row)
     self.set_terastal_controls_visible(False)
+    sp.addWidget(_sep())
 
-    # Detail toggle button (for backwards compatibility but hidden)
-    self._detail_toggle_btn = QPushButton("詳細設定を表示")
+    # Detail toggle button
+    self._detail_toggle_btn = QPushButton("▷ 詳細設定")
     self._detail_toggle_btn.setCheckable(True)
-    self._detail_toggle_btn.setChecked(True)
+    self._detail_toggle_btn.setChecked(False)
     self._detail_toggle_btn.toggled.connect(self._toggle_details)
-    self._detail_toggle_btn.setText("詳細設定を隠す")
-    self._detail_toggle_btn.setVisible(False)  # Hidden, always show details
+    self._detail_toggle_btn.setStyleSheet(
+        "QPushButton{background:transparent;border:none;color:#89b4fa;"
+        "font-size:15px;font-weight:bold;text-align:left;padding:0;}"
+        "QPushButton:hover{color:#cdd6f4;}"
+    )
+    detail_toggle_row = QHBoxLayout()
+    detail_toggle_row.setContentsMargins(6, 0, 0, 0)
+    detail_toggle_row.setSpacing(4)
+    detail_toggle_row.addWidget(self._detail_toggle_btn)
+    detail_toggle_row.addStretch()
+    sp.addLayout(detail_toggle_row)
 
     self._detail_container = QWidget()
-    self._detail_container.setVisible(True)
+    self._detail_container.setVisible(False)
     dl = QVBoxLayout(self._detail_container)
     dl.setContentsMargins(0, 0, 0, 0)
     dl.setSpacing(6)
     sp.addWidget(self._detail_container)
-
-    dl.addWidget(_sep())
 
     self._set_battle_format("single")
 
@@ -494,9 +509,6 @@ def _build_side_panel(self) -> None:
     self._self_tailwind_btn.setVisible(False)
     self._tailwind_btn.setVisible(False)
 
-    sp.addStretch()
-    sp.addWidget(_sep())
-
     # Reset button at bottom – 50% width, left-aligned
     _reset_btn = QPushButton("リセット")
     _reset_btn.setFixedHeight(36)
@@ -508,10 +520,13 @@ def _build_side_panel(self) -> None:
     )
     _reset_btn.clicked.connect(self._reset_conditions)
     _reset_row = QHBoxLayout()
-    _reset_row.setContentsMargins(0, 4, 0, 0)
+    _reset_row.setContentsMargins(0, 4, 0, 2)
     _reset_row.addWidget(_reset_btn, 1)
     _reset_row.addStretch(1)
-    sp.addLayout(_reset_row)
+    dl.addLayout(_reset_row)
+
+    sp.addWidget(_sep())
+    sp.addStretch()
 
 
 def _build_content(self) -> None:
@@ -571,20 +586,20 @@ def _build_content(self) -> None:
     cards_row.setContentsMargins(0, 0, 0, 0)
     cards_row.setSpacing(4)
 
-    self._atk_card = _AttackerCard()
-    self._atk_card.ability_change_requested.connect(self._change_atk_ability)
-    self._atk_card.item_change_requested.connect(self._change_atk_item)
-    cards_row.addWidget(self._atk_card, 1)
+    self._my_side_card = _AttackerCard()
+    self._my_side_card.ability_change_requested.connect(self._change_atk_ability)
+    self._my_side_card.item_change_requested.connect(self._change_atk_item)
+    cards_row.addWidget(self._my_side_card, 1)
 
-    self._def_card = _DefenderCard()
-    self._def_card.ability_change_requested.connect(self._change_def_ability)
-    self._def_card.item_change_requested.connect(self._change_def_item)
-    self._def_card.form_change_requested.connect(self._on_form_change_def)
-    cards_row.addWidget(self._def_card, 1)
+    self._opponent_side_card = _DefenderCard()
+    self._opponent_side_card.ability_change_requested.connect(self._change_def_ability)
+    self._opponent_side_card.item_change_requested.connect(self._change_def_item)
+    self._opponent_side_card.form_change_requested.connect(self._on_form_change_def)
+    cards_row.addWidget(self._opponent_side_card, 1)
 
-    self._atk_card.form_change_requested.connect(self._on_form_change_atk)
-    self._atk_card.transform_requested.connect(self._on_transform_atk)
-    self._def_card.transform_requested.connect(self._on_transform_def)
+    self._my_side_card.form_change_requested.connect(self._on_form_change_atk)
+    self._my_side_card.transform_requested.connect(self._on_transform_atk)
+    self._opponent_side_card.transform_requested.connect(self._on_transform_def)
 
     cl.addLayout(cards_row)
 
@@ -637,5 +652,6 @@ def _build_content(self) -> None:
     self._refresh_party_selector_labels()
 
 # ── Public API ────────────────────────────────────────────────────
+
 
 
