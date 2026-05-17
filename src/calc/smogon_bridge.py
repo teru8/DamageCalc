@@ -54,7 +54,7 @@ def _resolve_bridge_js() -> Path:
 
 _BRIDGE_JS = _resolve_bridge_js()
 
-def _item_name_to_en(item_name_ja: str) -> str:
+def item_name_to_smogon(item_name_ja: str) -> str:
     name = (item_name_ja or "").strip()
     if not name:
         return ""
@@ -66,6 +66,11 @@ def _item_name_to_en(item_name_ja: str) -> str:
     # Smogon側は未知アイテムをtrustyな値として扱うため、
     # ポルターガイスト等のアイテム有無チェックが正しく機能する。
     return en if en else name
+
+
+def _item_name_to_en(item_name_ja: str) -> str:
+    return item_name_to_smogon(item_name_ja)
+
 
 def _ability_name_to_en(ability_name_ja: str, pokemon_name_ja: str = "", terastal_active: bool = False) -> str:
     """Convert Japanese ability name to English, with special handling for form-dependent abilities."""

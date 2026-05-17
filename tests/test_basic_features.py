@@ -22,7 +22,9 @@ from PyQt5.QtWidgets import QApplication
 from src.models import BattleState, MoveInfo, PokemonInstance, SpeciesInfo
 from src.calc.smogon_bridge import (
     SmogonBridge,
+    defender_scenario_dict,
     field_to_dict,
+    item_name_to_smogon,
     move_to_dict,
     pokemon_to_attacker_dict,
     pokemon_to_defender_dict,
@@ -476,6 +478,47 @@ class TestSmogonDamageCalc:
         assert "defender" in call_payload
         assert "move" in call_payload
         assert "field" in call_payload
+
+    def test_unknown_japanese_item_is_preserved_for_fixed_defender_scenario(self) -> None:
+        """固定耐久シナリオでも未知の日本語アイテムを空にしないこと"""
+        item_name = "フラエッテナイト"
+
+        defender_d = defender_scenario_dict(
+            "Floette-Mega",
+            ev_hp=0,
+            ev_def=0,
+            ev_spd=0,
+            item_en=item_name_to_smogon(item_name),
+        )
+
+        assert defender_d["item"] == item_name
+
+    def test_poltergeist_substitutes_unknown_defender_item(
+        self, pikachu: PokemonInstance
+    ) -> None:
+        """ポルターガイストは未翻訳アイテムを持ち物ありとして Smogon に渡すこと"""
+        bridge = SmogonBridge.__new__(SmogonBridge)
+        bridge._proc = None
+        bridge._io_lock = __import__("threading").Lock()
+
+        with patch.object(bridge, "_send", return_value={"min": 10, "max": 12}) as mock_send:
+            attacker_d = pokemon_to_attacker_dict(pikachu, apply_both=True)
+            defender_d = defender_scenario_dict(
+                "Floette-Mega",
+                ev_hp=0,
+                ev_def=0,
+                ev_spd=0,
+                item_en="フラエッテナイト",
+            )
+            move_d = {"name": "poltergeist", "isCrit": False}
+            field_d = field_to_dict()
+
+            dmg_min, dmg_max, is_error = bridge.calc(attacker_d, defender_d, move_d, field_d)
+
+        assert not is_error
+        assert (dmg_min, dmg_max) == (10, 12)
+        call_payload = mock_send.call_args[0][0]
+        assert call_payload["defender"]["item"] == "Venusaurite"
 
     def test_calc_returns_error_on_bridge_failure(
         self, pikachu: PokemonInstance, blissey: PokemonInstance, thunderbolt: MoveInfo

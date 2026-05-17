@@ -160,12 +160,11 @@ def _calc_moves(self) -> None:
         SmogonBridge, pokemon_to_attacker_dict, defender_scenario_dict, attacker_scenario_dict,
         pokemon_to_defender_dict,
         move_to_dict as smogon_move_to_dict,
+        item_name_to_smogon,
         TYPE_TO_SMOGON,
         smogon_mega_species,
         _ability_name_to_en,
     )
-    from src.data.item_catalog import get_item_name_en
-    from src.data.item_dictionary import ITEM_FALLBACK_JA_TO_EN
     from src.data.database import get_move_by_name_ja
     from src.constants import BEST_DEF_NATURE_FOR, nature_ja_to_en
     from src.calc.damage_calculator import DamageCalculator
@@ -440,11 +439,9 @@ def _calc_moves(self) -> None:
         def_ability_ja = self._opponent_side_pokemon.ability if self._opponent_side_pokemon else ""
         def_terastal_active = bool(def_tera)
         def_ability_en = _ability_name_to_en(def_ability_ja, _def_name_ja, def_terastal_active)
-        def_item_en = ITEM_FALLBACK_JA_TO_EN.get(
-            self._opponent_side_pokemon.item if self._opponent_side_pokemon else "", ""
+        def_item_en = item_name_to_smogon(
+            self._opponent_side_pokemon.item if self._opponent_side_pokemon else ""
         )
-        if not def_item_en:
-            def_item_en = get_item_name_en(self._opponent_side_pokemon.item if self._opponent_side_pokemon else "")
         best_nat_en = nature_ja_to_en(best_nat)
 
         _def0_d = defender_scenario_dict(
@@ -696,9 +693,7 @@ def _calc_moves(self) -> None:
                 self._opponent_side_pokemon.name_ja if self._opponent_side_pokemon else "",
                 bool(def_tera),
             ) or "No Ability"
-            _opp_item_en = ITEM_FALLBACK_JA_TO_EN.get(self._opponent_side_pokemon.item or "", "")
-            if not _opp_item_en:
-                _opp_item_en = get_item_name_en(self._opponent_side_pokemon.item or "")
+            _opp_item_en = item_name_to_smogon(self._opponent_side_pokemon.item or "")
             _opp_species_en = ""
             if _opp_species:
                 _opp_species_en = _opp_species.name_en or ""
