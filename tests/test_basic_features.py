@@ -19,6 +19,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt5.QtWidgets import QApplication
 
+from src.calc.calc_inputs import (
+    DamageCalcInputs,
+    FieldCalcConfig,
+    MySideCalcConfig,
+    OpponentSideCalcConfig,
+)
+from src.calc.calc_utils import resolve_effective_move_category
+from src.calc.damage_calculator import DamageCalculator
 from src.models import BattleState, MoveInfo, PokemonInstance, SpeciesInfo
 from src.calc.smogon_bridge import (
     SmogonBridge,
@@ -519,6 +527,66 @@ class TestSmogonDamageCalc:
         assert (dmg_min, dmg_max) == (10, 12)
         call_payload = mock_send.call_args[0][0]
         assert call_payload["defender"]["item"] == "Venusaurite"
+
+    def test_attacker_dict_keeps_individual_rank_boosts(self, pikachu: PokemonInstance) -> None:
+        """A/B/C/D ランクを Smogon payload で別々に保持すること"""
+        inputs = DamageCalcInputs(
+            my_side=MySideCalcConfig(
+                pokemon=pikachu,
+                a_rank=-1,
+                b_rank=-2,
+                c_rank=2,
+                d_rank=3,
+            ),
+            opponent_side=OpponentSideCalcConfig(pokemon=None),
+            field=FieldCalcConfig(),
+        )
+        calculator = DamageCalculator(inputs)
+        runtime = calculator.build_runtime_context(
+            attacker_ability=pikachu.ability,
+            defender_ability="",
+        )
+
+        payload = calculator.build_attacker_dict(pikachu, runtime)
+
+        assert payload["boosts"] == {"atk": -1, "def": -2, "spa": 2, "spd": 3}
+
+    def test_effective_category_compares_separate_a_and_c_ranks(self) -> None:
+        """テラバースト等は A/C ランクを別々に比較すること"""
+        attacker = PokemonInstance(
+            name_ja="テスト",
+            name_en="test",
+            attack=100,
+            sp_attack=100,
+        )
+        move = MoveInfo(
+            name_ja="テラバースト",
+            name_en="Tera Blast",
+            type_name="normal",
+            category="special",
+            power=80,
+        )
+
+        assert (
+            resolve_effective_move_category(
+                attacker,
+                move,
+                atk_rank=1,
+                spa_rank=-1,
+                terastal_type="fire",
+            )
+            == "physical"
+        )
+        assert (
+            resolve_effective_move_category(
+                attacker,
+                move,
+                atk_rank=-1,
+                spa_rank=1,
+                terastal_type="fire",
+            )
+            == "special"
+        )
 
     def test_calc_returns_error_on_bridge_failure(
         self, pikachu: PokemonInstance, blissey: PokemonInstance, thunderbolt: MoveInfo

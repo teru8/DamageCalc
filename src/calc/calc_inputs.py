@@ -24,6 +24,10 @@ class MySideCalcConfig:
     nature: str = "まじめ"
     ac_rank: int = 0
     bd_rank: int = 0
+    a_rank: int = 0
+    b_rank: int = 0
+    c_rank: int = 0
+    d_rank: int = 0
     tera: str = ""
     # Status / condition flags (resolved from buttons)
     is_burned: bool = False
@@ -60,6 +64,10 @@ class OpponentSideCalcConfig:
     nature: str = "まじめ"
     ac_rank: int = 0
     bd_rank: int = 0
+    a_rank: int = 0
+    b_rank: int = 0
+    c_rank: int = 0
+    d_rank: int = 0
     hp_percent: float = 100.0
     use_sp_defense: bool = False
     tera: str = ""

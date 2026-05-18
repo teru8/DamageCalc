@@ -138,10 +138,19 @@ def resolve_effective_move_category(
     move: MoveInfo,
     atk_rank: int = 0,
     terastal_type: str = "",
+    spa_rank: int | None = None,
 ) -> str:
-    if move.name_ja in ("テラバースト", "フォトンゲイザー") and (terastal_type or move.name_ja == "フォトンゲイザー"):
-        rank_mult = _RANK_TABLE.get(max(-6, min(6, atk_rank)), 1.0)
-        return "physical" if attacker.attack * rank_mult > attacker.sp_attack * rank_mult else "special"
+    if move.name_ja in ("テラバースト", "フォトンゲイザー") and (
+        terastal_type or move.name_ja == "フォトンゲイザー"
+    ):
+        atk_mult = _RANK_TABLE.get(max(-6, min(6, atk_rank)), 1.0)
+        effective_spa_rank = spa_rank if spa_rank is not None else atk_rank
+        spa_mult = _RANK_TABLE.get(max(-6, min(6, effective_spa_rank)), 1.0)
+        return (
+            "physical"
+            if attacker.attack * atk_mult > attacker.sp_attack * spa_mult
+            else "special"
+        )
     return move.category
 
 

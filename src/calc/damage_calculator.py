@@ -29,9 +29,10 @@ class DamageRuntimeContext:
     tailwind: bool
     self_tailwind: bool
     gravity: bool
-    def_ac_rank: int
-    def_bd_rank: int
-    def_rank: int
+    def_a_rank: int
+    def_b_rank: int
+    def_c_rank: int
+    def_d_rank: int
     hp_percent: float
     def_use_sp: bool
     def_ev_pts_h: int
@@ -126,9 +127,10 @@ class DamageCalculator:
             tailwind=field.tailwind,
             self_tailwind=field.self_tailwind,
             gravity=field.gravity,
-            def_ac_rank=defender.ac_rank,
-            def_bd_rank=defender.bd_rank,
-            def_rank=defender.bd_rank,
+            def_a_rank=defender.a_rank,
+            def_b_rank=defender.b_rank,
+            def_c_rank=defender.c_rank,
+            def_d_rank=defender.d_rank,
             hp_percent=defender.hp_percent,
             def_use_sp=defender.use_sp_defense,
             def_ev_pts_h=defender.ev_hp,
@@ -175,18 +177,21 @@ class DamageCalculator:
         d = pokemon_to_attacker_dict(
             atk,
             ev_override=ev_override,
-            atk_rank=attacker.ac_rank,
             terastal_type=attacker.tera,
             allies_fainted=runtime.allies_fainted,
             gender=runtime.attacker_gender,
             ability_on=runtime.ability_on,
-            apply_both=True,
         )
         d["nature"] = nature_ja_to_en(attacker.nature)
         boosts = d.setdefault("boosts", {})
-        if attacker.bd_rank != 0:
-            boosts["def"] = attacker.bd_rank
-            boosts["spd"] = attacker.bd_rank
+        for key, rank in (
+            ("atk", attacker.a_rank),
+            ("def", attacker.b_rank),
+            ("spa", attacker.c_rank),
+            ("spd", attacker.d_rank),
+        ):
+            if rank != 0:
+                boosts[key] = rank
         if (
             atk.ability in ("こだいかっせい", "Protosynthesis")
             and runtime.protosynthesis_active

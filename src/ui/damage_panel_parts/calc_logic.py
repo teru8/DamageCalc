@@ -58,6 +58,10 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
         nature=self._my_side_panel.panel_nature(),
         ac_rank=self._my_side_panel.ac_rank(),
         bd_rank=self._my_side_panel.bd_rank(),
+        a_rank=self._my_side_panel.a_rank(),
+        b_rank=self._my_side_panel.b_rank(),
+        c_rank=self._my_side_panel.c_rank(),
+        d_rank=self._my_side_panel.d_rank(),
         tera=self._my_side_panel.terastal_type(),
         is_burned=self._burn_btn.isChecked(),
         is_toxic_boosted=_btn("_toxic_boost_btn"),
@@ -99,6 +103,10 @@ def collect_calc_inputs(self) -> DamageCalcInputs:
         nature=self._opponent_side_panel.panel_nature() if has_def else "まじめ",
         ac_rank=self._opponent_side_panel.ac_rank() if has_def else 0,
         bd_rank=self._opponent_side_panel.bd_rank() if has_def else 0,
+        a_rank=self._opponent_side_panel.a_rank() if has_def else 0,
+        b_rank=self._opponent_side_panel.b_rank() if has_def else 0,
+        c_rank=self._opponent_side_panel.c_rank() if has_def else 0,
+        d_rank=self._opponent_side_panel.d_rank() if has_def else 0,
         hp_percent=self._opponent_side_panel.current_hp_percent() if has_def else 100.0,
         use_sp_defense=self._opponent_side_panel.use_sp_defense() if has_def else False,
         tera=self._opponent_side_panel.terastal_type() if has_def else "",
@@ -188,9 +196,10 @@ def _calc_moves(self) -> None:
     ev_pts_d_atk = inputs.my_side.ev_sp_defense
     ev_pts_s_atk = inputs.my_side.ev_speed
     atk_nature = inputs.my_side.nature
-    atk_ac_rank = inputs.my_side.ac_rank
-    atk_bd_rank = inputs.my_side.bd_rank
-    rank = atk_ac_rank
+    atk_a_rank = inputs.my_side.a_rank
+    atk_b_rank = inputs.my_side.b_rank
+    atk_c_rank = inputs.my_side.c_rank
+    atk_d_rank = inputs.my_side.d_rank
     tera = inputs.my_side.tera
 
     # Re-calc all stats from species if available
@@ -270,9 +279,10 @@ def _calc_moves(self) -> None:
     tailwind = runtime.tailwind
     self_tailwind = runtime.self_tailwind
     gravity = runtime.gravity
-    def_ac_rank = runtime.def_ac_rank
-    def_bd_rank = runtime.def_bd_rank
-    def_rank = runtime.def_rank
+    def_a_rank = runtime.def_a_rank
+    def_b_rank = runtime.def_b_rank
+    def_c_rank = runtime.def_c_rank
+    def_d_rank = runtime.def_d_rank
     hp_percent = runtime.hp_percent
     def_use_sp = runtime.def_use_sp
     def_ev_pts_h = runtime.def_ev_pts_h
@@ -306,10 +316,10 @@ def _calc_moves(self) -> None:
         helping_hand=helping, steel_spirit=steel_spirit, charged=charged,
         fairy_aura=fairy_aura, dark_aura=dark_aura,
         terastal_type=tera,
-        atk_rank=atk_ac_rank,
-        def_rank=atk_bd_rank,
-        attacker_def_rank=atk_bd_rank,
-        defender_atk_rank=def_ac_rank,
+        atk_rank=atk_a_rank,
+        def_rank=atk_b_rank,
+        attacker_def_rank=atk_b_rank,
+        defender_atk_rank=def_a_rank,
         is_double_battle=is_double,
         allies_fainted=allies_fainted,
         rivalry_state=rivalry_state,
@@ -356,7 +366,11 @@ def _calc_moves(self) -> None:
             if normalize_move_name(effective_move.name_ja) == normalize_move_name("ウェザーボール") and resolved_type != "normal":
                 resolved_power = 100
             resolved_category = resolve_effective_move_category(
-                atk, effective_move, atk_rank=rank, terastal_type=tera,
+                atk,
+                effective_move,
+                atk_rank=atk_a_rank,
+                spa_rank=atk_c_rank,
+                terastal_type=tera,
             )
             if (resolved_type != effective_move.type_name
                     or resolved_category != effective_move.category
@@ -384,6 +398,16 @@ def _calc_moves(self) -> None:
 
         is_phys = effective_move.category == "physical" or effective_move.name_ja in (
             "サイコショック", "サイコブレイク", "しんぴのつるぎ"
+        )
+        atk_rank_for_move = atk_a_rank if is_phys else atk_c_rank
+        def_rank_for_move = def_b_rank if is_phys else def_d_rank
+        attacker_def_rank_for_move = atk_b_rank if is_phys else atk_d_rank
+        defender_atk_rank_for_move = def_a_rank if is_phys else def_c_rank
+        move_shared.update(
+            atk_rank=atk_rank_for_move,
+            def_rank=attacker_def_rank_for_move,
+            attacker_def_rank=attacker_def_rank_for_move,
+            defender_atk_rank=defender_atk_rank_for_move,
         )
         best_nat = BEST_DEF_NATURE_FOR["defense" if is_phys else "sp_defense"]
         opp_species = self._resolve_species_info(self._opponent_side_pokemon, self._opponent_side_species_name)
@@ -448,9 +472,8 @@ def _calc_moves(self) -> None:
             species_en, ev_hp=0, ev_def=0, ev_spd=0,
             nature_en="Hardy",
             ability_en=def_ability_en, item_en=def_item_en,
-            terastal_type=def_tera, def_rank=def_bd_rank, is_physical=is_phys,
+            terastal_type=def_tera, def_rank=def_rank_for_move, is_physical=is_phys,
             gender=defender_gender,
-            apply_both=True,
         )
         _def252_d = defender_scenario_dict(
             species_en, ev_hp=252,
@@ -458,9 +481,8 @@ def _calc_moves(self) -> None:
             ev_spd=0 if is_phys else 252,
             nature_en=best_nat_en,
             ability_en=def_ability_en, item_en=def_item_en,
-            terastal_type=def_tera, def_rank=def_bd_rank, is_physical=is_phys,
+            terastal_type=def_tera, def_rank=def_rank_for_move, is_physical=is_phys,
             gender=defender_gender,
-            apply_both=True,
         )
 
         # ── type effectiveness (for berry check + display) ────────────
@@ -608,7 +630,12 @@ def _calc_moves(self) -> None:
 
             # Build smogon dict for custom defender with panel EV/nature override
             _custom_nat = nature_ja_to_en(def_nature)
-            _custom_d = pokemon_to_defender_dict(cd, def_bd_rank, is_phys, gender=defender_gender, apply_both=True)
+            _custom_d = pokemon_to_defender_dict(
+                cd,
+                def_rank_for_move,
+                is_phys,
+                gender=defender_gender,
+            )
             _custom_d["nature"] = _custom_nat
             _custom_d["evs"]["hp"] = def_ev_pts_h * 8
             _custom_d["evs"]["atk"] = def_ev_pts_a * 8
@@ -646,7 +673,6 @@ def _calc_moves(self) -> None:
             if opp_move_info:
                 self._move_cache[opp_move_name] = opp_move_info
                 opp_effective_move = opp_move_info
-                _opp_def_ac_rank_preview = self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0
                 _opp_resolved_type = resolve_effective_move_type(
                     self._opponent_side_pokemon if self._opponent_side_pokemon else PokemonInstance(),
                     opp_move_info,
@@ -656,7 +682,8 @@ def _calc_moves(self) -> None:
                 _opp_resolved_category = resolve_effective_move_category(
                     self._opponent_side_pokemon if self._opponent_side_pokemon else PokemonInstance(),
                     opp_move_info,
-                    atk_rank=_opp_def_ac_rank_preview,
+                    atk_rank=def_a_rank,
+                    spa_rank=def_c_rank,
                     terastal_type=def_tera,
                 )
                 _opp_resolved_power = opp_move_info.power
@@ -704,10 +731,17 @@ def _calc_moves(self) -> None:
             _is_opp_phys = opp_effective_move.category == "physical" or opp_effective_move.name_ja in (
                 "サイコショック", "サイコブレイク", "しんぴのつるぎ"
             )
+            _opp_atk_rank_for_move = def_a_rank if _is_opp_phys else def_c_rank
+            _self_def_rank_for_move = atk_b_rank if _is_opp_phys else atk_d_rank
+            _self_atk_rank_for_notes = atk_a_rank if _is_opp_phys else atk_c_rank
             _opp_best_nat_en = "Adamant" if _is_opp_phys else "Modest"
 
             # Build self (atk) as defender dict for reverse calc
-            _self_def_d = pokemon_to_defender_dict(atk, atk_bd_rank, _is_opp_phys, apply_both=True)
+            _self_def_d = pokemon_to_defender_dict(
+                atk,
+                _self_def_rank_for_move,
+                _is_opp_phys,
+            )
 
             # Build move dict for opponent's move
             _opp_is_crit = self._opp_crit_btn.isChecked()
@@ -776,7 +810,6 @@ def _calc_moves(self) -> None:
                 mn, mx, is_error = _bridge.calc(opp_atk_d, def_payload, _mv_d_opp, _field_d_rev)
                 return (mn, mx, self_hp, is_error)
 
-            _opp_def_ac_rank = self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0
             _opp_ability_on = any(
                 btn.isVisible() and btn.isChecked()
                 for btn in list(
@@ -825,11 +858,11 @@ def _calc_moves(self) -> None:
 
             _opp_custom_atk_d = pokemon_to_attacker_dict(
                 _opp_atk_instance,
-                atk_rank=_opp_def_ac_rank,
+                atk_rank=_opp_atk_rank_for_move,
+                use_sp=not _is_opp_phys,
                 terastal_type=def_tera,
                 ability_on=_opp_ability_on,
                 allies_fainted=_opp_allies_fainted,
-                apply_both=True,
             )
             if opp_charged:
                 _opp_custom_atk_d["volatileStatus"] = "charge"
@@ -844,13 +877,12 @@ def _calc_moves(self) -> None:
                 nature_en="Hardy",
                 ability_en=_opp_atk_en,
                 item_en=_opp_item_en,
-                atk_rank=_opp_def_ac_rank,
+                atk_rank=_opp_atk_rank_for_move,
                 is_physical=_is_opp_phys,
                 terastal_type=def_tera,
                 allies_fainted=_opp_allies_fainted,
                 ability_on=_opp_ability_on,
                 gender=defender_gender,
-                apply_both=True,
             )
             _opp_ac0_atk_d["status"] = _opp_atk_instance.status or ""
             if _opp_atk_instance.current_hp > 0:
@@ -866,13 +898,12 @@ def _calc_moves(self) -> None:
                 nature_en=_opp_best_nat_en,
                 ability_en=_opp_atk_en,
                 item_en=_opp_item_en,
-                atk_rank=_opp_def_ac_rank,
+                atk_rank=_opp_atk_rank_for_move,
                 is_physical=_is_opp_phys,
                 terastal_type=def_tera,
                 allies_fainted=_opp_allies_fainted,
                 ability_on=_opp_ability_on,
                 gender=defender_gender,
-                apply_both=True,
             )
             _opp_ac32_atk_d["status"] = _opp_atk_instance.status or ""
             if _opp_atk_instance.current_hp > 0:
@@ -893,10 +924,10 @@ def _calc_moves(self) -> None:
                     helping_hand=opp_helping, steel_spirit=opp_steel_spirit, charged=opp_charged,
                     fairy_aura=fairy_aura, dark_aura=dark_aura,
                     terastal_type=def_tera,
-                    atk_rank=self._opponent_side_panel.ac_rank() if hasattr(self, "_opponent_side_panel") else 0,
-                    def_rank=def_bd_rank,
-                    defender_def_rank=def_bd_rank,
-                    defender_atk_rank=atk_ac_rank,
+                    atk_rank=_opp_atk_rank_for_move,
+                    def_rank=_self_def_rank_for_move,
+                    defender_def_rank=_self_def_rank_for_move,
+                    defender_atk_rank=_self_atk_rank_for_notes,
                     is_double_battle=is_double,
                     defender_speed=atk.speed,
                     defender_weight_kg=atk.weight_kg,
