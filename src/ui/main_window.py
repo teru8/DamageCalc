@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self._auto_detect_pending = False
         self._auto_detect_cooldown_until = 0.0
         self._auto_detect_score_log_last = 0.0
+        self._startup_auto_detect_done = False
         self._damage_tera_visible = False
         self._detailed_log_enabled = False
         self._sample_party_pending = False
@@ -397,6 +398,12 @@ class MainWindow(QMainWindow):
     def _poll_opponent_party_auto_detect(self) -> None:
         from src.ui.main_window_handlers import _poll_opponent_party_auto_detect as _poll_opponent_party_auto_detect_fn
         return _poll_opponent_party_auto_detect_fn(self)
+
+    def _startup_auto_detect_opponent_party_once(self) -> None:
+        from src.ui.main_window_handlers import (
+            _startup_auto_detect_opponent_party_once as startup_auto_detect_fn,
+        )
+        return startup_auto_detect_fn(self)
 
     def _toggle_live_battle_tracking(self, enabled: bool) -> None:
         from src.ui.main_window_handlers import _toggle_live_battle_tracking as _toggle_live_battle_tracking_fn

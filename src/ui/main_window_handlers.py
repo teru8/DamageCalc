@@ -725,14 +725,16 @@ def _select_registered_pokemon(self, title: str, current_name: str = "") -> tupl
 
 
 
-def _auto_detect_opponent_party(self) -> int:
+def _auto_detect_opponent_party(self, show_messages: bool = True) -> int:
     """相手PT検出を実行し、名前が確定したポケモン数を返す。"""
     if not self._video_thread or not self._video_thread.isRunning():
-        QMessageBox.information(self, "情報", "カメラを接続してください")
+        if show_messages:
+            QMessageBox.information(self, "情報", "カメラを接続してください")
         return 0
     frame = self._video_thread.get_last_frame()
     if frame is None or frame.size == 0:
-        QMessageBox.information(self, "情報", "フレームを取得できませんでした")
+        if show_messages:
+            QMessageBox.information(self, "情報", "フレームを取得できませんでした")
         return 0
     # Freeze the frame at button-press time and keep using this snapshot.
     frame = frame.copy()
@@ -740,11 +742,14 @@ def _auto_detect_opponent_party(self) -> int:
     db.set_active_usage_season(season)
     season_status = db.get_local_data_status(season)
     if int(season_status.get("usage_pokemon_count", 0) or 0) <= 0:
-        QMessageBox.information(
-            self,
-            "使用率データ不足",
-            "選択中シーズン [{}] の使用率データがありません。\n先に「使用率取得」を実行してください。".format(season),
-        )
+        if show_messages:
+            QMessageBox.information(
+                self,
+                "使用率データ不足",
+                "選択中シーズン [{}] の使用率データがありません。\n先に「使用率取得」を実行してください。".format(season),
+            )
+        else:
+            self._log("起動時相手PT検出スキップ: 使用率データ不足 [{}]".format(season))
         return 0
 
     self._set_auto_detect_enabled(False)
@@ -859,6 +864,24 @@ def _poll_opponent_party_auto_detect(self) -> None:
             self._auto_detect_pending = False
 
     QTimer.singleShot(1000, _run_detect)
+
+
+def _startup_auto_detect_opponent_party_once(self) -> None:
+    if self._startup_auto_detect_done:
+        return
+    self._startup_auto_detect_done = True
+    if not self._video_thread or not self._video_thread.isRunning():
+        return
+    frame = self._video_thread.get_last_frame()
+    if frame is None or frame.size == 0:
+        return
+    matched, _scores = opponent_party_auto_trigger.evaluate_auto_detect(frame)
+    if not matched:
+        return
+    if not opponent_party_auto_trigger.has_all_slot_types(frame):
+        return
+    self._log("起動時相手PT検出: 条件一致")
+    self._auto_detect_opponent_party(show_messages=False)
 
 def _toggle_live_battle_tracking(self, enabled: bool) -> None:
     enabled = bool(enabled)
@@ -1968,6 +1991,7 @@ def _auto_connect_saved_camera(self) -> None:
             self._cam_combo.setCurrentIndex(i)
             self._toggle_camera()
             self._log("前回のカメラに自動接続 (index {})".format(last_idx))
+            QTimer.singleShot(2500, self._startup_auto_detect_opponent_party_once)
             return
 
 
