@@ -1737,16 +1737,10 @@ def _apply_top_saved_party_on_startup(self) -> None:
         return
     preset = self._party_presets[0]
     my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
-    opponent_party = [self._deserialize_pokemon(item) for item in preset.get("opponent_party", [])][:6]
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
-    self._battle_state.opponent_party = (opponent_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
-    opp_active_name = str(preset.get("opp_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
         _select_active_my_party_member(self._battle_state.my_party, my_active_name)
-    )
-    self._battle_state.opponent_pokemon = copy.deepcopy(
-        _select_active_my_party_member(self._battle_state.opponent_party, opp_active_name)
     )
     self._sync_battle_state_to_panels()
 
@@ -1756,9 +1750,7 @@ def _save_party_preset(self, to_top: bool = False) -> None:
     self._ensure_party_slots()
     entry = {
         "my_party": [self._serialize_pokemon(member) for member in self._battle_state.my_party],
-        "opponent_party": [self._serialize_pokemon(member) for member in self._battle_state.opponent_party],
         "my_active_name": self._battle_state.my_pokemon.name_ja if self._battle_state.my_pokemon else "",
-        "opp_active_name": self._battle_state.opponent_pokemon.name_ja if self._battle_state.opponent_pokemon else "",
     }
     if to_top:
         self._party_presets.insert(0, entry)
@@ -1785,16 +1777,10 @@ def _load_party_preset_at(self, index: int) -> None:
         return
     preset = self._party_presets[index]
     my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
-    opponent_party = [self._deserialize_pokemon(item) for item in preset.get("opponent_party", [])][:6]
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
-    self._battle_state.opponent_party = (opponent_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
-    opp_active_name = str(preset.get("opp_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
         _select_active_my_party_member(self._battle_state.my_party, my_active_name)
-    )
-    self._battle_state.opponent_pokemon = copy.deepcopy(
-        _select_active_my_party_member(self._battle_state.opponent_party, opp_active_name)
     )
     self._sync_battle_state_to_panels()
     self._status_bar.showMessage("保存済みパーティを反映しました", 4000)
