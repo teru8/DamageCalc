@@ -17,7 +17,7 @@ logging.getLogger("src.data.pokeapi_client").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 APP_NAME = "DamageCalc"
-APP_VERSION = "0.3.0-beta"
+APP_VERSION = "0.3.1-beta"
 APP_USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 
 
