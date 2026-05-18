@@ -379,9 +379,9 @@ class MainWindow(QMainWindow):
         from src.ui.main_window_handlers import _select_registered_pokemon as _select_registered_pokemon_fn
         return _select_registered_pokemon_fn(self, title, current_name)
 
-    def _auto_detect_opponent_party(self) -> None:
+    def _auto_detect_opponent_party(self, show_messages: bool = True) -> int:
         from src.ui.main_window_handlers import _auto_detect_opponent_party as _auto_detect_opponent_party_fn
-        return _auto_detect_opponent_party_fn(self)
+        return _auto_detect_opponent_party_fn(self, show_messages=show_messages)
 
     def _on_auto_detect_toggled(self, checked: bool) -> None:
         from src.ui.main_window_handlers import _on_auto_detect_toggled as _on_auto_detect_toggled_fn
