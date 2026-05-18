@@ -1673,7 +1673,38 @@ def _deserialize_pokemon(self, payload: dict | None) -> PokemonInstance | None:
             setattr(pokemon, key, value)
     if not (pokemon.terastal_type or "").strip():
         pokemon.terastal_type = "normal"
+    _refresh_deserialized_pokemon_stats(pokemon)
     return pokemon
+
+
+def _refresh_deserialized_pokemon_stats(pokemon: PokemonInstance) -> None:
+    from src.calc.calc_utils import fill_stats_from_species
+    from src.ui.damage_panel_species import resolve_species
+
+    species = resolve_species(pokemon, pokemon.name_ja)
+    if species is None:
+        return
+    current_hp_percent = float(pokemon.current_hp_percent or 0)
+    if current_hp_percent <= 0 and pokemon.current_hp > 0 and pokemon.max_hp > 0:
+        current_hp_percent = max(
+            1.0,
+            min(100.0, pokemon.current_hp / pokemon.max_hp * 100.0),
+        )
+    pokemon.species_id = species.species_id
+    pokemon.name_en = species.name_en
+    pokemon.types = [t for t in [species.type1, species.type2] if t]
+    pokemon.weight_kg = species.weight_kg
+    fill_stats_from_species(pokemon, species)
+    pokemon.max_hp = pokemon.hp
+    if current_hp_percent > 0:
+        pokemon.current_hp_percent = current_hp_percent
+        pokemon.current_hp = max(
+            1,
+            min(pokemon.max_hp, round(pokemon.max_hp * current_hp_percent / 100.0)),
+        )
+    else:
+        pokemon.current_hp = pokemon.hp
+        pokemon.current_hp_percent = 100.0
 
 
 
@@ -1706,10 +1737,16 @@ def _apply_top_saved_party_on_startup(self) -> None:
         return
     preset = self._party_presets[0]
     my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
+    opponent_party = [self._deserialize_pokemon(item) for item in preset.get("opponent_party", [])][:6]
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
+    self._battle_state.opponent_party = (opponent_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
+    opp_active_name = str(preset.get("opp_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
         _select_active_my_party_member(self._battle_state.my_party, my_active_name)
+    )
+    self._battle_state.opponent_pokemon = copy.deepcopy(
+        _select_active_my_party_member(self._battle_state.opponent_party, opp_active_name)
     )
     self._sync_battle_state_to_panels()
 
@@ -1748,10 +1785,16 @@ def _load_party_preset_at(self, index: int) -> None:
         return
     preset = self._party_presets[index]
     my_party = [self._deserialize_pokemon(item) for item in preset.get("my_party", [])][:6]
+    opponent_party = [self._deserialize_pokemon(item) for item in preset.get("opponent_party", [])][:6]
     self._battle_state.my_party = (my_party + [None] * 6)[:6]
+    self._battle_state.opponent_party = (opponent_party + [None] * 6)[:6]
     my_active_name = str(preset.get("my_active_name") or "")
+    opp_active_name = str(preset.get("opp_active_name") or "")
     self._battle_state.my_pokemon = copy.deepcopy(
         _select_active_my_party_member(self._battle_state.my_party, my_active_name)
+    )
+    self._battle_state.opponent_pokemon = copy.deepcopy(
+        _select_active_my_party_member(self._battle_state.opponent_party, opp_active_name)
     )
     self._sync_battle_state_to_panels()
     self._status_bar.showMessage("保存済みパーティを反映しました", 4000)

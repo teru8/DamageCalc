@@ -145,7 +145,14 @@ def resolve_species(
 
     species: SpeciesInfo | None = get_species_by_name_ja(name_ja) if name_ja else None
 
-    if pokemon and pokemon.name_en:
+    resolved_mega = False
+    if name_ja.startswith("メガ"):
+        mega_species = _resolve_mega_by_name_ja(name_ja)
+        if mega_species is not None:
+            species = mega_species
+            resolved_mega = True
+
+    if pokemon and pokemon.name_en and not resolved_mega:
         by_en = _resolve_by_name_en(pokemon, species)
         if by_en is not None:
             species = by_en
